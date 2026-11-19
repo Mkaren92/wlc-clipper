@@ -7,6 +7,7 @@ import { CARD_SIZES, GOAL_TYPES, goalType, minuteLabel, RED_TYPES } from '../../
 import { renderCard } from '../../../src/cards/templates.js';
 import { api } from '../api.js';
 import { cardPng, download, loadCardFont } from '../cardPng.js';
+import Icon from '../components/Icon.vue';
 import TrashButton from '../components/TrashButton.vue';
 
 const matches = ref([]);
@@ -17,6 +18,10 @@ const note = ref('');
 const error = ref('');
 const saving = ref(false);
 const confirming = ref('');
+
+// What the open match looked like when it was last saved or opened, to tell when it has changes.
+const savedText = ref('');
+const unsaved = computed(() => match.value !== null && JSON.stringify(match.value) !== savedText.value);
 
 const card = computed(() => match.value?.cards.find((c) => c.id === cardId.value) ?? null);
 const svg = computed(() => (card.value ? renderCard({ match: match.value, card: card.value, size: size.value }) : ''));
@@ -41,6 +46,7 @@ const newId = () => `c${Date.now().toString(36)}${Math.floor(Math.random() * 129
 
 function open(saved) {
   match.value = copy(saved);
+  savedText.value = JSON.stringify(match.value);
   cardId.value = match.value.cards[0]?.id ?? '';
   note.value = '';
 }
@@ -49,12 +55,14 @@ function newMatch() {
   match.value = { id: null, home: '', away: '', competition: '', date: '', colours: { home: '#a50044', away: '#1d4ed8' }, cards: [] };
   cardId.value = '';
   note.value = '';
+  savedText.value = '';
 }
 
 function duplicateMatch(saved) {
   match.value = { ...copy(saved), id: null, cards: copy(saved.cards).map((c) => ({ ...c, id: newId() + c.id.slice(-2) })) };
   cardId.value = match.value.cards[0]?.id ?? '';
   note.value = 'This is a copy. Change what you need, then save it as a new match.';
+  savedText.value = '';
 }
 
 async function removeMatch(id) {
@@ -125,6 +133,7 @@ async function removeCard(target) {
   try {
     await api.saveMatch(match.value);
     await load();
+    savedText.value = JSON.stringify(match.value);
     note.value = 'Card deleted.';
   } catch (e) {
     error.value = e.message;
@@ -180,6 +189,7 @@ async function save() {
     const keep = cardId.value;
     await load();
     match.value = copy(saved);
+    savedText.value = JSON.stringify(match.value);
     cardId.value = saved.cards.some((c) => c.id === keep) ? keep : saved.cards[0]?.id ?? '';
     note.value = `Saved, with ${saved.cards.length} ${saved.cards.length === 1 ? 'card' : 'cards'} ready for compilations.`;
   } catch (e) {
@@ -204,8 +214,8 @@ async function exportPng(name) {
   <div class="maker">
     <section class="panel list">
       <h2>Matches</h2>
-      <button class="primary" @click="newMatch">New match</button>
-      <p v-if="matches.length === 0" class="muted empty">No saved matches yet.</p>
+      <button class="primary" @click="newMatch"><Icon name="plus" /> New match</button>
+      <p v-if="matches.length === 0" class="empty">No saved matches yet. Start one with “New match”.</p>
       <div v-for="saved in matches" :key="saved.id" class="entry" :class="{ current: match?.id === saved.id }">
         <button class="open" @click="open(saved)">
           <strong>{{ saved.home }} v {{ saved.away }}</strong>
@@ -243,15 +253,15 @@ async function exportPng(name) {
       <section class="panel">
         <h2>Cards</h2>
         <div class="row">
-          <button class="fixed" @click="addCard('goal')">Add goal</button>
-          <button class="fixed" @click="addCard('red')">Add red card</button>
-          <button class="fixed" @click="addCard('fulltime')">Add full time</button>
+          <button class="fixed" @click="addCard('goal')"><Icon name="plus" /> Goal</button>
+          <button class="fixed" @click="addCard('red')"><Icon name="plus" /> Red card</button>
+          <button class="fixed" @click="addCard('fulltime')"><Icon name="plus" /> Full time</button>
         </div>
-        <p v-if="match.cards.length === 0" class="muted empty">Add a card to start.</p>
+        <p v-if="match.cards.length === 0" class="empty">No cards yet. Add a goal, a red card or the full-time score.</p>
         <div v-for="c in match.cards" :key="c.id" class="entry" :class="{ current: c.id === cardId }">
           <button class="open" @click="cardId = c.id">
             <strong>{{ label(c) }}</strong>
-            <span class="muted">{{ CARD_NAMES[c.type] }}</span>
+            <span class="muted">{{ CARD_NAMES[c.type] }}{{ c.id === cardId ? ' · being edited below' : '' }}</span>
           </button>
           <div v-if="confirming !== `card:${c.id}`" class="row tools">
             <button class="fixed small" @click="cardId = c.id">Edit</button>
@@ -337,52 +347,58 @@ async function exportPng(name) {
         </template>
       </section>
 
-      <section class="panel">
-        <div class="row">
-          <button class="fixed primary" :disabled="saving || Boolean(problem)" @click="save">{{ saving ? 'Saving…' : 'Save match and cards' }}</button>
-          <span v-if="problem" class="muted">{{ problem }}</span>
-          <span v-else role="status" class="muted">{{ note }}</span>
-        </div>
-      </section>
+      <!-- Always in view, so a change is never left unsaved by accident. -->
+      <div class="savebar">
+        <span v-if="problem" class="say problem"><Icon name="alert" /> {{ problem }}</span>
+        <span v-else-if="unsaved" class="say"><span class="chip warn">Changes not saved</span> {{ note }}</span>
+        <span v-else role="status" class="say muted">{{ note || 'Everything is saved.' }}</span>
+        <button class="primary" :disabled="saving || Boolean(problem)" @click="save">
+          <span v-if="saving" class="spinner" aria-hidden="true" /> {{ saving ? 'Saving…' : 'Save match and cards' }}
+        </button>
+      </div>
     </div>
-    <p v-else class="muted">Choose a match, or start a new one.</p>
+    <p v-else class="empty wide">Choose a match on the left, or start a new one.</p>
 
     <section v-if="match && card" class="panel preview">
-      <h2>Preview</h2>
-      <div class="row">
-        <button class="fixed small" :class="{ primary: size === 'landscape' }" @click="size = 'landscape'">1920×1080</button>
-        <button class="fixed small" :class="{ primary: size === 'portrait' }" @click="size = 'portrait'">1080×1920</button>
+      <div class="row middle">
+        <h2 class="fixed">Preview</h2>
+        <span />
+        <div class="choices" role="group" aria-label="Size of the preview">
+          <button :aria-pressed="size === 'landscape'" @click="size = 'landscape'">Wide</button>
+          <button :aria-pressed="size === 'portrait'" @click="size = 'portrait'">Tall</button>
+        </div>
       </div>
       <!-- The template escapes every name, so this is safe to put in the page as it is. -->
       <div class="card" :class="size" :style="{ aspectRatio: `${frame.width} / ${frame.height}` }" v-html="svg" />
       <div class="row">
-        <button class="fixed" @click="exportPng('landscape')">Export PNG 1920×1080</button>
-        <button class="fixed" @click="exportPng('portrait')">Export PNG 1080×1920</button>
+        <button class="fixed" @click="exportPng('landscape')"><Icon name="download" /> PNG 1920×1080</button>
+        <button class="fixed" @click="exportPng('portrait')"><Icon name="download" /> PNG 1080×1920</button>
       </div>
+      <p class="hint">The picture is exactly what a compilation shows.</p>
     </section>
   </div>
 </template>
 
 <style scoped>
-.maker { display: grid; grid-template-columns: 260px minmax(0, 1fr) minmax(280px, 420px); gap: 16px; align-items: start; }
-.list .primary { width: 100%; margin-bottom: 10px; }
-.empty { margin: 10px 0 0; }
-.entry { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 8px; }
-.entry.current { border-color: var(--accent); }
-.open { display: flex; flex-direction: column; align-items: flex-start; width: 100%; text-align: left; border: 0; padding: 2px; background: transparent; font-size: 13px; }
-.open strong { font-size: 14px; }
-.tools { margin-top: 6px; align-items: center; }
-.confirm { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; margin-top: 6px; }
-.confirm span { flex: 1 1 100%; }
-.danger { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 600; }
-.second { margin-top: 10px; }
+.maker { display: grid; grid-template-columns: 270px minmax(0, 1fr) minmax(280px, 420px); gap: var(--gap); align-items: start; }
+.list .primary { width: 100%; }
+.empty.wide { align-self: start; margin: 0; padding: 28px; }
+.second { margin-top: 12px; }
 .narrow { flex: 0 1 150px; }
-.check { color: var(--text); font-size: 15px; padding-bottom: 6px; }
-.hint { margin: 10px 0; font-size: 13px; }
-input[type='color'] { width: 56px; height: 36px; padding: 2px; }
-.preview { position: sticky; top: 8px; }
-.card { width: 100%; margin: 10px 0; border-radius: 6px; overflow: hidden; background: #000; }
+.check { padding-bottom: 8px; }
+.editor .hint { margin: 10px 0; }
+.preview { position: sticky; top: 16px; }
+.preview h2 { margin: 0; }
+/* The card's own colours are the teams'. They do not follow the palette. */
+.card { width: 100%; margin: 12px auto; border-radius: var(--radius); overflow: hidden; background: black; box-shadow: 0 2px 10px var(--shadow); }
 .card.portrait { max-width: 250px; }
 .card :deep(svg) { display: block; width: 100%; height: 100%; }
+.savebar {
+  position: sticky; bottom: 0; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px;
+  background: var(--panel); border: 1px solid var(--line); border-bottom: 0;
+  border-radius: var(--radius-large) var(--radius-large) 0 0; box-shadow: 0 -4px 14px var(--shadow);
+}
+.savebar .say { flex: 1 1 200px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.savebar .problem { color: var(--warn); font-weight: 600; }
 @media (max-width: 1100px) { .maker { grid-template-columns: 1fr; } .preview { position: static; } }
 </style>

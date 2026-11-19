@@ -1,9 +1,10 @@
 <script setup>
 // Put videos and cards in order and render them into one video.
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { minuteLabel } from '../../../src/cards/config.js';
 import { api } from '../api.js';
 import { clock } from '../format.js';
+import Icon from '../components/Icon.vue';
 import TrashButton from '../components/TrashButton.vue';
 import { isActive, jobs, track } from '../jobs.js';
 
@@ -26,6 +27,14 @@ const dropping = ref(false);
 const confirming = ref('');
 const dragged = ref(-1);
 const lastResult = ref(null);
+
+// What the open compilation looked like when it was last saved or opened, to tell when it has changes.
+const savedText = ref('');
+const draft = (value) => JSON.stringify({ name: value.name, preset: value.preset, items: value.items });
+const unsaved = computed(() => current.value !== null && draft(current.value) !== savedText.value);
+
+let onScreen = true;
+onUnmounted(() => (onScreen = false));
 
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const newId = () => `i${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
@@ -53,6 +62,7 @@ onMounted(async () => {
 
 function open(saved) {
   current.value = copy(saved);
+  savedText.value = draft(current.value);
   lastResult.value = null;
   note.value = '';
   for (const item of current.value.items) if (item.kind === 'video') learnLength(item);
@@ -178,11 +188,24 @@ async function save() {
     const saved = await api.saveCompilation(current.value);
     await load();
     current.value = copy(saved);
+    savedText.value = draft(current.value);
     note.value = 'Saved.';
     return saved;
   } catch (e) {
     error.value = e.message;
     return null;
+  }
+}
+
+// The credits and chapters, ready to paste under the video where it is posted.
+const copied = ref(false);
+async function copyDescription() {
+  try {
+    await navigator.clipboard.writeText(current.value.description ?? '');
+    copied.value = true;
+    setTimeout(() => (copied.value = false), 2000);
+  } catch {
+    error.value = 'The browser did not allow copying. Select the text and copy it by hand.';
   }
 }
 
@@ -193,7 +216,10 @@ async function generate() {
   if (!saved) return;
   note.value = '';
   try {
-    lastResult.value = await track(await api.generate(saved.id));
+    const started = await api.generate(saved.id);
+    lastResult.value = await track(started);
+    // The result is on this page already, so the side column need not announce it.
+    if (onScreen) jobs.dismissed.push(started.id);
     await load();
     const fresh = compilations.value.find((c) => c.id === saved.id);
     if (fresh && current.value?.id === saved.id) Object.assign(current.value, { final: fresh.final, description: fresh.description });
@@ -207,15 +233,16 @@ async function generate() {
   <div class="builder">
     <section class="panel list">
       <h2>Compilations</h2>
-      <button class="primary" @click="create">New compilation</button>
-      <p v-if="compilations.length === 0" class="muted empty">No compilations yet.</p>
+      <button class="primary" @click="create"><Icon name="plus" /> New compilation</button>
+      <p v-if="compilations.length === 0" class="empty">No compilations yet. Start one with “New compilation”.</p>
       <div v-for="saved in compilations" :key="saved.id" class="entry" :class="{ current: current?.id === saved.id }">
         <button class="open" @click="open(saved)">
           <strong>{{ saved.name }}</strong>
-          <span class="muted">{{ saved.items.length }} items{{ saved.final ? ' · generated' : '' }}</span>
+          <span class="muted">{{ saved.items.length }} {{ saved.items.length === 1 ? 'item' : 'items' }} · {{ saved.preset === 'portrait' ? '1080×1920' : '1920×1080' }}</span>
         </button>
         <div v-if="confirming !== saved.id" class="row tools">
-          <span class="muted">{{ saved.preset === 'portrait' ? '1080×1920' : '1920×1080' }}</span>
+          <span v-if="saved.final" class="chip good"><Icon name="check" /> generated</span>
+          <span v-else class="chip">not generated yet</span>
           <TrashButton class="fixed" :label="`Delete the compilation ${saved.name}`" @click="confirming = saved.id" />
         </div>
         <div v-else class="confirm" role="alertdialog">
@@ -243,7 +270,7 @@ async function generate() {
 
       <section class="panel">
         <h2>Add videos</h2>
-        <p class="muted hint">Videos already in the project are added as they are. Nothing is copied.</p>
+        <p class="hint first">Videos already in the project are added as they are. Nothing is copied.</p>
         <div v-for="(text, folder) in LIBRARIES" :key="folder" class="row adder">
           <div>
             <label :for="`pick-${folder}`">{{ text }}</label>
@@ -252,22 +279,22 @@ async function generate() {
               <option v-for="name in library[folder]" :key="name" :value="name">{{ name }}</option>
             </select>
           </div>
-          <button class="fixed" :disabled="!pick[folder]" @click="addVideo(folder, pick[folder])">Add</button>
+          <button class="fixed" :disabled="!pick[folder]" @click="addVideo(folder, pick[folder])"><Icon name="plus" /> Add</button>
         </div>
         <div
           class="drop" :class="{ over: dropping }"
           @dragover.prevent="dropping = true" @dragleave="dropping = false" @drop.prevent="onDrop"
         >
-          <label for="files">Or choose files from your computer, or drop them here</label>
+          <label for="files"><Icon name="download" /> Or choose files from your computer, or drop them here</label>
           <input id="files" type="file" accept="video/*,.mkv" multiple @change="addFiles([...$event.target.files]); $event.target.value = ''" />
-          <p class="muted hint">A file from elsewhere is copied into the project's <code>in</code> folder, so it uses that much more disk space.</p>
-          <p v-if="uploading" role="status">{{ uploading }}</p>
+          <p class="hint">A file from elsewhere is copied into the project's <code>in</code> folder, so it uses that much more disk space.</p>
+          <p v-if="uploading" class="uploading" role="status"><span class="spinner" aria-hidden="true" /> {{ uploading }}</p>
         </div>
       </section>
 
       <section class="panel">
         <h2>Add a card</h2>
-        <p v-if="matches.length === 0" class="muted">No saved cards yet. Make some on the Cards page first.</p>
+        <p v-if="matches.length === 0" class="empty">No saved cards yet. Make some on the Cards page first.</p>
         <div v-else class="row adder">
           <div>
             <label for="pick-match">Match</label>
@@ -283,13 +310,17 @@ async function generate() {
               <option v-for="c in pickedMatch?.cards ?? []" :key="c.id" :value="c.id">{{ cardLabel(c) }}</option>
             </select>
           </div>
-          <button class="fixed" :disabled="!pick.card" @click="addCard">Add</button>
+          <button class="fixed" :disabled="!pick.card" @click="addCard"><Icon name="plus" /> Add</button>
         </div>
       </section>
 
       <section class="panel">
-        <h2>Timeline</h2>
-        <p v-if="current.items.length === 0" class="muted">Add videos and cards above. They play in this order.</p>
+        <div class="row middle">
+          <h2 class="fixed">Timeline</h2>
+          <span />
+          <span class="fixed total numbers"><strong>{{ clock(total) }}</strong> · {{ current.items.length }} {{ current.items.length === 1 ? 'item' : 'items' }}</span>
+        </div>
+        <p v-if="current.items.length === 0" class="empty">Add videos and cards above. They play in the order shown here.</p>
         <ol class="timeline">
           <li
             v-for="(item, index) in current.items" :key="item.id" :class="[item.kind, { dragging: dragged === index }]"
@@ -297,11 +328,13 @@ async function generate() {
           >
             <div class="row head">
               <span class="fixed grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
-              <strong class="what">{{ index + 1 }}. {{ item.kind === 'card' ? 'Card' : 'Video' }}: {{ title(item) }}</strong>
-              <span class="fixed muted">{{ clock(seconds(item)) }}</span>
-              <span v-if="state(index)" class="fixed state" role="status">{{ state(index) }}</span>
-              <button class="fixed small" :disabled="index === 0" :aria-label="`Move item ${index + 1} up`" @click="move(index, index - 1)">Up</button>
-              <button class="fixed small" :disabled="index === current.items.length - 1" :aria-label="`Move item ${index + 1} down`" @click="move(index, index + 1)">Down</button>
+              <span class="fixed number numbers">{{ index + 1 }}</span>
+              <span class="chip" :class="{ mark: item.kind === 'card' }"><Icon :name="item.kind === 'card' ? 'card' : 'video'" /> {{ item.kind === 'card' ? 'Card' : 'Video' }}</span>
+              <strong class="what">{{ title(item) }}</strong>
+              <span class="fixed muted numbers">{{ clock(seconds(item)) }}</span>
+              <span v-if="state(index)" class="chip" :class="state(index) === STATE_NAMES.working ? 'accent' : state(index) === STATE_NAMES.waiting ? '' : 'good'" role="status">{{ state(index) }}</span>
+              <button class="fixed small icon-only" :disabled="index === 0" :aria-label="`Move item ${index + 1} up`" title="Move up" @click="move(index, index - 1)"><Icon name="up" /></button>
+              <button class="fixed small icon-only" :disabled="index === current.items.length - 1" :aria-label="`Move item ${index + 1} down`" title="Move down" @click="move(index, index + 1)"><Icon name="down" /></button>
               <TrashButton class="fixed" :label="`Remove item ${index + 1} from the timeline`" @click="current.items.splice(index, 1)" />
             </div>
             <div v-if="item.kind === 'video'" class="row fields">
@@ -326,63 +359,81 @@ async function generate() {
             </div>
           </li>
         </ol>
-        <p class="total">Total length: <strong>{{ clock(total) }}</strong> ({{ current.items.length }} items)</p>
-      </section>
-
-      <section class="panel">
-        <div class="row">
-          <button class="fixed" :disabled="Boolean(job)" @click="save">Save</button>
-          <button class="fixed primary" :disabled="Boolean(job) || current.items.length === 0" @click="generate">Generate the video</button>
-          <span v-if="job" role="status">{{ job.step === 'joining' ? 'Joining the segments…' : 'Making the segments…' }}</span>
-          <span v-else role="status" class="muted">{{ note }}</span>
-        </div>
       </section>
 
       <section v-if="current.final" class="panel result">
         <h2>Final video</h2>
         <video :key="current.final.version" :src="api.finalUrl(current.id, current.final.version)" controls playsinline :class="current.preset" />
-        <p>
-          <a :href="api.finalUrl(current.id, current.final.version)" :download="`${current.name}.mp4`">Download the video</a>
-          <span class="muted"> · it is also at <code>data/compilations/{{ current.id }}/final.mp4</code></span>
+        <p class="download">
+          <a class="button" :href="api.finalUrl(current.id, current.final.version)" :download="`${current.name}.mp4`"><Icon name="download" /> Download the video</a>
+          <span class="muted">It is also at <code>data/compilations/{{ current.id }}/final.mp4</code></span>
         </p>
-        <h3>description.txt</h3>
+        <div class="row middle">
+          <h3 class="fixed">description.txt</h3>
+          <span />
+          <button class="fixed small" @click="copyDescription"><Icon name="copy" /> {{ copied ? 'Copied' : 'Copy' }}</button>
+        </div>
         <pre>{{ current.description }}</pre>
       </section>
+
+      <!-- Always in view, so a change is never left unsaved by accident. -->
+      <div class="savebar">
+        <span v-if="job" class="say" role="status"><span class="spinner" aria-hidden="true" /> {{ job.step === 'joining' ? 'Joining the segments…' : 'Making the segments…' }}</span>
+        <span v-else-if="unsaved" class="say"><span class="chip warn">Changes not saved</span></span>
+        <span v-else role="status" class="say muted">{{ note || 'Everything is saved.' }}</span>
+        <button :disabled="Boolean(job) || !unsaved" @click="save">Save</button>
+        <button class="primary" :disabled="Boolean(job) || current.items.length === 0" @click="generate"><Icon name="film" /> Generate the video</button>
+      </div>
+
     </div>
-    <p v-else class="muted">Choose a compilation, or start a new one.</p>
+    <p v-else class="empty wide">Choose a compilation on the left, or start a new one.</p>
   </div>
 </template>
 
 <style scoped>
-.builder { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
-.list .primary { width: 100%; margin-bottom: 10px; }
-.empty { margin: 10px 0 0; }
-.entry { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 8px; }
-.entry.current { border-color: var(--accent); }
-.open { display: flex; flex-direction: column; align-items: flex-start; width: 100%; text-align: left; border: 0; padding: 2px; background: transparent; font-size: 13px; }
-.open strong { font-size: 14px; }
-.tools { margin-top: 6px; align-items: center; font-size: 13px; }
-.confirm { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; margin-top: 6px; }
-.confirm span { flex: 1 1 100%; }
-.danger { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 600; }
-.hint { margin: 0 0 8px; font-size: 13px; }
+.builder { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.list .primary { width: 100%; }
+.empty.wide { align-self: start; margin: 0; padding: 28px; }
+.first { margin: 0 0 10px; }
 .adder { margin-bottom: 8px; }
-.drop { border: 2px dashed var(--line); border-radius: 8px; padding: 12px; margin-top: 12px; }
-.drop.over { border-color: var(--accent); }
-.drop .hint { margin: 6px 0 0; }
-.timeline { list-style: none; margin: 0; padding: 0; }
-.timeline li { border: 1px solid var(--line); border-left: 5px solid var(--accent); border-radius: 8px; padding: 10px; margin-bottom: 8px; background: var(--panel); }
-.timeline li.card { border-left-color: #e8a020; }
+.drop { border: 2px dashed var(--line-strong); border-radius: var(--radius); padding: 14px; margin-top: 14px; background: var(--bg); }
+.drop.over { border-color: var(--accent); background: var(--accent-tint); }
+.drop label { display: flex; align-items: center; gap: 6px; color: var(--text); margin-bottom: 8px; }
+.uploading { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; }
+.panel h2.fixed { margin: 0; }
+.total { color: var(--muted); }
+.total strong { color: var(--text); }
+.timeline { list-style: none; margin: 12px 0 0; padding: 0; }
+.timeline li {
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 8px;
+  background: var(--panel); box-shadow: inset 4px 0 0 var(--accent);
+}
+.timeline li.card { box-shadow: inset 4px 0 0 var(--good); }
 .timeline li.dragging { opacity: 0.5; }
-.head { align-items: center; }
-.grip { cursor: grab; color: var(--muted); letter-spacing: -2px; }
-.what { word-break: break-all; }
-.state { color: var(--good); font-size: 13px; }
-.fields { margin-top: 8px; }
+.head { align-items: center; gap: 8px; }
+.grip { cursor: grab; color: var(--muted); letter-spacing: -2px; padding: 0 2px; }
+.number { color: var(--muted); font-weight: 650; min-width: 1.4em; text-align: right; }
+.what { word-break: break-all; font-weight: 600; }
+.fields { margin-top: 10px; }
 .narrow { flex: 0 1 150px; }
-.total { margin: 12px 0 0; }
-.result video { width: 100%; max-height: 60vh; background: #000; border-radius: 8px; display: block; }
+.result video { width: 100%; max-height: 60vh; background: black; border-radius: var(--radius); display: block; }
 .result video.portrait { max-width: 300px; }
-pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; white-space: pre-wrap; font: 13px ui-monospace, Menlo, monospace; }
+.download { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0 16px; }
+a.button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 14px; border-radius: var(--radius);
+  background: var(--accent); color: var(--accent-text); font-weight: 650; text-decoration: none;
+}
+a.button:hover { background: var(--accent-hover); }
+.result h3 { margin: 0; }
+pre {
+  margin: 8px 0 0; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px;
+  white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;
+}
+.savebar {
+  position: sticky; bottom: 0; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px;
+  background: var(--panel); border: 1px solid var(--line); border-bottom: 0;
+  border-radius: var(--radius-large) var(--radius-large) 0 0; box-shadow: 0 -4px 14px var(--shadow);
+}
+.savebar .say { flex: 1 1 200px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 @media (max-width: 900px) { .builder { grid-template-columns: 1fr; } }
 </style>

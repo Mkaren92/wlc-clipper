@@ -13,10 +13,11 @@ Version 1 of the spec is complete: all three "evenings".
 - Beyond the spec: `--trim`, `--crop-width` (a wider crop over a blurred copy), `keepFullFrame`, `replacements`, the `work/` subfolder, a hook time setting, clip folders named after the hook, deleting clips and videos from the dashboard, and plain parts (`extract`)
 - A dashboard in the browser (`npm run dashboard`): cut with a visual range and crop, view clips with their checks and post text, fix caption words
 - Two more dashboard pages: a card maker (goal, red card and full-time cards, saved per match, exported as PNG in two sizes) and a compilation builder (videos and cards in order, credits, one final video with a description file)
+- A redesigned dashboard on a five-colour palette that can be swapped (`web/src/theme.js`), with a palette chooser, keys for the player, and the cut button always in view
 - A sources list and `fetch`: part of a YouTube video, up to 20 minutes, from a channel marked as agreed
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-281 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, and none call the real AI service.
+302 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, and none call the real AI service.
 
 ## Waiting on the owner
 
@@ -28,8 +29,8 @@ Version 1 of the spec is complete: all three "evenings".
 
 ## Not verified
 
-- `fetch` end to end since fetched parts are rewritten to hide nothing. The rewrite was run on a part already fetched, and is tested on made-up files, but no new part has been fetched through it yet.
 - Which player showed the fetched part out of step. The file is now the same for every player, but the owner has not yet confirmed it plays in step.
+- The redesigned dashboard in long use. The owner looked at it and accepted it on 2026-11-19; before that it was looked at in screenshots from a hidden Chrome and its main actions were run by script. A real mouse drag of the crop on the new layout, a screen reader and browsers other than Chrome were not tried.
 - The wider crop (`--crop-width`) on a clip the owner has judged. One frame from a real video was looked at, and one cut was made from the page.
 
 The owner was told about the rest on 2026-11-19 and accepted them as they are, along with the result of the quality check (the softness comes from the source file).

@@ -38,7 +38,7 @@ export const isActive = (job) => job.status === 'queued' || job.status === 'runn
 
 /**
  * Follow a job that was just started. The promise settles when it finishes,
- * but the job is shown in the status bar whether or not anyone still waits.
+ * but the job is shown in the side column whether or not anyone still waits.
  *
  * @returns {Promise<any>} the job's result
  */
@@ -78,7 +78,7 @@ export async function refresh() {
   if (jobs.list.some(isActive)) timer = setTimeout(refresh, 800);
 }
 
-/** Jobs to show in the status bar: everything running, and watched jobs that just finished. */
+/** Jobs to show under "Activity" in the side column: everything running, and watched jobs that just finished. */
 export function visibleJobs() {
   return jobs.list.filter((job) => isActive(job) || (watched.has(job.id) && !jobs.dismissed.includes(job.id)));
 }

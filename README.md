@@ -59,11 +59,13 @@ npm run dashboard
 
 Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 
-- **Cut:** pick a video from `in/`, play it, press "Set start here" and "Set end here", choose the layout, and drag the frame over the video to place the crop (or the webcam box for the facecam layout). With the center layout, the "Show more of the picture" slider makes the crop wider, for a person who moves out of the narrow column. Add a hook and a brief if you want them, then press "Cut the clip".
-- **Status bar:** while a clip is being cut, rendered again, or searched for moments, a bar at the top says what is happening and at which step. It stays there when you move to another video or clip, and after a page reload. You can start another cut meanwhile; it waits its turn. When a clip is ready, the bar offers "Open".
+- **Cut:** pick a video in the left column. It plays on the left and stays in view while you set the range, the layout, the text and the brief on the right. Drag the bright window over the video to place the crop (or the yellow box for the facecam layout). With the center layout, the "Show more of the picture" slider makes the crop wider, for a person who moves out of the narrow column. The bar at the bottom of the screen always shows what will be made, anything that is in the way, and "Cut the clip".
+- **Keys for the player:** Space plays and pauses, the left and right arrows move one second (a tenth with Shift), I sets the start, O sets the end, and P plays the range. They do nothing while you are typing in a box, and they go by the key's place on the keyboard, so they work on a keyboard set to another alphabet.
+- **Activity:** while a clip is being cut, rendered again, fetched, or searched for moments, the left column says what is happening and at which step, under "Activity". It is there on every page and after a reload. You can start another cut meanwhile; it waits its turn. When something is ready, it offers "Open".
 - **Deleting a video:** each video in the left column has a trash icon. It asks once, then deletes the file from `in/`. Clips already cut from it stay, but can no longer be rendered again, because rendering reads the source. A compilation that uses the video will not build until the item is taken out. It is not possible while a clip is being made.
 - **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
-- **Clip:** watch the result, see each brief rule as Pass or Fail, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
+- **Clip:** watch the result, download it, see each brief rule as passed or failed, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
+- **Unsaved changes:** the card, compilation and sources pages show "Changes not saved" until you save, and their Save button stays in view.
 
 Only this computer can reach the dashboard; it is not visible on your network.
 
@@ -74,6 +76,20 @@ CLIPPER_PORT=4600 npm run dashboard
 ```
 
 `npm run dashboard` builds the pages each time it starts, which takes a second or two. While a clip renders, ffmpeg uses every CPU core for about a minute.
+
+### Colours
+
+The dashboard's colours come from a palette of five: the page, a tint, a highlight, a primary colour and the text colour. Three palettes come with it: Clay, which a browser starts with, Lagoon and Night. Choose one under "Colours" at the bottom of the left column; the choice is remembered in that browser.
+
+To add your own, add one entry to `PALETTES` in `web/src/theme.js`:
+
+```js
+sunset: { name: 'Sunset', background: '#fff8f1', surface: '#ffe3c8', highlight: '#ffd166', primary: '#9c3d00', ink: '#3b1d0f' },
+```
+
+Everything else (borders, quiet text, hover colours, the text on buttons) is worked out from those five, and moved where needed so that text stays readable. The tint may be a strong colour: it is thinned with the page colour until text reads on it. The highlight marks step numbers, counts and "this one". Results (passed, failed, waiting) are always green, red and amber, whatever the palette, so a palette with an orange highlight does not make "passed" look like a warning. Set `DEFAULT_PALETTE` in the same file to change what a new browser starts with. `npm test` checks every palette for readable contrast.
+
+Two things keep their own colours whatever the palette: match cards, which use the teams' colours, and the crop window drawn over the video, which has to show on any footage.
 
 The Clips page and the command line do the same things and share the same `out/` and `parts/` folders, so you can mix them. The Cards and Compilations pages exist only in the dashboard, and so does the sources list; fetching works from both.
 

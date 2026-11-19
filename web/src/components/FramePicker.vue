@@ -83,7 +83,14 @@ function resizeCam(event) {
 </script>
 
 <template>
-  <div ref="frame" class="frame" :style="{ aspectRatio: `${info.width} / ${info.height}` }">
+  <!--
+    The picture is kept inside the screen with room for the player's buttons
+    and the bar at the bottom: its width is held to what that height allows.
+  -->
+  <div
+    ref="frame" class="frame"
+    :style="{ aspectRatio: `${info.width} / ${info.height}`, maxWidth: `calc(max(200px, 100vh - 400px) * ${info.width / info.height})` }"
+  >
     <video
       ref="video" :src="src" preload="metadata" playsinline
       @timeupdate="$emit('time', video.currentTime)"
@@ -117,19 +124,24 @@ function resizeCam(event) {
 </template>
 
 <style scoped>
-.frame { position: relative; width: 100%; background: #000; border-radius: 8px; overflow: hidden; user-select: none; }
+/*
+ * The colours here are fixed and do not follow the palette. These marks lie
+ * over the video, so they have to show on any footage: white and yellow lines
+ * with a dark surround, whatever colours the rest of the page has.
+ */
+.frame { position: relative; width: 100%; margin: 0 auto; background: black; border-radius: var(--radius); overflow: hidden; user-select: none; }
 video { display: block; width: 100%; height: 100%; }
-.window { position: absolute; border: 2px solid #fff; touch-action: none; }
+.window { position: absolute; border: 2px solid white; touch-action: none; }
 .window.dim { box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6); }
 .window.slide { cursor: ew-resize; }
 .window.outline { border-style: dashed; border-color: rgba(255, 255, 255, 0.8); pointer-events: none; }
-.window.cam { border-color: #ffd54a; cursor: move; background: rgba(255, 213, 74, 0.12); }
+.window.cam { border-color: rgb(255, 213, 74); cursor: move; background: rgba(255, 213, 74, 0.12); }
 .tag {
-  position: absolute; left: 6px; top: 6px; font-size: 12px; padding: 1px 6px; border-radius: 4px;
-  background: rgba(0, 0, 0, 0.7); color: #fff; pointer-events: none;
+  position: absolute; left: 6px; top: 6px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
+  background: rgba(0, 0, 0, 0.75); color: white; pointer-events: none; white-space: nowrap;
 }
 .handle {
-  position: absolute; right: -7px; bottom: -7px; width: 16px; height: 16px; border-radius: 50%;
-  background: #ffd54a; border: 2px solid #000; cursor: nwse-resize;
+  position: absolute; right: -9px; bottom: -9px; width: 20px; height: 20px; border-radius: 50%;
+  background: rgb(255, 213, 74); border: 2px solid black; cursor: nwse-resize;
 }
 </style>

@@ -1,66 +1,172 @@
-:root {
-  color-scheme: light dark;
-  --bg: #f6f6f4;
-  --panel: #ffffff;
-  --line: #dcdcd6;
-  --text: #1c1c1a;
-  --muted: #66665f;
-  --accent: #2456d6;
-  --accent-text: #ffffff;
-  --good: #1f7a3d;
-  --bad: #b3261e;
-  --warn-bg: #fff4d6;
-  font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
-}
+/*
+ * Styles shared by every page.
+ *
+ * No colour is named here or in the pages. They all come from the tokens that
+ * theme.js works out from a palette and puts on the page before it is drawn:
+ *
+ *   --bg  --panel  --soft  --soft-strong     fills, from the page outwards
+ *   --line  --line-strong                    a divider; the edge of a box you type in
+ *   --text  --muted                          words
+ *   --accent  --accent-hover  --accent-text  --accent-tint   what you press, and what is chosen
+ *   --highlight  --highlight-text            marks that draw the eye: step numbers, counts, "this one"
+ *   --good  --bad  --warn  (each with -bg)   results, and --bad-text for words on --bad.
+ *                                            A result never borrows --highlight: in one palette
+ *                                            that is green, in the next it is orange.
+ *   --shadow
+ */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161615;
-    --panel: #20201e;
-    --line: #3a3a36;
-    --text: #ececE6;
-    --muted: #a3a39b;
-    --accent: #7fa2ff;
-    --accent-text: #10182e;
-    --good: #6fce8c;
-    --bad: #ff8a80;
-    --warn-bg: #3d3414;
-  }
+:root {
+  font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --radius: 8px;
+  --radius-large: 12px;
+  --gap: 16px;
 }
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); }
-h1, h2, h3 { margin: 0; font-weight: 600; }
-h1 { font-size: 17px; }
-h2 { font-size: 16px; margin-bottom: 10px; }
-h3 { font-size: 13px; color: var(--muted); text-transform: none; margin-bottom: 6px; }
+
+h1, h2, h3 { margin: 0; font-weight: 650; line-height: 1.25; }
+h1 { font-size: 22px; letter-spacing: -0.01em; }
+h2 { font-size: 16px; margin-bottom: 12px; }
+h3 { font-size: 12px; margin-bottom: 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 p { margin: 0 0 8px; }
-code { font: 13px ui-monospace, 'SF Mono', Menlo, monospace; }
+a { color: var(--accent); text-underline-offset: 2px; }
+a:hover { color: var(--accent-hover); }
+code {
+  font: 13px ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  background: var(--soft); padding: 1px 5px; border-radius: 4px;
+}
+::selection { background: var(--highlight); color: var(--highlight-text); }
+
+/* --- Buttons ------------------------------------------------------------- */
 
 button, input, select, textarea { font: inherit; color: inherit; }
 button {
-  border: 1px solid var(--line); background: var(--panel); border-radius: 6px;
-  padding: 6px 12px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 36px; padding: 6px 14px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius);
+  background: var(--panel); color: var(--accent); font-weight: 550;
+  cursor: pointer; transition: background-color 0.12s, border-color 0.12s, color 0.12s;
 }
-button:hover:not(:disabled) { border-color: var(--accent); }
-button:disabled { opacity: 0.5; cursor: default; }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
-button.small { padding: 3px 8px; font-size: 13px; }
-input[type='text'], input[type='number'], select, textarea {
-  border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 6px 8px; width: 100%;
-}
-input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 1px;
-}
-label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px; }
+button:hover:not(:disabled) { background: var(--soft); border-color: var(--accent); }
+button:active:not(:disabled) { background: var(--soft-strong); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 650; }
+button.primary:hover:not(:disabled), button.primary:active:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+button.danger { background: var(--bad); border-color: var(--bad); color: var(--bad-text); font-weight: 650; }
+button.danger:hover:not(:disabled) { background: var(--bad); border-color: var(--text); }
+button.quiet { border-color: transparent; background: transparent; }
+button.small { min-height: 28px; padding: 2px 10px; font-size: 13px; }
+button.icon-only { padding: 6px; min-width: 36px; }
+button.small.icon-only { min-width: 28px; padding: 2px; }
 
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+/* --- Boxes you type in --------------------------------------------------- */
+
+input[type='text'], input[type='number'], select, textarea {
+  width: 100%; min-height: 36px; padding: 6px 10px;
+  border: 1px solid var(--line-strong); border-radius: var(--radius);
+  background: var(--panel); color: var(--text);
+}
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
+input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover { border-color: var(--accent); }
+input:disabled, select:disabled { opacity: 0.55; cursor: not-allowed; }
+textarea { resize: vertical; line-height: 1.45; }
+input[type='range'], input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); }
+input[type='range'] { width: 100%; margin: 0; cursor: pointer; }
+input[type='checkbox'] { width: 16px; height: 16px; margin: 0; }
+input[type='color'] { width: 56px; height: 36px; padding: 2px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); cursor: pointer; }
+input[type='file'] { max-width: 100%; }
+input[type='file']::file-selector-button {
+  font: inherit; font-weight: 550; margin-right: 10px; padding: 6px 12px; cursor: pointer;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); color: var(--accent);
+}
+
+/* One outline for everything that can take the keyboard. */
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: var(--radius); }
+
+label { display: block; margin-bottom: 4px; font-size: 13px; font-weight: 550; color: var(--muted); }
+label.check {
+  display: inline-flex; align-items: center; gap: 8px; margin: 0;
+  font-size: 15px; font-weight: 400; color: var(--text); cursor: pointer;
+}
+
+/* --- Blocks -------------------------------------------------------------- */
+
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-large);
+  padding: 18px; box-shadow: 0 1px 2px var(--shadow);
+}
 .muted { color: var(--muted); }
-.error { color: var(--bad); white-space: pre-wrap; }
-.notice { background: var(--warn-bg); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; }
-.row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
-.row > * { flex: 1 1 120px; }
+.hint { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+.error {
+  color: var(--bad); background: var(--bad-bg); border: 1px solid var(--bad);
+  border-radius: var(--radius); padding: 8px 12px; white-space: pre-wrap;
+}
+.notice { background: var(--warn-bg); border: 1px solid var(--warn); border-radius: var(--radius); padding: 8px 12px; margin-bottom: 10px; }
+.row { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+.row > * { flex: 1 1 120px; min-width: 0; }
 .row > .fixed { flex: 0 0 auto; }
-.stack > * + * { margin-top: 14px; }
-.pass { color: var(--good); font-weight: 600; }
-.fail { color: var(--bad); font-weight: 600; }
+.row.middle { align-items: center; }
+.stack > * + * { margin-top: var(--gap); }
+.pass { color: var(--good); font-weight: 650; }
+.fail { color: var(--bad); font-weight: 650; }
+.numbers { font-variant-numeric: tabular-nums; }
+
+/* A small label that says what state something is in. */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 650; line-height: 20px; white-space: nowrap;
+  background: var(--soft); color: var(--text);
+}
+.chip.good { background: var(--good-bg); color: var(--good); }
+.chip.mark { background: var(--highlight); color: var(--highlight-text); }
+.chip.bad { background: var(--bad-bg); color: var(--bad); }
+.chip.warn { background: var(--warn-bg); color: var(--warn); }
+.chip.accent { background: var(--accent); color: var(--accent-text); }
+
+/* Two or three choices side by side, one of them chosen. */
+.choices { display: inline-flex; flex: none; border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden; }
+.choices button { border: 0; border-radius: 0; min-height: 30px; padding: 2px 12px; font-size: 13px; }
+.choices button + button { border-left: 1px solid var(--line-strong); }
+.choices button[aria-pressed='true'] { background: var(--accent); color: var(--accent-text); }
+
+/* A list of saved things, one of which is open: matches, cards, compilations. */
+.entry { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; margin-top: 8px; background: var(--panel); }
+.entry.current { border-color: var(--accent); background: var(--accent-tint); box-shadow: inset 3px 0 0 var(--accent); }
+.entry .open {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 0; width: 100%; min-height: 0;
+  padding: 2px 4px; border: 0; background: transparent; color: var(--text); text-align: left; font-size: 13px; font-weight: 400;
+}
+.entry .open:hover:not(:disabled) { background: transparent; color: var(--accent); }
+.entry .open strong { font-size: 14px; font-weight: 650; word-break: break-word; }
+.entry .tools { margin-top: 6px; align-items: center; gap: 6px; font-size: 13px; }
+
+/* "Are you sure?", shown in place of the buttons it replaces. */
+.confirm {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; padding: 8px 10px;
+  font-size: 13px; background: var(--bad-bg); border: 1px solid var(--bad); border-radius: var(--radius);
+}
+.confirm > span { flex: 1 1 100%; }
+
+/* What to do when a list is still empty. */
+.empty {
+  padding: 14px; margin: 10px 0 0; text-align: center; font-size: 14px; color: var(--muted);
+  border: 1px dashed var(--line-strong); border-radius: var(--radius);
+}
+
+/* The top of a page: what it is, and one line on what it is for. */
+.page-head { margin-bottom: var(--gap); }
+.page-head p { margin: 4px 0 0; color: var(--muted); max-width: 75ch; }
+
+.spinner {
+  width: 14px; height: 14px; border-radius: 50%; flex: none; display: inline-block;
+  border: 2px solid var(--line); border-top-color: var(--accent); animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.icon { width: 16px; height: 16px; flex: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+  .spinner { animation: none; border-top-color: var(--line); border-right-color: var(--accent); }
+}

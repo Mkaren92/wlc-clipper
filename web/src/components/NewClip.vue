@@ -1,11 +1,12 @@
 <script setup>
 // Cut a new clip from one source video: choose the range, the layout and the
 // text, then start the job and wait for it.
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { api } from '../api.js';
 import { clock } from '../format.js';
 import { describe, isActive, jobs, track } from '../jobs.js';
 import FramePicker from './FramePicker.vue';
+import Icon from './Icon.vue';
 
 const props = defineProps({
   video: { type: String, required: true },
@@ -14,6 +15,11 @@ const props = defineProps({
 const emit = defineEmits(['done']);
 
 const HOOK_LIMIT = 60;
+const LAYOUTS = [
+  { id: 'center', name: 'Center', about: 'Crop a column. Fills the screen.' },
+  { id: 'blur', name: 'Blur', about: 'The whole frame, over a blurred copy.' },
+  { id: 'facecam', name: 'Facecam', about: 'The webcam above the gameplay.' },
+];
 
 const info = ref(null);
 const loadError = ref('');
@@ -43,7 +49,6 @@ const description = ref('');
 // Work in progress is kept in jobs.js, not here, so leaving this screen and
 // coming back shows it again.
 let onScreen = true;
-onUnmounted(() => (onScreen = false));
 const cutError = ref('');
 const cutsOfThisVideo = computed(() =>
   jobs.list.filter((job) => ['cut', 'part'].includes(job.kind) && isActive(job) && job.label.startsWith(`${props.video} `)),
@@ -169,6 +174,20 @@ const problem = computed(() => {
   return '';
 });
 
+// One line saying what "Cut the clip" will make, beside the button.
+const summary = computed(() => {
+  if (length.value === null || length.value <= 0) return null;
+  return {
+    range: `${clock(startSeconds.value)}–${clock(endSeconds.value)} · ${total.value.toFixed(1)} s`,
+    rest: [
+      LAYOUTS.find((known) => known.id === layout.value).name,
+      captions.value ? 'captions' : 'no captions',
+      hook.value.trim() ? 'hook' : 'no hook',
+      chosenBrief.value ? `brief “${chosenBrief.value.id}”` : 'no brief',
+    ].join(' · '),
+  };
+});
+
 // --- Player ---------------------------------------------------------------
 
 const element = () => picker.value?.video;
@@ -184,6 +203,9 @@ function seek(to) {
   const video = element();
   if (video) video.currentTime = Math.min(Math.max(to, 0), duration.value || 0);
 }
+// A step is counted from where the video really is, not from the last time
+// it reported: pressing a key three times quickly then moves three steps.
+const nudge = (by) => seek((element()?.currentTime ?? time.value) + by);
 // Set by "Play the range" only, so the ordinary Play button never stops by itself.
 let stopAtEnd = false;
 function playRange() {
@@ -200,9 +222,47 @@ function onTime(now) {
   }
 }
 // Refs are already unwrapped in the template, so the marking is done here by name.
-const markStart = () => (start.value = time.value.toFixed(2));
-const markEnd = () => (end.value = time.value.toFixed(2));
-const percent = (t) => `${((t ?? 0) / (duration.value || 1)) * 100}%`;
+const here = () => (element()?.currentTime ?? time.value).toFixed(2);
+const markStart = () => (start.value = here());
+const markEnd = () => (end.value = here());
+const percent = (t) => `${(Math.min(Math.max(t ?? 0, 0), duration.value || 1) / (duration.value || 1)) * 100}%`;
+
+// Keys for the player. They are ignored while a box, a list or a slider has
+// the keyboard, so typing a title never moves the video. On a button or a
+// link only Space and Enter are left alone, because those press it: after
+// choosing a video or pressing Play, a button is where the keyboard is.
+// Keys are told apart by their place on the keyboard, not by the letter they
+// type, so they work the same on a keyboard set to another alphabet.
+const KEYS = [
+  ['Space', 'play or pause'], ['← →', '1 second'], ['Shift + ← →', '0.1 second'],
+  ['I', 'set start'], ['O', 'set end'], ['P', 'play the range'],
+];
+function onKey(event) {
+  if (!info.value || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+  const target = event.target;
+  if (target instanceof HTMLElement) {
+    if (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+    if (['BUTTON', 'A'].includes(target.tagName) && ['Space', 'Enter', 'NumpadEnter'].includes(event.code)) return;
+  }
+  const step = event.shiftKey ? 0.1 : 1;
+  const action = {
+    Space: toggle,
+    KeyK: toggle,
+    ArrowLeft: () => nudge(-step),
+    ArrowRight: () => nudge(step),
+    KeyI: markStart,
+    KeyO: markEnd,
+    KeyP: playRange,
+  }[event.code];
+  if (!action) return;
+  event.preventDefault();
+  action();
+}
+onMounted(() => window.addEventListener('keydown', onKey));
+onUnmounted(() => {
+  onScreen = false;
+  window.removeEventListener('keydown', onKey);
+});
 
 // --- Cutting ----------------------------------------------------------------
 
@@ -230,7 +290,7 @@ async function cut() {
     if (usedNumber.value > 0) (jobs.cutMoments[props.video] ??= []).push(usedKey.value);
     const result = await track(started);
     // Open the new clip only if this screen is still the one being looked at,
-    // and then its "ready" notice is not needed. Otherwise the status bar offers it.
+    // and then its "ready" notice is not needed. Otherwise the side column offers it.
     if (onScreen) {
       jobs.dismissed.push(started.id);
       emit('done', result.clip);
@@ -242,227 +302,357 @@ async function cut() {
 </script>
 
 <template>
-  <div class="stack">
-    <p v-if="loadError" class="error">{{ loadError }}</p>
-
-    <section v-if="info" class="panel">
-      <h2>{{ video }}</h2>
-      <p class="muted">
-        {{ info.width }}×{{ info.height }}, {{ info.fps }} fps, {{ clock(info.duration) }} long,
-        {{ info.audioStreams === 0 ? 'no sound' : info.audioStreams === 1 ? '1 audio track' : `${info.audioStreams} audio tracks (the first is used)` }}
+  <div class="cutting">
+    <header class="page-head">
+      <h1>{{ video }}</h1>
+      <p v-if="info" class="facts">
+        <span class="chip">{{ info.width }}×{{ info.height }}</span>
+        <span class="chip">{{ info.fps }} fps</span>
+        <span class="chip">{{ clock(info.duration) }} long</span>
+        <span class="chip" :class="{ warn: info.audioStreams === 0 }">
+          {{ info.audioStreams === 0 ? 'no sound' : info.audioStreams === 1 ? '1 audio track' : `${info.audioStreams} audio tracks (the first is used)` }}
+        </span>
       </p>
-      <p v-if="!playable" class="notice">
-        This browser cannot play this file, so there is no preview. You can still type the start and end and cut it.
-      </p>
+    </header>
+    <p v-if="loadError" class="error" role="alert">{{ loadError }}</p>
 
-      <FramePicker
-        ref="picker" v-model:crop-x="cropX" v-model:cam="cam"
-        :src="api.videoUrl(video)" :info="info" :layout="layout"
-        @time="onTime" @duration="duration = $event" @playing="playing = $event" @unplayable="playable = false"
-      />
+    <div v-if="info" class="columns">
+      <!-- The video stays in view while the settings beside it scroll. -->
+      <section class="panel watch" aria-label="The video">
+        <p v-if="!playable" class="notice">
+          This browser cannot play this file, so there is no preview. You can still type the start and end and cut it.
+        </p>
 
-      <div class="timeline">
-        <div class="range" :style="{ left: percent(startSeconds), width: percent(Math.max(0, length ?? 0)) }" />
-        <button
-          v-for="(moment, i) in moments" :key="i" class="mark" :class="{ current: keyOf(moment) === usedKey }"
-          :title="`Suggestion ${i + 1}: ${moment.reason}`"
-          :aria-label="`Use suggestion ${i + 1}`"
-          :style="{ left: percent(moment.start), width: percent(moment.end - moment.start) }" @click="useMoment(moment)"
+        <FramePicker
+          ref="picker" v-model:crop-x="cropX" v-model:cam="cam"
+          :src="api.videoUrl(video)" :info="info" :layout="layout"
+          @time="onTime" @duration="duration = $event" @playing="playing = $event" @unplayable="playable = false"
         />
-        <input
-          type="range" min="0" :max="duration" step="0.01" :value="time" aria-label="Position in the video"
-          @input="seek(Number($event.target.value))"
-        />
-      </div>
 
-      <div class="row controls">
-        <button class="fixed primary" @click="toggle">{{ playing ? 'Pause' : 'Play' }}</button>
-        <span class="fixed time">{{ clock(time) }} / {{ clock(duration) }}</span>
-        <button class="fixed small" @click="seek(time - 1)">−1 s</button>
-        <button class="fixed small" @click="seek(time - 0.1)">−0.1 s</button>
-        <button class="fixed small" @click="seek(time + 0.1)">+0.1 s</button>
-        <button class="fixed small" @click="seek(time + 1)">+1 s</button>
-        <button class="fixed small" @click="playRange">Play the range</button>
-      </div>
-    </section>
-
-    <section v-if="info && ai" class="panel">
-      <h2>Suggested moments</h2>
-      <p v-if="!ai.configured" class="muted">{{ ai.help }} Then restart the dashboard.</p>
-      <template v-else>
-        <p class="muted">
-          Transcribes the whole video on this computer, then sends the transcript text (not the video) to
-          {{ ai.service }} ({{ ai.model }}). The first time on a video takes a few minutes.
-        </p>
-        <div class="row">
-          <div class="fixed count">
-            <label for="count">How many</label>
-            <input id="count" v-model.number="suggestCount" type="number" min="1" max="10" />
+        <div class="timeline">
+          <div class="track" aria-hidden="true">
+            <div class="range" :style="{ left: percent(startSeconds), width: percent(Math.max(0, length ?? 0)) }" />
           </div>
-          <button class="fixed" :disabled="Boolean(suggestJob)" @click="suggest">Suggest moments</button>
-          <span v-if="suggestJob" role="status">{{ describe(suggestJob) }}</span>
-          <span v-else-if="noMoments" class="muted">No usable moments came back. Try again.</span>
-        </div>
-        <p v-if="suggestError" class="error" role="alert">{{ suggestError }}</p>
-        <ol v-if="moments.length > 0" class="moments">
-          <li v-for="(moment, i) in moments" :key="i" :class="{ current: keyOf(moment) === usedKey }">
-            <div class="row">
-              <strong class="fixed">{{ clock(moment.start) }}–{{ clock(moment.end) }}</strong>
-              <span class="fixed muted">{{ (moment.end - moment.start).toFixed(1) }} s · rated {{ moment.score.toFixed(2) }}</span>
-              <button class="fixed small" :class="{ primary: keyOf(moment) === usedKey }" @click="useMoment(moment)">
-                {{ keyOf(moment) === usedKey ? 'In use' : 'Use this' }}
-              </button>
-              <span v-if="alreadyCut(moment)" class="fixed pass">Already cut</span>
-            </div>
-            <p>{{ moment.reason }}</p>
-            <p v-if="moment.hook" class="muted">Hook: “{{ moment.hook }}”</p>
-            <p v-for="problem in moment.problems" :key="problem" class="fail">Brief: {{ problem }}</p>
-          </li>
-        </ol>
-      </template>
-    </section>
-
-    <section v-if="info" class="panel stack">
-      <div>
-        <h2>Range</h2>
-        <p v-if="usedNumber > 0" class="using">
-          Working on suggestion {{ usedNumber }}. <button class="small" @click="usedKey = ''">Clear</button>
-        </p>
-        <div class="row">
-          <div>
-            <label for="start">Start</label>
-            <input id="start" v-model="start" type="text" inputmode="decimal" />
-          </div>
-          <button class="fixed" @click="markStart">Set start here</button>
-          <div>
-            <label for="end">End</label>
-            <input id="end" v-model="end" type="text" inputmode="decimal" />
-          </div>
-          <button class="fixed" @click="markEnd">Set end here</button>
-        </div>
-        <p v-if="length !== null && length > 0" class="muted length">
-          {{ length.toFixed(1) }} s of footage<span v-if="total !== length">, {{ total.toFixed(1) }} s with the end card</span>
-          <span v-if="chosenBrief?.minSeconds || chosenBrief?.maxSeconds">
-            (the brief allows {{ chosenBrief.minSeconds ?? 0 }}–{{ chosenBrief.maxSeconds ?? '∞' }} s)
-          </span>
-        </p>
-      </div>
-
-      <div>
-        <h2>Layout</h2>
-        <div class="row">
-          <div>
-            <label for="layout">How to fit the picture into 9:16</label>
-            <select id="layout" v-model="layout">
-              <option value="center">Center: crop a column</option>
-              <option value="blur">Blur: whole frame over a blurred copy</option>
-              <option value="facecam">Facecam: webcam above gameplay</option>
-            </select>
-          </div>
-          <div>
-            <label for="trim">Trim each edge (pixels)</label>
-            <input id="trim" v-model.number="trim" type="number" min="0" />
-          </div>
-        </div>
-        <div v-if="layout === 'center' && info?.layouts.centerWidths" class="wider">
-          <label for="crop-width">Show more of the picture</label>
-          <input
-            id="crop-width" v-model.number="widthSlider" type="range" step="2"
-            :min="info.layouts.centerWidths.min" :max="info.layouts.centerWidths.max"
+          <button
+            v-for="(moment, i) in moments" :key="i" class="mark" :class="{ current: keyOf(moment) === usedKey }"
+            :title="`Suggestion ${i + 1}: ${moment.reason}`"
+            :aria-label="`Use suggestion ${i + 1}`"
+            :style="{ left: percent(moment.start), width: percent(moment.end - moment.start) }" @click="useMoment(moment)"
           />
-          <p class="muted length">
-            <template v-if="cropWidth === undefined">The crop is the 9:16 column and fills the screen.</template>
-            <template v-else>
-              The crop is {{ info.layouts.center.width }} px wide. It is shown whole, with a blurred copy above and below.
-              <button class="small" @click="cropWidth = undefined">Back to the column</button>
+          <input
+            type="range" min="0" :max="duration" step="0.01" :value="time" aria-label="Position in the video"
+            @input="seek(Number($event.target.value))"
+          />
+        </div>
+
+        <div class="controls">
+          <button class="primary play" :aria-label="playing ? 'Pause' : 'Play'" @click="toggle">
+            <Icon :name="playing ? 'pause' : 'play'" /> {{ playing ? 'Pause' : 'Play' }}
+          </button>
+          <span class="time numbers">{{ clock(time) }} <span class="muted">/ {{ clock(duration) }}</span></span>
+          <span class="steps" role="group" aria-label="Step through the video">
+            <button class="small" @click="nudge(-1)">−1 s</button>
+            <button class="small" @click="nudge(-0.1)">−0.1 s</button>
+            <button class="small" @click="nudge(0.1)">+0.1 s</button>
+            <button class="small" @click="nudge(1)">+1 s</button>
+          </span>
+          <button class="small" @click="playRange"><Icon name="refresh" /> Play the range</button>
+        </div>
+
+        <p v-if="playable" class="keys">
+          <span v-for="[key, what] in KEYS" :key="key"><kbd>{{ key }}</kbd> {{ what }}</span>
+        </p>
+      </section>
+
+      <div class="settings stack">
+        <section class="panel">
+          <h2><span class="step">1</span> Range</h2>
+          <p v-if="usedNumber > 0" class="using">
+            <span class="chip mark">Suggestion {{ usedNumber }}</span> is filled in below.
+            <button class="small" @click="usedKey = ''">Clear</button>
+          </p>
+          <div class="row">
+            <div>
+              <label for="start">Start</label>
+              <div class="joined">
+                <input id="start" v-model="start" type="text" inputmode="decimal" class="numbers" />
+                <button title="Set the start to where the video is now (I)" @click="markStart"><Icon name="start" /> Set start here</button>
+              </div>
+            </div>
+            <div>
+              <label for="end">End</label>
+              <div class="joined">
+                <input id="end" v-model="end" type="text" inputmode="decimal" class="numbers" />
+                <button title="Set the end to where the video is now (O)" @click="markEnd"><Icon name="end" /> Set end here</button>
+              </div>
+            </div>
+          </div>
+          <p class="hint">
+            Seconds, or minutes and seconds such as 1:30.
+            <template v-if="length !== null && length > 0">
+              <strong class="numbers">{{ length.toFixed(1) }} s</strong> of footage<span v-if="total !== length">, {{ total.toFixed(1) }} s with the end card</span>
+              <span v-if="chosenBrief?.minSeconds || chosenBrief?.maxSeconds">
+                (the brief allows {{ chosenBrief.minSeconds ?? 0 }}–{{ chosenBrief.maxSeconds ?? '∞' }} s)
+              </span>.
             </template>
           </p>
-        </div>
-        <p v-if="layout === 'center' && cropX !== undefined" class="muted length">
-          Crop starts {{ cropX }} px from the left. <button class="small" @click="cropX = undefined">Centre it</button>
+        </section>
+
+        <section class="panel">
+          <h2><span class="step">2</span> Layout</h2>
+          <div class="layouts" role="radiogroup" aria-label="How to fit the picture into 9:16">
+            <label v-for="known in LAYOUTS" :key="known.id" class="layout-choice" :class="{ chosen: layout === known.id }">
+              <input v-model="layout" type="radio" name="layout" :value="known.id" />
+              <!-- A small drawing of the tall frame and what goes where in it. -->
+              <svg class="drawing" viewBox="0 0 36 64" aria-hidden="true">
+                <rect class="frame" x="1" y="1" width="34" height="62" rx="4" />
+                <rect v-if="known.id === 'center'" class="main" x="4" y="4" width="28" height="56" rx="2" />
+                <template v-else-if="known.id === 'blur'">
+                  <rect class="faint" x="4" y="4" width="28" height="56" rx="2" />
+                  <rect class="main" x="4" y="24" width="28" height="16" rx="1" />
+                </template>
+                <template v-else>
+                  <rect class="main" x="4" y="4" width="28" height="18" rx="2" />
+                  <rect class="faint" x="4" y="24" width="28" height="36" rx="2" />
+                </template>
+              </svg>
+              <span class="words"><strong>{{ known.name }}</strong><span>{{ known.about }}</span></span>
+            </label>
+          </div>
+
+          <div v-if="layout === 'center' && info.layouts.centerWidths" class="option">
+            <label for="crop-width">Show more of the picture</label>
+            <input
+              id="crop-width" v-model.number="widthSlider" type="range" step="2"
+              :min="info.layouts.centerWidths.min" :max="info.layouts.centerWidths.max"
+            />
+            <p class="hint">
+              <template v-if="cropWidth === undefined">
+                The crop is the 9:16 column and fills the screen. Widen it when a person moves out of the column.
+              </template>
+              <template v-else>
+                The crop is {{ info.layouts.center.width }} px wide. It is shown whole, with a blurred copy above and below.
+                <button class="small" @click="cropWidth = undefined">Back to the column</button>
+              </template>
+            </p>
+          </div>
+          <p v-if="layout === 'center'" class="hint">
+            Drag the bright window on the video to move the crop.
+            <template v-if="cropX !== undefined">
+              It starts {{ cropX }} px from the left. <button class="small" @click="cropX = undefined">Centre it</button>
+            </template>
+          </p>
+          <p v-if="layout === 'facecam' && cam" class="hint">
+            Drag the yellow box on the video over the webcam, and its corner to resize it. Now
+            {{ cam.width }}×{{ cam.height }} at {{ cam.x }}, {{ cam.y }}.
+          </p>
+
+          <div class="option trim">
+            <label for="trim">Trim each edge (pixels)</label>
+            <input id="trim" v-model.number="trim" type="number" min="0" />
+            <p class="hint">For a thin frame baked into a recording. Leave at 0 otherwise.</p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2><span class="step">3</span> Text</h2>
+          <div class="row">
+            <div class="wide">
+              <label for="hook">
+                Hook: a line shown at the top
+                <span class="chip" :class="{ bad: hook.length > HOOK_LIMIT }">{{ hook.length }}/{{ HOOK_LIMIT }}</span>
+              </label>
+              <input id="hook" v-model="hook" type="text" :aria-invalid="hook.length > HOOK_LIMIT" />
+            </div>
+            <div class="narrow">
+              <label for="hook-seconds">Hook time (seconds)</label>
+              <input id="hook-seconds" v-model.number="hookSeconds" type="number" min="0" step="0.5" />
+            </div>
+          </div>
+          <p class="hint">A hook time of 0 keeps the hook for the whole clip.</p>
+
+          <div class="row option">
+            <label class="check fixed"><input v-model="captions" type="checkbox" /> Burn in captions</label>
+            <div class="narrow">
+              <label for="lang">Spoken language</label>
+              <input id="lang" v-model="lang" type="text" />
+            </div>
+          </div>
+
+          <div class="row option">
+            <div>
+              <label for="title">Title for the post{{ brief ? ' (the hook is used when empty)' : '' }}</label>
+              <input id="title" v-model="title" type="text" />
+            </div>
+            <div class="wide">
+              <label for="description">Description for the post</label>
+              <input id="description" v-model="description" type="text" />
+            </div>
+          </div>
+          <p class="hint">The title and description are saved next to the clip as post.txt, ready to copy when you upload.</p>
+        </section>
+
+        <section class="panel">
+          <h2><span class="step">4</span> Brief</h2>
+          <label for="brief">Campaign brief to follow and check against</label>
+          <select id="brief" v-model="brief">
+            <option value="">None: no hashtags, no checks, no end card</option>
+            <option v-for="b in briefs" :key="b.file" :value="b.file" :disabled="!b.ok">
+              {{ b.ok ? b.brief.id : `${b.file} (not valid)` }}
+            </option>
+          </select>
+        </section>
+
+        <p class="hint part-note">
+          “Save this part as it is”, in the bar below, keeps the original size and adds nothing: no reframing, hook
+          or captions. It uses only the start and end, and the file goes to the <code>parts</code> folder.
         </p>
-        <p v-if="layout === 'facecam' && cam" class="muted length">
-          Webcam area: {{ cam.width }}×{{ cam.height }} at {{ cam.x }}, {{ cam.y }}.
+
+        <section v-if="ai" class="panel">
+          <h2><Icon name="spark" /> Suggested moments</h2>
+          <p v-if="!ai.configured" class="muted">{{ ai.help }} Then restart the dashboard.</p>
+          <template v-else>
+            <p class="hint first">
+              Transcribes the whole video on this computer, then sends the transcript text (not the video) to
+              {{ ai.service }} ({{ ai.model }}). The first time on a video takes a few minutes.
+            </p>
+            <div class="row middle suggest">
+              <div class="fixed count">
+                <label for="count">How many</label>
+                <input id="count" v-model.number="suggestCount" type="number" min="1" max="10" />
+              </div>
+              <button class="fixed" :disabled="Boolean(suggestJob)" @click="suggest"><Icon name="spark" /> Suggest moments</button>
+              <span v-if="suggestJob" role="status"><span class="spinner" aria-hidden="true" /> {{ describe(suggestJob) }}</span>
+              <span v-else-if="noMoments" class="muted">No usable moments came back. Try again.</span>
+            </div>
+            <p v-if="suggestError" class="error" role="alert">{{ suggestError }}</p>
+            <ol v-if="moments.length > 0" class="moments">
+              <li v-for="(moment, i) in moments" :key="i" :class="{ current: keyOf(moment) === usedKey }">
+                <div class="row middle">
+                  <strong class="fixed numbers">{{ i + 1 }}. {{ clock(moment.start) }}–{{ clock(moment.end) }}</strong>
+                  <span class="fixed muted">{{ (moment.end - moment.start).toFixed(1) }} s · rated {{ moment.score.toFixed(2) }}</span>
+                  <span v-if="alreadyCut(moment)" class="chip good"><Icon name="check" /> Already cut</span>
+                  <span class="spacer" />
+                  <button class="fixed small" :class="{ primary: keyOf(moment) === usedKey }" @click="useMoment(moment)">
+                    {{ keyOf(moment) === usedKey ? 'In use' : 'Use this' }}
+                  </button>
+                </div>
+                <p>{{ moment.reason }}</p>
+                <p v-if="moment.hook" class="muted">Hook: “{{ moment.hook }}”</p>
+                <p v-for="found in moment.problems" :key="found" class="fail">Brief: {{ found }}</p>
+              </li>
+            </ol>
+          </template>
+        </section>
+      </div>
+    </div>
+
+    <!-- Always in view: what will be made, what is in the way, and the two buttons. -->
+    <div v-if="info" class="cutbar">
+      <div class="say">
+        <p v-if="problem" class="problem"><Icon name="alert" /> {{ problem }}</p>
+        <p v-else-if="summary" class="summary"><strong class="numbers">{{ summary.range }}</strong> · {{ summary.rest }}</p>
+        <p v-for="running in cutsOfThisVideo" :key="running.id" class="running" role="status">
+          <span class="spinner" aria-hidden="true" /> {{ describe(running) }}
         </p>
+        <p v-if="cutError" class="error" role="alert">{{ cutError }}</p>
       </div>
-
-      <div>
-        <h2>Text</h2>
-        <div class="row">
-          <div class="wide">
-            <label for="hook">Hook: a line shown at the top ({{ hook.length }}/{{ HOOK_LIMIT }})</label>
-            <input id="hook" v-model="hook" type="text" />
-          </div>
-          <div>
-            <label for="hook-seconds">Hook time in seconds (0 = whole clip)</label>
-            <input id="hook-seconds" v-model.number="hookSeconds" type="number" min="0" step="0.5" />
-          </div>
-          <div>
-            <label for="lang">Spoken language</label>
-            <input id="lang" v-model="lang" type="text" />
-          </div>
-        </div>
-        <div class="row post-text">
-          <div>
-            <label for="title">Title for the post{{ brief ? ' (the hook is used when empty)' : '' }}</label>
-            <input id="title" v-model="title" type="text" />
-          </div>
-          <div class="wide">
-            <label for="description">Description for the post</label>
-            <input id="description" v-model="description" type="text" />
-          </div>
-        </div>
-        <p class="muted post-note">The title and description are saved next to the clip as post.txt, ready to copy when you upload.</p>
-        <label class="check"><input v-model="captions" type="checkbox" /> Burn in captions</label>
-      </div>
-
-      <div>
-        <h2>Brief</h2>
-        <label for="brief">Campaign brief to follow and check against</label>
-        <select id="brief" v-model="brief">
-          <option value="">None: no hashtags, no checks, no end card</option>
-          <option v-for="b in briefs" :key="b.file" :value="b.file" :disabled="!b.ok">
-            {{ b.ok ? b.brief.id : `${b.file} (not valid)` }}
-          </option>
-        </select>
-      </div>
-
-      <div class="row">
-        <button class="fixed primary" :disabled="Boolean(problem)" @click="cut">Cut the clip</button>
-        <button class="fixed" :disabled="Boolean(rangeProblem)" @click="savePart">Save this part as it is</button>
-        <span v-if="problem" class="muted">{{ problem }}</span>
-      </div>
-      <p class="muted part-note">
-        “Save this part as it is” keeps the original size and adds nothing: no reframing, hook or captions. It uses only
-        the start and end, and the file goes to the <code>parts</code> folder.
-      </p>
-      <p v-for="running in cutsOfThisVideo" :key="running.id" role="status">{{ describe(running) }}</p>
-      <p v-if="cutError" class="error" role="alert">{{ cutError }}</p>
-    </section>
+      <button
+        :disabled="Boolean(rangeProblem)"
+        title="Keeps the original size and adds nothing: no reframing, hook or captions. Uses only the start and end. The file goes to the parts folder."
+        @click="savePart"
+      >
+        <Icon name="piece" /> Save this part as it is
+      </button>
+      <button class="primary" :disabled="Boolean(problem)" @click="cut"><Icon name="scissors" /> Cut the clip</button>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.timeline { position: relative; margin-top: 18px; padding-top: 8px; }
-.timeline input { width: 100%; margin: 0; }
-.range { position: absolute; top: 0; height: 5px; border-radius: 3px; background: var(--accent); }
-.mark {
-  position: absolute; top: -9px; height: 7px; min-width: 6px; padding: 0; border: 0; border-radius: 3px;
-  background: #e8a020; cursor: pointer;
+.facts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); align-items: start; }
+@media (min-width: 1250px) {
+  .columns { grid-template-columns: minmax(0, 1.15fr) minmax(380px, 1fr); }
+  .watch { position: sticky; top: 16px; }
 }
+
+/* The timeline: a track with the chosen range on it, suggestions above, the position slider below. */
+.timeline { position: relative; margin-top: 22px; }
+.track { position: relative; height: 8px; border-radius: 4px; background: var(--soft); overflow: hidden; }
+.range { position: absolute; top: 0; bottom: 0; min-width: 3px; background: var(--accent); }
+.mark {
+  position: absolute; top: -12px; height: 8px; min-width: 8px; min-height: 0; padding: 0;
+  border: 0; border-radius: 3px; background: var(--warn);
+}
+.mark:hover:not(:disabled) { background: var(--accent-hover); }
+.mark.current { background: var(--accent); top: -14px; height: 10px; }
+.timeline input { margin-top: 6px; }
+
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; }
+.play { min-width: 104px; }
+.time { min-width: 128px; font-weight: 600; }
+.steps { display: inline-flex; gap: 4px; }
+.keys { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 12px 0 0; font-size: 12px; color: var(--muted); }
+kbd {
+  font: 600 11px ui-monospace, Menlo, Consolas, monospace; padding: 1px 6px; border-radius: 4px;
+  background: var(--soft); color: var(--text); border: 1px solid var(--line);
+}
+
+h2 { display: flex; align-items: center; gap: 8px; }
+.step {
+  display: grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 50%;
+  background: var(--highlight); color: var(--highlight-text); font-size: 13px;
+}
+.using { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.joined { display: flex; }
+.joined input { border-radius: var(--radius) 0 0 var(--radius); min-width: 0; }
+.joined button { flex: none; border-left: 0; border-radius: 0 var(--radius) var(--radius) 0; white-space: nowrap; }
+.option { margin-top: 14px; }
+.trim { max-width: 260px; }
+.wide { flex: 3 1 260px; }
+.narrow { flex: 0 1 170px; }
+label .chip { margin-left: 6px; }
+
+/* Three layouts to choose from, each with a small drawing. */
+.layouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.layout-choice {
+  position: relative; display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px; cursor: pointer;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--panel); color: var(--text); font-weight: 400;
+}
+.layout-choice:hover { border-color: var(--accent); background: var(--soft); }
+.layout-choice.chosen { border-color: var(--accent); background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent); }
+.layout-choice input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.layout-choice:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 2px; }
+.drawing { width: 30px; height: 53px; flex: none; }
+.drawing .frame { fill: none; stroke: var(--line-strong); stroke-width: 2; }
+.drawing .main { fill: var(--accent); }
+.drawing .faint { fill: var(--soft-strong); }
+.words { display: flex; flex-direction: column; min-width: 0; }
+.words strong { font-size: 14px; }
+.words span { font-size: 12px; color: var(--muted); line-height: 1.35; }
+
+.first { margin: 0 0 10px; }
 .count { width: 90px; }
-.moments { margin: 12px 0 0; padding-left: 20px; }
-.moments li { padding: 8px 10px; border-top: 1px solid var(--line); border-left: 4px solid transparent; }
-.moments li.current { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 0 6px 6px 0; }
-.mark.current { background: var(--accent); top: -12px; height: 10px; }
-.using { margin-bottom: 10px; font-weight: 600; }
-.moments p { margin: 4px 0 0; }
-.controls { margin-top: 6px; align-items: center; }
-.time { font-variant-numeric: tabular-nums; min-width: 120px; }
-.length { margin-top: 8px; }
-.wide { flex: 3 1 300px; }
-.check { margin-top: 10px; color: var(--text); font-size: 15px; }
-.post-text { margin-top: 10px; }
-.post-note { margin: 6px 0 0; font-size: 13px; }
-.part-note { margin: 0; font-size: 13px; }
+.suggest [role='status'] { display: inline-flex; align-items: center; gap: 8px; }
+.moments { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.moments li { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
+.moments li.current { border-color: var(--accent); background: var(--accent-tint); box-shadow: inset 3px 0 0 var(--accent); }
+.moments p { margin: 6px 0 0; }
+.moments .spacer { flex: 1 1 0; }
+
+/* The bar at the bottom of the screen. */
+.cutbar {
+  position: sticky; bottom: 0; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin-top: var(--gap); padding: 12px 16px;
+  background: var(--panel); border: 1px solid var(--line); border-bottom: 0;
+  border-radius: var(--radius-large) var(--radius-large) 0 0; box-shadow: 0 -4px 14px var(--shadow);
+}
+.say { flex: 1 1 260px; min-width: 0; }
+.say p { margin: 0; }
+.say p + p { margin-top: 6px; }
+.summary { font-size: 14px; color: var(--muted); }
+.summary strong { color: var(--text); }
+.problem { display: flex; align-items: center; gap: 8px; color: var(--warn); font-weight: 600; }
+.running { display: flex; align-items: center; gap: 8px; }
 </style>
