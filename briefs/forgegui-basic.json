@@ -1,0 +1,27 @@
+{
+  "id": "forgegui-basic",
+  "platforms": ["youtube", "tiktok", "instagram"],
+  "minSeconds": 8,
+  "maxSeconds": 60,
+  "hashtags": {
+    "required": ["#forgeguipartner", "#robloxdev", "#roblox"],
+    "strictOrder": true,
+    "optional": ["#gamedev", "#aitools", "#robloxstudio"]
+  },
+  "descriptionMustInclude": [],
+  "onScreenTextMustInclude": ["ForgeGUI"],
+  "forbiddenTerms": [],
+  "disclosure": {
+    "mode": "hashtag",
+    "text": "#forgeguipartner"
+  },
+  "endCard": {
+    "seconds": 3,
+    "text": "Try ForgeGUI"
+  },
+  "manualChecks": [
+    "Pin a comment that mentions ForgeGUI",
+    "Likes, comments and shares are on",
+    "Submit the link within 30 minutes of posting"
+  ]
+}

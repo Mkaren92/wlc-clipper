@@ -1,0 +1,24 @@
+{
+  "name": "wlc-clipper",
+  "version": "0.1.0",
+  "description": "Turns a local video file and a time range into a finished 1080x1920 clip",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "clipper": "./src/cli.js"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "setup": "node scripts/setup.js"
+  },
+  "dependencies": {
+    "commander": "^15.1.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "vitest": "^5.1.1"
+  }
+}
