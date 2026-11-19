@@ -17,7 +17,7 @@ Read these before changing behaviour:
 npm install                 # Node dependencies
 npm run setup               # Python .venv with faster-whisper; ask the owner first (see below)
 npm test                    # vitest; some tests run the real ffmpeg
-node src/cli.js --help      # the command line: probe, cut, render, check
+node src/cli.js --help      # the command line: probe, cut, render, check, suggest, extract
 npm run dashboard           # build the pages, then serve them at http://127.0.0.1:4517
 npm run dev:web             # only while editing the pages: live reload on port 4518
 ```
@@ -32,7 +32,7 @@ Needs Node 22.12 or later, and `ffmpeg` and `ffprobe` on the PATH built with lib
    - the system's Python venv package, if it is missing (`sudo apt install python3-venv` on Ubuntu)
    - `npm run setup`, which installs faster-whisper with pip into `.venv`
    - the first `cut` with captions on, which downloads the speech model (about 460 MB) to `~/.cache/huggingface`
-4. Source videos go in `in/`, which has to be created by hand. Clips come out in `out/`, which the tool creates. Both are git-ignored, so neither comes with a clone.
+4. Source videos go in `in/`. Clips come out in `out/`, plain parts in `parts/`, and saved matches, cards and compilations in `data/`. The tool creates all four. They are git-ignored, so none comes with a clone.
 
 Clip folders do not move between machines. `work/meta.json` stores the absolute path of the source video and of the end-card image, so `render` fails on a clip whose source is not at that path.
 
@@ -51,15 +51,22 @@ A `cut` runs these steps in order (`src/cut.js`):
 
 `render` repeats steps 6 to 8 from the files in `work/`. `check` repeats only the rules of step 8 and writes nothing.
 
+`src/ai/` holds the two optional AI features: `suggest.js` proposes moments from a whole-video transcript and `fixWords.js` proposes corrections to caption words. They talk to a service only through the small interface in `client.js`, which picks one of two: `claudeCli.js` runs the Claude Code command line (`claude -p`) with the login it already has, and `openai.js` uses an API key. `src/env.js` reads settings from `.env`.
+
+`src/part.js` is the one thing that is not a clip: `extract` saves a time range of a video as it is, at the original size, into `parts/`.
+
+`src/cards/` draws match cards: `templates.js` has one function per kind of card that returns SVG, `measure.js` fits text without a browser, `config.js` holds the lists of goal and red-card types, and `match.js` saves a match with its cards. `src/compilation/` joins videos and cards into one video: `timeline.js` is the saved format, `build.js` renders it, `description.js` writes the credits and chapters. Both are used only from the dashboard.
+
 `src/cli.js` defines the commands and flags. `src/run.js` spawns programs. `src/time.js` parses and formats timestamps. `src/types.js` holds the shared JSDoc types.
 
 ### The dashboard
 
 - `server/` is an Express server (`server/app.js`) that exposes the same engine functions over HTTP. It adds nothing of its own beyond listing files and running slow work as background jobs (`server/jobs.js`). `server/index.js` starts it.
-- `web/` is a Vue 3 app built with Vite into `web/dist`, which the server serves. `NewClip.vue` is the cutting screen, `FramePicker.vue` draws the layout over the video, `ClipView.vue` shows a finished clip, and `api.js` holds every call to the server.
+- `server/cards.js` and `server/compilations.js` hold the routes for the two extra pages, and `web/src/pages/` holds the pages (`CardMaker.vue`, `CompilationBuilder.vue`). The buttons at the top of the left column switch pages; the page is kept after `#` in the address.
+- `web/` is a Vue 3 app built with Vite into `web/dist`, which the server serves. `NewClip.vue` is the cutting screen, `FramePicker.vue` draws the layout over the video, `ClipView.vue` shows a finished clip, `api.js` holds every call to the server, and `jobs.js` keeps the list of work in progress that the status bar and both screens read.
 - The command line and the dashboard are two front ends to `src/`. Behaviour belongs in `src/`, so both get it.
 
-A clip folder holds `clip.mp4` and `post.txt` for the owner, and a `work/` subfolder with `meta.json`, `transcript.json` and `captions.ass` for the tool. Folders from before `work/` existed have those files next to `clip.mp4` and must keep working.
+A clip folder is named after the clip's hook (`out/barca-wants-who`, then `-2`, `-3` when taken), or `clip-NNN` when there is no hook. It holds `clip.mp4` and `post.txt` for the owner, and a `work/` subfolder with `meta.json`, `transcript.json` and `captions.ass` for the tool. Folders from before `work/` existed have those files next to `clip.mp4` and must keep working.
 
 ## Rules that must hold
 
@@ -68,7 +75,7 @@ Each of these exists because something broke or the spec demands it. The evidenc
 - **Never use ffmpeg's `-r` output option.** The frame rate is set by the `fps` filter at the start of the graph. `-r 30` put the picture two frames behind the sound.
 - **`-ss` and `-t` both go before `-i`.** Limiting only the output lets the source keep playing under the end card.
 - **Never put a path inside a filter graph.** ffmpeg runs in the clip's `work/` folder and the graph names `captions.ass` and `fonts` bare. Paths passed as their own arguments are fine.
-- **Keep only the first audio track** (`0:a:0`), mixed to stereo.
+- **Keep only the first audio track** (`0:a:0`), mixed to stereo. A plain part (`src/part.js`) is the exception: it is meant to be the source unchanged, so it keeps every audio track, the original size and the original frame rate.
 - **Spawn with an argument array**, never a shell string. The tool does it through `src/run.js`.
 - **Text drawn on the video goes through `cleanOverlayText`**, because `{`, `}` and `\` are control characters in subtitle files.
 - **The caption font is bundled** (`assets/fonts`), and `src/captions/width.js` holds widths measured for that font. Changing the font means re-measuring the widths, the hook position and the end-card text position.
@@ -80,8 +87,22 @@ Each of these exists because something broke or the spec demands it. The evidenc
 - **The dashboard listens on `127.0.0.1` only**, and `onlyThisMachine` in `server/app.js` refuses requests whose `Host` or `Origin` is not its own. Without that, any web page open in the owner's browser could start cuts.
 - **The browser sends names, never paths.** A video is a file name in `in/`, a clip a folder name in `out/`, a brief a file name in `briefs/`; the server resolves them.
 - **One job at a time.** Two cuts at once could pick the same clip folder.
+- **A clip is deleted only through `removeClip` in `src/cut.js`**, which refuses any folder without a clip's `meta.json`. The page asks for confirmation first, in the page itself and not with a browser dialog, and the server refuses while a job is running.
+- **Work in progress is not kept inside a screen.** The pages read it from `web/src/jobs.js`, which asks the server (`GET /api/jobs`), so progress is still shown after moving to another screen or reloading.
 - **The pages do not redo the engine's arithmetic.** The crop windows drawn over the video come from `describeLayouts` in `src/layout.js`.
 - **A re-rendered clip keeps its address**, so the pages add a version number to it and the server sends it uncached. Otherwise the browser replays the old clip.
+- **The AI key lives only in `.env` or the environment.** Never write it into a file that is tracked, a brief, `meta.json`, a log, or a message to the owner, and never print `.env` or `process.env`. To check that it is set, count the line (`grep -c '^OPENAI_API_KEY=' .env`).
+- **Only the entry points read `.env`**: `src/cli.js` and `server/index.js`, through `loadEnv`. If a module the tests import loaded it, `npm test` could spend the owner's money. Tests use a stand-in for the AI service.
+- **What a model returns is untrusted.** It is validated in our own code (`tidyMoments`, `tidyFixes`), checked against the brief with the ordinary rules, and only ever shown as a proposal: nothing is cut, saved or rendered without the owner pressing a button. Model-written text never goes into a shell command; `suggest` prints only numbers in its `cut` line.
+- **Error messages about the AI service are written here**, not passed on from the service, whose own text can repeat part of the key.
+- **Only text leaves the machine**: transcript words and the brief's rules. No audio, no video, no file names or paths.
+- **Claude Code is run as a question-answerer and nothing else**: with `--tools ""` so it cannot read or change files, `--strict-mcp-config` so no connected services load, `--no-session-persistence`, and from the system's temporary folder so it does not read this project's `CLAUDE.md`. Do not loosen any of these.
+- **A card's preview and its PNG come from the same template function.** The PNG is drawn in the browser (`web/src/cardPng.js`), which writes the bundled font into the SVG first: a picture drawn from SVG cannot load a font from outside itself and would silently use another one.
+- **Everything a person types into a card is escaped** (`escapeXml`), and a team colour is used only if it is a plain `#rrggbb` value.
+- **Cards are text only.** No crests, league logos, player photos or broadcast images, fetched or embedded.
+- **Every segment of a compilation has the same settings and an explicit length**, which is what lets them be joined without encoding again. A change to the segment settings in `src/compilation/build.js` must also change `RECIPE`, or old segments would be reused.
+- **A segment is reused only when everything that went into it is unchanged.** Its file name is a hash of those things, and it is written under a partial name first.
+- **Paths handed to ffmpeg from `build.js` are absolute**, because ffmpeg runs inside the work folder. `list.txt` holds only names the tool made, never one a person typed.
 - **Guardrails from the spec:** local files only, no downloading; no uploading or posting; no feature whose purpose is removing watermarks or logos. `--trim` is capped at 5% of the shorter side for that reason.
 
 ## Adding a flag to `cut`
@@ -121,4 +142,6 @@ Go through each file against what changed since the last push (`git diff origin/
 3. `docs/decisions.md`: an entry for each new choice that is not obvious from the code, with the reason and what was measured.
 4. `docs/roadmap.md`: what is built, what is waiting on the owner, what is not verified, what comes next, and the "Last updated" date.
 
-Read the whole of each file, not only the section you expect to change: a new feature usually makes a sentence somewhere else false. Then run `npm test`, check the new files for names, paths and keys (the repository is public), and say in the report which of the four files changed and which needed nothing.
+Read the whole of each file, not only the section you expect to change: a new feature usually makes a sentence somewhere else false. Then run `npm test`, and say in the report which of the four files changed and which needed nothing.
+
+The repository is public, so before committing look through what is staged for keys: `git diff --cached | grep -nE 'sk-[A-Za-z0-9_-]{12}|API_KEY=.'` must find nothing but placeholder text, and `git check-ignore .env` must succeed.

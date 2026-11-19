@@ -9,6 +9,7 @@
  * @property {string} label     shown to the person waiting
  * @property {'queued' | 'running' | 'done' | 'failed'} status
  * @property {string | null} step      the slow step in progress
+ * @property {unknown} detail          more about the step, such as the state of each item
  * @property {string | null} error
  * @property {unknown} result
  * @property {number} createdAt
@@ -27,13 +28,13 @@ export function createJobs() {
   /**
    * @param {string} kind
    * @param {string} label
-   * @param {(onStep: (step: string) => void) => Promise<unknown>} work
+   * @param {(onStep: (step: string, detail?: unknown) => void) => Promise<unknown>} work
    * @returns {Job}
    */
   function add(kind, label, work) {
     /** @type {Job} */
     const job = {
-      id: String(nextId++), kind, label, status: 'queued', step: null, error: null, result: null,
+      id: String(nextId++), kind, label, status: 'queued', step: null, detail: null, error: null, result: null,
       createdAt: Date.now(), startedAt: null, finishedAt: null,
     };
     jobs.set(job.id, job);
@@ -41,7 +42,10 @@ export function createJobs() {
       job.status = 'running';
       job.startedAt = Date.now();
       try {
-        job.result = await work((step) => (job.step = step));
+        job.result = await work((step, detail = null) => {
+          job.step = step;
+          job.detail = detail;
+        });
         job.status = 'done';
       } catch (error) {
         job.error = error.message;
@@ -62,6 +66,8 @@ export function createJobs() {
   return {
     add,
     get: (id) => jobs.get(id) ?? null,
+    /** Every job still remembered, oldest first. */
+    list: () => [...jobs.values()],
     /** Whether anything is waiting or running. */
     busy: () => [...jobs.values()].some((job) => job.finishedAt === null),
     /** Resolves when everything queued so far has finished. */

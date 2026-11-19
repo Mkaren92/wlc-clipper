@@ -49,6 +49,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
  * @param {object} options
  * @param {{ text: string, start: number, end: number }[]} [options.groups]
  * @param {string | null} [options.hook]
+ * @param {number} [options.hookSeconds]   how long the hook stays; 0 means the whole clip
  * @param {string | null} [options.disclosure]   shown at the top for the first 3 seconds
  * @param {{ text: string, seconds: number } | null} [options.endCard]
  *   text shown on the card, which follows the footage
@@ -56,7 +57,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
  * @param {number} options.clipSeconds   length of the footage, without the card
  * @returns {string}
  */
-export function buildAss({ groups = [], hook = null, disclosure = null, endCard = null, layout, clipSeconds }) {
+export function buildAss({ groups = [], hook = null, hookSeconds = HOOK_SECONDS, disclosure = null, endCard = null, layout, clipSeconds }) {
   const lines = [HEADER];
 
   // 0 means "use the style's margin". \q0 lets these lines wrap; captions
@@ -69,7 +70,9 @@ export function buildAss({ groups = [], hook = null, disclosure = null, endCard 
     lines.push(event(1, 0, end, 'Hook', topMargin, `{\\q0}${cleanOverlayText(disclosure)}`));
   }
   if (hook) {
-    const end = Math.min(HOOK_SECONDS, clipSeconds);
+    // 0 means for as long as the footage runs. The end card is not footage,
+    // so the hook never sits on it.
+    const end = hookSeconds === 0 ? clipSeconds : Math.min(hookSeconds, clipSeconds);
     lines.push(event(1, 0, end, 'Hook', topMargin, `{\\q0}${cleanOverlayText(hook)}`));
   }
   if (endCard?.text) {

@@ -179,6 +179,18 @@ describe('buildAss', () => {
     expect(ass).toContain(',Hook,,0,0,670,,{\\q0}Look at this');
   });
 
+  it('keeps the hook for the chosen time, and for the whole clip when the time is 0', () => {
+    const hookLine = (options) => buildAss({ hook: 'Look', layout: 'center', clipSeconds: 30, ...options }).split('\n').find((line) => line.includes(',Hook,'));
+    expect(hookLine({})).toContain('0:00:00.00,0:00:02.50,Hook');
+    expect(hookLine({ hookSeconds: 6 })).toContain('0:00:00.00,0:00:06.00,Hook');
+    expect(hookLine({ hookSeconds: 0 })).toContain('0:00:00.00,0:00:30.00,Hook');
+    expect(hookLine({ hookSeconds: 99 })).toContain('0:00:00.00,0:00:30.00,Hook');
+    // With an end card the hook stops with the footage, before the card.
+    const withCard = buildAss({ hook: 'Look', hookSeconds: 0, endCard: { text: 'Bye', seconds: 3 }, layout: 'center', clipSeconds: 30 });
+    expect(withCard).toContain('0:00:00.00,0:00:30.00,Hook,,0,0,0,,{\\q0}Look');
+    expect(withCard).toContain('0:00:30.00,0:00:33.00,Hook,,0,0,540,,{\\an2\\q0}Bye');
+  });
+
   it('ends the hook with the clip when the clip is shorter', () => {
     const ass = buildAss({ hook: 'Quick', layout: 'center', clipSeconds: 1.2 });
     expect(ass).toContain('Dialogue: 1,0:00:00.00,0:00:01.20,Hook');

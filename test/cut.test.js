@@ -4,7 +4,7 @@ import { mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promi
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { checkClip, checkRange, cut, localIsoTime, rerender } from '../src/cut.js';
+import { checkClip, checkRange, clipSlug, cut, localIsoTime, rerender } from '../src/cut.js';
 import { probe } from '../src/probe.js';
 import { run } from '../src/run.js';
 
@@ -126,6 +126,17 @@ describe('cut', () => {
     expect(path.basename(second.clipDir)).toBe('clip-002');
   }, 120_000);
 
+  it('names a clip folder after its hook, and adds a number when the name is taken', async () => {
+    const outDir = path.join(dir, 'out-named');
+    const make = (hook) => cut({ source, start: 0, end: 0.5, hook, outDir, toolVersion: 'test', captions: false });
+    const names = [];
+    for (const hook of ['Barca wants WHO?', 'Barca wants WHO?', 'barca  wants who', undefined, '?!', undefined]) {
+      names.push(path.basename((await make(hook)).clipDir));
+    }
+    // A hook with nothing usable in it falls back to a number, like no hook at all.
+    expect(names).toEqual(['barca-wants-who', 'barca-wants-who-2', 'barca-wants-who-3', 'clip-001', 'clip-002', 'clip-003']);
+  }, 120_000);
+
   it('rejects a range that runs past the end of the video', async () => {
     await expect(cut({ source, start: 4, end: 30, outDir: dir, toolVersion: 'test' })).rejects.toThrow(
       /only 0:06\.00 long/,
@@ -181,12 +192,16 @@ describe('captions and hook', () => {
 
   it('still shows the hook with captions off', async () => {
     const { clipDir, meta } = await cut({
-      source, start: 1, end: 2, hook: 'Watch this', captions: false,
+      source, start: 1, end: 2, hook: 'Watch this', hookSeconds: 0, captions: false,
       outDir: path.join(dir, 'out-hook-only'), toolVersion: 'test', transcriber: fakeTranscriber,
     });
     expect(meta.captions).toBe(false);
     expect((await readdir(clipDir)).sort()).toEqual(['clip.mp4', 'work']);
     expect((await readdir(path.join(clipDir, 'work'))).sort()).toEqual(['captions.ass', 'meta.json']);
+    // A hook time of 0 keeps the hook for the whole 1-second clip, and is saved.
+    expect(meta.hookSeconds).toBe(0);
+    expect(await readFile(path.join(clipDir, 'work', 'captions.ass'), 'utf8')).toContain('0:00:00.00,0:00:01.00,Hook');
+    await expect(cut({ source, start: 1, end: 2, hook: 'x', hookSeconds: -1, outDir: dir, toolVersion: 'test' })).rejects.toThrow(/0 or more/);
   }, 120_000);
 
   it('makes the clip without captions when the transcriber is not installed', async () => {
@@ -206,7 +221,7 @@ describe('captions and hook', () => {
     // Rebuild the old shape: every file next to clip.mp4, and a meta.json
     // without the fields that were added later.
     const work = path.join(clipDir, 'work');
-    const { cam, hook, lang, trim, brief, briefPath, checks, ...oldMeta } = JSON.parse(
+    const { cam, hook, hookSeconds, lang, trim, brief, briefPath, checks, ...oldMeta } = JSON.parse(
       await readFile(path.join(work, 'meta.json'), 'utf8'),
     );
     await writeFile(path.join(clipDir, 'meta.json'), JSON.stringify(oldMeta));
@@ -214,7 +229,7 @@ describe('captions and hook', () => {
     await rm(work, { recursive: true });
 
     const again = await rerender(clipDir);
-    expect(again.meta).toMatchObject({ trim: 0, cam: null, hook: null, captions: true, lang: 'en', brief: null });
+    expect(again.meta).toMatchObject({ trim: 0, cam: null, hook: null, hookSeconds: 2.5, captions: true, lang: 'en', brief: null });
     expect(again.meta.output.captionGroups).toBe(1);
     expect((await readdir(clipDir)).sort()).toEqual(['captions.ass', 'clip.mp4', 'meta.json', 'transcript.json']);
     await expect(checkClip(clipDir)).rejects.toThrow(/made without a brief/);
@@ -326,14 +341,29 @@ describe('briefs', () => {
     ).rejects.toThrow(/Length: the clip is 5\.5 s; the brief asks for at most 5 s/);
   });
 
-  it('needs a title, and a brief for a title', async () => {
+  it('needs a title when there is a brief', async () => {
     await expect(cut({ source, start: 1, end: 3, briefFile: briefs.card, outDir: dir, toolVersion: 'test' })).rejects.toThrow(
       /needs a title/,
     );
-    await expect(cut({ source, start: 1, end: 3, title: 'T', outDir: dir, toolVersion: 'test' })).rejects.toThrow(
-      /only written with --brief/,
-    );
   });
+
+  it('saves a title and description without a brief: no hashtags, no checks', async () => {
+    const { clipDir, meta, checks } = await cut({
+      source, start: 1, end: 2, title: 'Araújo over Martínez', description: 'My honest take.', captions: false,
+      outDir: path.join(dir, 'out-post-no-brief'), toolVersion: 'test',
+    });
+    expect(await readFile(path.join(clipDir, 'post.txt'), 'utf8')).toBe('Araújo over Martínez\n\nMy honest take.\n');
+    expect([meta.brief, checks]).toEqual([null, []]);
+
+    // Only a description: the hook becomes the title. Neither given: no post.txt.
+    const hooked = await cut({
+      source, start: 1, end: 2, hook: 'Watch this', description: 'Text.', captions: false,
+      outDir: path.join(dir, 'out-post-no-brief'), toolVersion: 'test',
+    });
+    expect(await readFile(path.join(hooked.clipDir, 'post.txt'), 'utf8')).toBe('Watch this\n\nText.\n');
+    const plain = await cut({ source, start: 1, end: 2, captions: false, outDir: path.join(dir, 'out-post-no-brief'), toolVersion: 'test' });
+    expect((await readdir(plain.clipDir)).sort()).toEqual(['clip.mp4', 'work']);
+  }, 120_000);
 
   it('says a clip without a brief needs one named', async () => {
     const { clipDir } = await cut({
@@ -342,6 +372,25 @@ describe('briefs', () => {
     await expect(checkClip(clipDir)).rejects.toThrow(/made without a brief/);
     expect((await checkClip(clipDir, briefs.strict)).checks.map((c) => c.rule)).toEqual(['Length', 'Forbidden terms', 'Format', 'Full frame']);
   }, 120_000);
+});
+
+describe('clipSlug', () => {
+  it.each([
+    ['Barca wants WHO?', 'barca-wants-who'],
+    ["I'd take Araújo over Martínez", 'i-d-take-araújo-over-martínez'],
+    ['  --He did NOT expect that!!  ', 'he-did-not-expect-that'],
+    ['../../etc/passwd', 'etc-passwd'],
+    ['20K by the end of the year', '20k-by-the-end-of-the-year'],
+    ['?!…', ''],
+  ])('turns %j into %j', (hook, slug) => {
+    expect(clipSlug(hook)).toBe(slug);
+  });
+
+  it('cuts a long hook at a word', () => {
+    const slug = clipSlug('This hook is far too long to fit on the screen in two lines');
+    expect(slug).toBe('this-hook-is-far-too-long-to-fit-on-the-screen-in');
+    expect(slug.length).toBeLessThanOrEqual(50);
+  });
 });
 
 describe('checkRange', () => {

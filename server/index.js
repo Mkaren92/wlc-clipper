@@ -2,7 +2,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadEnv } from '../src/env.js';
 import { createApp } from './app.js';
+
+loadEnv();
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 // Relative paths in briefs (an end-card image) are looked up from here.
@@ -16,6 +19,8 @@ const { app } = createApp({
   inDir: path.join(root, 'in'),
   outDir: path.join(root, 'out'),
   briefsDir: path.join(root, 'briefs'),
+  partsDir: path.join(root, 'parts'),
+  dataDir: path.join(root, 'data'),
   webDir: existsSync(webDir) ? webDir : undefined,
   toolVersion: pkg.version,
 });

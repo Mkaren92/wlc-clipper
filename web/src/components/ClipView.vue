@@ -1,10 +1,10 @@
 <script setup>
 // One finished clip: watch it, see how it did against its brief, copy the
 // post text, and fix caption words.
-import { computed, ref } from 'vue';
+import { computed, onUnmounted, ref } from 'vue';
 import { api } from '../api.js';
 import { clock } from '../format.js';
-import { useJob } from '../useJob.js';
+import { describe, isActive, jobs, track } from '../jobs.js';
 
 const props = defineProps({ name: { type: String, required: true } });
 const emit = defineEmits(['changed']);
@@ -15,7 +15,37 @@ const words = ref([]);
 const postText = ref('');
 const error = ref('');
 const note = ref('');
-const { state: job, follow } = useJob();
+// A render in progress is kept in jobs.js, so it still shows after leaving
+// this screen and coming back.
+let onScreen = true;
+onUnmounted(() => (onScreen = false));
+const renderJob = computed(() => jobs.list.find((j) => j.kind === 'render' && isActive(j) && j.label === props.name));
+const job = computed(() => ({ running: Boolean(renderJob.value) }));
+
+// AI word fixes: proposals are typed into the word boxes for review, and
+// nothing is saved until "Save words and render again" is pressed.
+const ai = ref(null);
+const fixing = ref(false);
+const fixNote = ref('');
+api.ai().then((answer) => (ai.value = answer), () => {});
+
+async function suggestFixes() {
+  fixing.value = true;
+  fixNote.value = '';
+  try {
+    const { fixes } = await api.fixWords(props.name);
+    for (const fix of fixes) {
+      if (words.value[fix.index]) words.value[fix.index].text = fix.to;
+    }
+    fixNote.value = fixes.length === 0
+      ? 'No likely mistakes were found.'
+      : `${fixes.length} ${fixes.length === 1 ? 'word was' : 'words were'} changed and marked. Check them, then save.`;
+  } catch (e) {
+    error.value = e.message;
+  }
+  fixing.value = false;
+}
+const original = (i) => clip.value.transcript.words[i]?.text;
 
 async function load() {
   try {
@@ -76,7 +106,8 @@ async function saveWords() {
 
 async function render() {
   try {
-    await follow(await api.render(props.name));
+    await track(await api.render(props.name));
+    if (!onScreen) return;
     await load();
     emit('changed');
   } catch (e) {
@@ -109,9 +140,8 @@ async function render() {
         <p v-if="meta.hook" class="muted">Hook: “{{ meta.hook }}”</p>
         <div class="row">
           <button class="fixed" :disabled="job.running" @click="render">Render again</button>
-          <span v-if="job.running" role="status">{{ job.text }}</span>
+          <span v-if="renderJob" role="status">{{ describe(renderJob) }}</span>
         </div>
-        <p v-if="job.error" class="error" role="alert">{{ job.error }}</p>
       </section>
 
       <section v-if="brief" class="panel">
@@ -136,7 +166,7 @@ async function render() {
         <div class="row actions">
           <button class="fixed" @click="copy(postTitle, 'the title')">Copy title</button>
           <button class="fixed" @click="copy(postRest, 'the description and hashtags')">Copy description and hashtags</button>
-          <button class="fixed" :disabled="!postChanged" @click="savePost">Save and check again</button>
+          <button class="fixed" :disabled="!postChanged" @click="savePost">{{ brief ? 'Save and check again' : 'Save' }}</button>
           <span role="status" class="muted">{{ note }}</span>
         </div>
       </section>
@@ -147,15 +177,25 @@ async function render() {
         <div class="words">
           <input
             v-for="(word, i) in words" :key="i" v-model="word.text" type="text" class="word"
+            :class="{ changed: word.text !== original(i) }"
             :style="{ width: `${Math.max(2, word.text.length) + 2}ch` }"
-            :title="`${clock(word.start)}–${clock(word.end)}`" :aria-label="`Word ${i + 1}`"
+            :title="word.text !== original(i) ? `Was: ${original(i)}` : `${clock(word.start)}–${clock(word.end)}`"
+            :aria-label="`Word ${i + 1}`"
           />
         </div>
         <div class="row actions">
           <button class="fixed primary" :disabled="!wordsChanged || job.running" @click="saveWords">
             Save words and render again
           </button>
+          <button v-if="ai?.configured" class="fixed" :disabled="fixing || job.running" @click="suggestFixes">
+            {{ fixing ? 'Asking…' : 'Suggest fixes' }}
+          </button>
+          <span role="status" class="muted">{{ fixNote }}</span>
         </div>
+        <p v-if="ai?.configured" class="muted hint">
+          “Suggest fixes” sends these words to {{ ai.service }} and marks what it would change. Hover a marked word to see
+          the original.
+        </p>
       </section>
       <p v-else class="muted">This clip has no captions.</p>
     </div>
@@ -171,5 +211,7 @@ async function render() {
 .actions { margin-top: 10px; align-items: center; }
 .words { display: flex; flex-wrap: wrap; gap: 4px; }
 .word { width: auto; padding: 3px 5px; font-size: 14px; }
+.word.changed { border-color: #e8a020; background: var(--warn-bg); }
+.hint { margin-top: 8px; font-size: 13px; }
 @media (max-width: 800px) { .clip { grid-template-columns: 1fr; } }
 </style>

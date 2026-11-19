@@ -7,6 +7,10 @@ You can use it two ways, and mix them freely:
 - **From the command line**, with `node src/cli.js` (see [Commands](#commands)).
 - **From a dashboard in your browser**, with `npm run dashboard` (see [Dashboard](#dashboard)).
 
+Optionally, an AI service can suggest which moments to clip and fix caption mistakes (see [AI help](#ai-help)).
+
+The dashboard also has two pages for building a longer video out of several pieces: [match cards and compilations](#match-cards-and-compilations).
+
 It works on files already on your disk. It does not download videos and it does not post anything.
 
 ## Requirements
@@ -36,12 +40,12 @@ node src/cli.js probe in/video.mp4
 node src/cli.js cut in/video.mp4 --start 1:00 --end 1:30 --hook "He did NOT expect that"
 
 # Watch it
-xdg-open out/clip-001/clip.mp4
+xdg-open out/he-did-not-expect-that/clip.mp4
 ```
 
 Run `npm link` once if you would rather type `clipper` than `node src/cli.js`. It adds the command to your global npm setup.
 
-Put your source videos in a folder named `in/` (create it yourself; it is git-ignored). `xdg-open` is the Linux command for opening a file; use your system's own on another platform.
+Put your source videos in a folder named `in/` (it is git-ignored, and the dashboard creates it if it is missing). `xdg-open` is the Linux command for opening a file; use your system's own on another platform.
 
 ## Dashboard
 
@@ -54,6 +58,8 @@ npm run dashboard
 Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 
 - **Cut:** pick a video from `in/`, play it, press "Set start here" and "Set end here", choose the layout, and drag the frame over the video to place the crop (or the webcam box for the facecam layout). Add a hook and a brief if you want them, then press "Cut the clip".
+- **Status bar:** while a clip is being cut, rendered again, or searched for moments, a bar at the top says what is happening and at which step. It stays there when you move to another video or clip, and after a page reload. You can start another cut meanwhile; it waits its turn. When a clip is ready, the bar offers "Open".
+- **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
 - **Clip:** watch the result, see each brief rule as Pass or Fail, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
 
 Only this computer can reach the dashboard; it is not visible on your network.
@@ -66,16 +72,111 @@ CLIPPER_PORT=4600 npm run dashboard
 
 `npm run dashboard` builds the pages each time it starts, which takes a second or two. While a clip renders, ffmpeg uses every CPU core for about a minute.
 
-The dashboard and the command line do the same things and share the same `out/` folder, so you can mix them.
+The Clips page and the command line do the same things and share the same `out/` and `parts/` folders, so you can mix them. The Cards and Compilations pages exist only in the dashboard.
+
+## Match cards and compilations
+
+These two dashboard pages are for "goal reaction" compilations: streamers' reaction clips, with a card between them that says what just happened in the match. Open them with the buttons at the top left of the dashboard.
+
+### Cards
+
+1. Press "New match" and enter the two teams, their colours, and optionally the competition and date. These are shared by every card of the match.
+2. Add cards:
+   - **Goal:** scoring team, scorer, assist, minute (with added time, such as 45+2), goal type, and the score after the goal. The assist is left out for a penalty and an own goal.
+   - **Red card:** player, team, minute, straight red or second yellow, and optionally the score.
+   - **Full time:** the final score and the scorers. The lists are filled in from the goal cards; you can edit them, and "Fill from the goal cards" refreshes them.
+3. The preview on the right updates as you type, in either size.
+4. "Save match and cards" stores the match and a picture of each card in both sizes, which is what a compilation uses. "Export PNG" downloads one card at 1920×1080 or 1080×1920.
+
+Every match and every card has a trash icon. It asks once, then deletes for good. Deleting a card of a saved match takes effect straight away, without pressing Save; deleting a match removes its cards and their pictures with it.
+
+Cards are text only, with team colours as plain blocks: no crests, logos or photos. They are drawn with the font bundled in `assets/fonts`, so they look the same on every machine.
+
+To add a goal type, add a line to `GOAL_TYPES` in `src/cards/config.js`.
+
+### Compilations
+
+1. Press "New compilation", name it, and choose the size: 1920×1080 or 1080×1920, both 30 fps.
+2. Add videos. Anything already in the project (`in/`, your parts, your clips) is added without copying. You can also choose files from your computer or drop them on the page; those are copied into `in/`, so they take that much more disk space.
+3. Add cards from a saved match.
+4. Put the items in order by dragging them, or with "Up" and "Down". For each video you can set a start and end in seconds and a credit, the streamer's name, which is shown in the bottom left corner for the whole clip. For each card you set how long it is shown (3 seconds by default). The total length is shown under the list.
+5. Press "Generate the video". Each item shows its progress. When it is done the video plays on the page, with a download link.
+
+Next to the video, `description.txt` lists the credits (each streamer once, in order) and chapter times taken from where the cards fall, starting at 0:00. Players usually want at least three chapters of ten seconds or more before they show them.
+
+Each compilation in the list has a trash icon, which deletes it with its final video and description after asking once. The trash icon on a timeline item only takes that item out of the timeline.
+
+Everything is kept in `data/`: matches in `data/matches`, and each compilation in `data/compilations/<name>` with its `timeline.json`, `final.mp4` and `description.txt`. A compilation can be reopened, changed and generated again. Only the items you changed are made again, so a second run is quick, and a run that failed carries on from where it stopped.
+
+Clips of any size and frame rate can be mixed. Each is fitted inside the chosen size with black bars where needed, and its loudness is levelled so that clips from different streams sit together.
+
+## AI help
+
+Two optional features use an AI service. Everything else works without them.
+
+- **Suggested moments:** proposes ranges worth clipping, each with a reason, a hook, a title and a description.
+- **Caption fixes:** proposes corrections for words the transcriber misheard, such as names.
+
+Both only propose. Nothing is cut, saved or rendered until you press the button yourself.
+
+### Setting it up
+
+There are two services to choose from.
+
+**Claude, through Claude Code.** If [Claude Code](https://claude.com/claude-code) is installed and you have logged in (run `claude` once), nothing else is needed: the tool runs it in the background with the login it already has. No API key. It counts against your Claude plan's usage.
+
+**OpenAI, with an API key.** Put the key in a file named `.env` in the project folder:
+
+```bash
+printf 'OPENAI_API_KEY=%s\n' 'your-key-here' > .env
+```
+
+`.env` is git-ignored, so the key is never pushed.
+
+When both are available, Claude is used. To choose yourself, add a line to `.env`:
+
+```
+CLIPPER_AI=openai
+```
+
+or `CLIPPER_AI=claude`. Restart the dashboard after changing `.env`.
+
+| Service | Default model | Setting to change it |
+|---|---|---|
+| Claude Code | `sonnet` | `CLIPPER_CLAUDE_MODEL`, for example `haiku` or `opus` |
+| OpenAI | `gpt-6.2-sol` | `CLIPPER_AI_MODEL`, for example `gpt-6-luna` |
+
+### What is sent
+
+Only text: the video's transcript, or a clip's caption words, plus the brief's rules. The video, the audio and file names stay on your computer. Speech is still turned into text locally by Whisper.
+
+In testing, suggestions for a 10-minute video took about 6 seconds either way once the transcript existed. With OpenAI it used about 5,300 tokens in and 550 out, around two cents.
+
+### Using it
+
+In the dashboard, press "Suggest moments" on the cutting screen. The first time on a video it transcribes the whole video, which takes a few minutes; the transcript is kept in `out/.cache` for next time. Suggestions appear as a list and as marks above the timeline. "Use this" fills in the range, hook, title and description for you to check before cutting. The suggestion you are working on is highlighted in the list and on the timeline, and one you have sent for cutting is marked "Already cut".
+
+On a clip's screen, "Suggest fixes" marks the caption words it would change. Hover a marked word to see the original, edit as you like, then press "Save words and render again".
+
+From the command line:
+
+```bash
+node src/cli.js suggest in/video.mp4 --count 5
+node src/cli.js suggest in/video.mp4 --brief briefs/forgegui-basic.json
+```
+
+It prints each moment with a `cut` command for its range. Videos longer than 60 minutes are refused.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `probe <file>` | Shows resolution, frame rate, duration, whether the video is vertical, and its audio tracks |
-| `cut <file>` | Produces one finished clip in a new `out/clip-NNN` folder |
+| `cut <file>` | Produces one finished clip in a new folder in `out/`, named after the hook |
 | `render <clip-folder>` | Renders an existing clip folder again, for example after fixing a word in its transcript |
 | `check <clip-folder>` | Checks an existing clip and its `post.txt` against a brief |
+| `suggest <file>` | Asks an AI service for moments worth clipping (see [AI help](#ai-help)) |
+| `extract <file>` | Saves a part of a video as it is, at the original size (see [Plain parts](#plain-parts)) |
 
 Every command has built-in help: `node src/cli.js cut --help`.
 
@@ -89,12 +190,13 @@ Every command has built-in help: `node src/cli.js cut --help`.
 | `--crop-x <pixels>` | Left edge of the crop in source pixels, `center` layout only | centred |
 | `--cam <x,y,w,h>` | Webcam rectangle in source pixels, required for `facecam` | none |
 | `--trim <pixels>` | Cut this many pixels off every edge of the source first | `0` |
-| `--hook <text>` | Line shown at the top for the first 2.5 seconds, up to 60 characters | none |
+| `--hook <text>` | Line shown at the top at the start of the clip, up to 60 characters | none |
+| `--hook-seconds <seconds>` | How long the hook stays on screen; `0` keeps it for the whole clip | `2.5` |
 | `--no-captions` | Skip transcription and captions | captions on |
 | `--lang <code>` | Language spoken in the video | `en` |
 | `--brief <file>` | Campaign brief to follow and check the clip against | none |
-| `--title <text>` | Title for `post.txt`, needs `--brief` | the hook |
-| `--desc <text>` | Description for `post.txt`, needs `--brief` | empty |
+| `--title <text>` | Title for `post.txt` | the hook |
+| `--desc <text>` | Description for `post.txt` | empty |
 | `--out <dir>` | Output folder | `./out` |
 
 Times can be seconds (`754.5`), `mm:ss` (`12:34.5`) or `hh:mm:ss` (`1:02:03`).
@@ -113,12 +215,28 @@ node src/cli.js cut in/video.mp4 --start 1:00 --end 1:30 --crop-x 700
 node src/cli.js cut in/video.mp4 --start 1:00 --end 1:30 --layout facecam --cam 1400,40,480,270
 ```
 
+## Plain parts
+
+Sometimes you only want a piece of the video as it is: the same size and shape, with no reframing, no hook, no captions and no transcription.
+
+```bash
+node src/cli.js extract in/video.mp4 --start 1:00 --end 1:30
+```
+
+In the dashboard, set the start and end on the cutting screen and press "Save this part as it is". The layout, hook and brief settings are ignored for it.
+
+Parts are kept apart from clips: all of them go into one folder, `parts/`, as single files named after the source and the range, such as `video_1m00s-1m30s.mp4`. The dashboard lists them under "Parts" in the left column, where you can play or delete them. To save somewhere else from the command line, add `--out <folder>`.
+
+A part keeps the original size, frame rate and every audio track. It starts and ends exactly where you asked, because the picture is encoded again and not just copied; a 30-second part of a 720p video took about 17 seconds to make.
+
 ## What a clip folder contains
 
+A clip's folder is named after its hook: the hook "Barca wants WHO?" gives `out/barca-wants-who`. If that name is taken, a number is added (`barca-wants-who-2`). A clip cut without a hook gets the next free number: `clip-001`, `clip-002` and so on. The `cut` command prints the folder it wrote.
+
 ```
-out/clip-001/
+out/barca-wants-who/
   clip.mp4            the finished video; this is what you upload
-  post.txt            title, description and hashtags (only with --brief)
+  post.txt            title, description and hashtags (with a brief, a title or a description)
   work/
     transcript.json   the words that were heard, with their times
     meta.json         the options of the run, and the check results
@@ -137,7 +255,7 @@ The transcriber makes mistakes, especially with names. To correct one:
 2. Render the clip again:
 
 ```bash
-node src/cli.js render out/clip-001
+node src/cli.js render out/barca-wants-who
 ```
 
 This skips transcription, so it is quicker than a new `cut`. If the render fails, the old `clip.mp4` is left as it was.
@@ -197,10 +315,10 @@ The end card is added after the footage as a silent tail, so a 30-second range w
 
 ```bash
 # Against the brief it was made with
-node src/cli.js check out/clip-001
+node src/cli.js check out/barca-wants-who
 
 # Against another brief
-node src/cli.js check out/clip-001 --brief briefs/other.json
+node src/cli.js check out/barca-wants-who --brief briefs/other.json
 ```
 
 `check` reads `post.txt` as it stands on disk, so it catches edits you made by hand. It changes nothing.
@@ -233,6 +351,6 @@ To work on the pages with live reload, run the dashboard in one terminal and `np
 
 - Download video from any site
 - Upload or post anywhere
-- Choose the moments for you
+- Cut a clip on its own: the AI only suggests moments, and you choose
 - Follow a moving speaker
 - Remove watermarks or logos

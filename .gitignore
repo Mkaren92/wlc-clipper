@@ -3,3 +3,6 @@ out/
 .venv/
 in/
 web/dist/
+.env
+parts/
+data/

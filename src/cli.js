@@ -2,10 +2,18 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Command, InvalidArgumentError, Option } from 'commander';
+import { getAi } from './ai/client.js';
+import { suggestMoments } from './ai/suggest.js';
+import { loadBrief } from './brief/schema.js';
 import { checkClip, cut, rerender } from './cut.js';
+import { loadEnv } from './env.js';
 import { LAYOUTS } from './layout.js';
+import { savePart } from './part.js';
 import { probe } from './probe.js';
 import { formatClock, parseTime } from './time.js';
+import { getTranscriber } from './transcribe/index.js';
+
+loadEnv();
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -20,6 +28,14 @@ function timeOption(value) {
 function pixelOption(value) {
   if (!/^\d+$/.test(value)) throw new InvalidArgumentError('Give a whole number of pixels.');
   return Number(value);
+}
+
+function secondsOption(value) {
+  const seconds = Number(value);
+  if (value.trim() === '' || !Number.isFinite(seconds) || seconds < 0) {
+    throw new InvalidArgumentError('Give a number of seconds, 0 or more.');
+  }
+  return seconds;
 }
 
 function camOption(value) {
@@ -62,12 +78,13 @@ program
   .option('--crop-x <pixels>', 'left edge of the crop in source pixels, for the center layout', pixelOption)
   .option('--cam <x,y,w,h>', 'webcam rectangle in source pixels, required for the facecam layout', camOption)
   .option('--trim <pixels>', 'cut this many pixels off every edge of the source first, to remove a frame baked into the recording', pixelOption, 0)
-  .option('--hook <text>', 'line shown at the top for the first 2.5 seconds')
+  .option('--hook <text>', 'line shown at the top at the start of the clip')
+  .option('--hook-seconds <seconds>', 'how long the hook stays on screen; 0 keeps it for the whole clip', secondsOption, 2.5)
   .option('--no-captions', 'skip transcription and captions')
   .option('--lang <code>', 'language spoken in the video, passed to the transcriber', 'en')
   .option('--brief <file>', 'campaign brief to follow and check the clip against')
-  .option('--title <text>', 'title for post.txt (needs --brief; defaults to the hook)')
-  .option('--desc <text>', 'description for post.txt (needs --brief)')
+  .option('--title <text>', 'title for post.txt (defaults to the hook)')
+  .option('--desc <text>', 'description for post.txt')
   .option('--out <dir>', 'output folder', './out')
   .action(async (file, options) => {
     report(
@@ -80,6 +97,7 @@ program
         cam: options.cam,
         trim: options.trim,
         hook: options.hook,
+        hookSeconds: options.hookSeconds,
         captions: options.captions,
         lang: options.lang,
         briefFile: options.brief,
@@ -89,6 +107,19 @@ program
         toolVersion: pkg.version,
       }),
     );
+  });
+
+program
+  .command('extract')
+  .description('Save a part of a video as it is: original size, no hook, no captions')
+  .argument('<file>', 'video file')
+  .requiredOption('--start <time>', 'start of the range: seconds, mm:ss or hh:mm:ss', timeOption)
+  .requiredOption('--end <time>', 'end of the range, same formats', timeOption)
+  .option('--out <dir>', 'folder the part is saved in', './parts')
+  .action(async (file, options) => {
+    const part = await savePart({ source: file, start: options.start, end: options.end, outDir: options.out });
+    console.log(`Wrote ${part.file}`);
+    console.log(`${part.width}x${part.height}, ${part.fps} fps, ${part.seconds.toFixed(2)} s`);
   });
 
 program
@@ -108,6 +139,51 @@ program
     const result = await checkClip(clipFolder, options.brief);
     reportChecks(result.checks, result.brief);
   });
+
+program
+  .command('suggest')
+  .description('Ask an AI service for moments worth clipping. Sends the transcript text, not the video')
+  .argument('<file>', 'video file')
+  .option('--count <number>', 'how many moments to propose', pixelOption, 5)
+  .option('--brief <file>', 'campaign brief the clips should follow')
+  .option('--lang <code>', 'language spoken in the video', 'en')
+  .option('--out <dir>', 'output folder; the whole-video transcript is kept in its .cache', './out')
+  .action(async (file, options) => {
+    const ai = getAi();
+    const brief = options.brief ? (await loadBrief(options.brief)).brief : null;
+    const steps = { transcribing: 'Transcribing the whole video (kept for next time)...', thinking: `Asking ${ai.service} (${ai.model})...` };
+    const { moments, usage, fromCache } = await suggestMoments({
+      source: file,
+      count: options.count,
+      brief,
+      lang: options.lang,
+      cacheDir: path.join(path.resolve(options.out), '.cache'),
+      transcriber: getTranscriber(),
+      ai,
+      onStep: (step) => console.log(steps[step] ?? step),
+    });
+    if (fromCache) console.log('Used the transcript kept from an earlier run.');
+    if (moments.length === 0) console.log('No usable moments came back. Try again, or a different --count.');
+
+    moments.forEach((moment, i) => {
+      const seconds = (moment.end - moment.start).toFixed(1);
+      console.log(`\n${i + 1}. ${formatClock(moment.start)} to ${formatClock(moment.end)} (${seconds} s), rated ${moment.score.toFixed(2)}`);
+      console.log(`   Why:   ${moment.reason}`);
+      if (moment.hook) console.log(`   Hook:  ${moment.hook}`);
+      console.log(`   Title: ${moment.title}`);
+      console.log(`   Text:  ${moment.description}`);
+      for (const problem of moment.problems) console.log(`   Brief: ${problem}`);
+      // Only numbers go into the command. The hook and title were written by
+      // a model, so they are shown as text above and never placed in a shell line.
+      console.log(`   Cut:   clipper cut ${shellQuote(file)} --start ${moment.start} --end ${moment.end}`);
+    });
+    console.log(`\nSent ${usage.input} tokens to ${ai.service} and received ${usage.output}.`);
+  });
+
+/** Quote a file name for a shell command line. */
+function shellQuote(text) {
+  return `'${text.replaceAll("'", `'\\''`)}'`;
+}
 
 function report({ clipDir, meta, warnings, checks }) {
   const { output } = meta;

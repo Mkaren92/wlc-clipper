@@ -48,6 +48,7 @@
  * @property {{ x: number, y: number, width: number, height: number } | null} cam
  *   webcam rectangle in source pixels, facecam layout only
  * @property {string | null} hook
+ * @property {number} hookSeconds   how long the hook stays on screen; 0 means the whole clip
  * @property {boolean} captions   whether the clip has a transcript to caption from
  * @property {string} lang
  * @property {string | null} briefPath   the brief file the clip was made with

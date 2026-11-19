@@ -82,6 +82,8 @@ describe('post text', () => {
   it('puts the title first and the hashtags last', () => {
     const text = buildPostText({ title: 'T', description: 'D', hashtags: ['#a', '#b'] });
     expect(text).toBe('T\n\nD\n\n#a #b\n');
+    expect(buildPostText({ title: 'T', description: 'D', hashtags: [] })).toBe('T\n\nD\n');
+    expect(buildPostText({ title: 'T', description: '', hashtags: [] })).toBe('T\n');
   });
 });
 

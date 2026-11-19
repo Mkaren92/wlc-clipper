@@ -16,5 +16,6 @@ export default defineConfig({
   root: import.meta.dirname,
   plugins: [vue()],
   build: { outDir: 'dist', emptyOutDir: true },
-  server: { host: '127.0.0.1', port: 4518, proxy: { '/api': toApi, '/media': toApi } },
+  // The pages share code and the font with the rest of the project (../src, ../assets).
+  server: { host: '127.0.0.1', port: 4518, proxy: { '/api': toApi, '/media': toApi }, fs: { allow: ['..'] } },
 });

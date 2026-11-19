@@ -10,10 +10,12 @@ Version 1 of the spec is complete: all three "evenings".
 - Transcription, word-timed captions, hook line
 - `render` to rebuild a clip after editing its transcript
 - Briefs: validation, `post.txt`, the rule checks, on-screen disclosure, end card, `check`
-- Beyond the spec: `--trim`, `keepFullFrame`, `replacements`, the `work/` subfolder
+- Beyond the spec: `--trim`, `keepFullFrame`, `replacements`, the `work/` subfolder, a hook time setting, clip folders named after the hook, deleting clips, and plain parts (`extract`)
 - A dashboard in the browser (`npm run dashboard`): cut with a visual range and crop, view clips with their checks and post text, fix caption words
+- Two more dashboard pages: a card maker (goal, red card and full-time cards, saved per match, exported as PNG in two sizes) and a compilation builder (videos and cards in order, credits, one final video with a description file)
+- AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-174 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages.
+241 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, and none call the real AI service.
 
 ## Waiting on the owner
 
@@ -21,6 +23,7 @@ Version 1 of the spec is complete: all three "evenings".
 - **The Stitch brief.** Stitch is a second campaign: the spec lists "two real brief files (ForgeGUI and Stitch)" and gives no rules for it.
 - **The ForgeGUI logo.** The spec's example refers to `assets/forgegui-logo.png`, which was never supplied, so the example brief has no `image` line and its end card is plain.
 - **A verdict on caption timing** in continuous speech, judged by eye on real clips. Only word starts after pauses were measured.
+- **What exactly looks wrong.** The owner felt quality was poor across clips, parts and cards. Measurement put it on the source file, not the tool; the owner was asked whether it is blur, blocks, choppy motion or sound, and on which output.
 - **Whether the `small` speech model is accurate enough.** A larger model needs about 1.5 GB more disk and is slower.
 
 ## Not verified
@@ -32,13 +35,15 @@ Version 1 of the spec is complete: all three "evenings".
 - The dashboard was tried in Chrome only, and its facecam box was placed but never used for a real cut.
 - Nothing has been run on Windows or macOS. Windows would need work first: the transcriber's path is `.venv/bin/python`, and each render makes a symbolic link to the fonts folder.
 
-## Next: version 1.1, suggested moments
+## Next
 
-`clipper suggest <file> --count 5 --brief <file>` is in the spec and is not built. It would transcribe the whole source, send the transcript to an LLM through OpenRouter, and print candidate ranges for `clipper cut`. The reply is to be validated with `zod`, and each range snapped to word boundaries and to the brief's length limits.
+Nothing is decided. Ideas the owner has been offered:
 
-In the dashboard, the suggestions would appear as marked ranges on the timeline that can be previewed and cut. The owner was also offered AI-written hooks, titles and descriptions, and AI correction of transcript mistakes; none of that is decided.
-
-It needs an OpenRouter API key from the owner and sends transcripts to an outside service, so it starts only on the owner's explicit go. Keep the key in an environment variable, never in a brief or in the repository. The variable's name and the model to use are not decided; settle both with the owner. It does not depend on the items under "Waiting on the owner".
+- A screen for creating and editing briefs, so the JSON is not edited by hand
+- An option to keep the source's frame rate (60 fps) in clips and compilations, offered after the quality check of 2026-11-19 (see `docs/decisions.md`)
+- Cutting several ranges in one go
+- A larger local speech model, if caption mistakes prove a problem (about 1.5 GB more disk)
+- AI word fixes from the command line; they exist only in the dashboard
 
 ## Later, only if clipping proves worth it
 

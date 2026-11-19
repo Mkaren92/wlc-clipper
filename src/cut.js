@@ -4,7 +4,7 @@ import { runChecks } from './brief/check.js';
 import { buildHashtags, buildPostText, parsePostText } from './brief/postText.js';
 import { applyReplacements } from './brief/replacements.js';
 import { loadBrief } from './brief/schema.js';
-import { buildAss, checkHook, cleanOverlayText } from './captions/ass.js';
+import { buildAss, checkHook, cleanOverlayText, HOOK_SECONDS } from './captions/ass.js';
 import { groupWords } from './captions/group.js';
 import { findPauses, snapToSpeech } from './captions/pauses.js';
 import { buildFilter, OUT_FPS, OUT_HEIGHT, OUT_WIDTH, SUBTITLE_FILE } from './layout.js';
@@ -56,11 +56,13 @@ const LENGTH_TOLERANCE = 0.1;
  * @param {number} [options.trim]
  * @param {{ x: number, y: number, width: number, height: number }} [options.cam]
  * @param {string} [options.hook]
+ * @param {number} [options.hookSeconds]   how long the hook stays; 0 means the whole clip
  * @param {boolean} [options.captions]
  * @param {string} [options.lang]
  * @param {string} [options.briefFile]
  * @param {string} [options.title]         for post.txt; the hook when missing
- * @param {string} [options.description]   for post.txt
+ * @param {string} [options.description]   for post.txt. post.txt is written
+ *   when there is a brief, a title or a description.
  * @param {string} [options.outDir]
  * @param {string} options.toolVersion
  * @param {Transcriber} [options.transcriber]   replaced in tests
@@ -76,6 +78,7 @@ export async function cut({
   trim = 0,
   cam,
   hook,
+  hookSeconds = HOOK_SECONDS,
   captions = true,
   lang = 'en',
   briefFile,
@@ -90,6 +93,9 @@ export async function cut({
   const info = await probe(sourcePath);
   checkRange(start, end, info.duration);
   const hookText = hook === undefined ? null : checkHook(hook);
+  if (!Number.isFinite(hookSeconds) || hookSeconds < 0) {
+    throw new Error('The hook time must be 0 or more seconds. 0 keeps the hook for the whole clip.');
+  }
   // Built here only to reject bad options before anything is written.
   const filter = buildFilter({ layout, source: info, cropX, trim, cam });
 
@@ -120,7 +126,8 @@ export async function cut({
       throw new Error(`The brief "${brief.id}" does not allow this clip:\n${lines.join('\n')}`);
     }
   } else if (title !== undefined || description !== undefined) {
-    throw new Error('--title and --desc go into post.txt, which is only written with --brief.');
+    // No brief: the post text is what was given, with no hashtags and no rules to check.
+    post = { title: cleanLine(title ?? hookText ?? ''), description: (description ?? '').trim(), hashtags: [] };
   }
 
   const warnings = [];
@@ -134,7 +141,7 @@ export async function cut({
     warnings.push('Captions were skipped: the transcriber is not installed. Run "npm run setup" to install it.');
   }
 
-  const clipDir = await nextClipDir(path.resolve(outDir));
+  const clipDir = await nextClipDir(path.resolve(outDir), hookText);
   const workDir = path.join(clipDir, WORK_DIR);
   await mkdir(workDir);
 
@@ -149,6 +156,7 @@ export async function cut({
     trim,
     cam: cam ?? null,
     hook: hookText,
+    hookSeconds,
     captions: wantCaptions,
     lang,
     briefPath,
@@ -258,9 +266,24 @@ export async function saveTranscript(clipDir, transcript) {
 export async function savePostText(clipDir, text) {
   const file = path.join(path.resolve(clipDir), POST_FILE);
   if ((await readIfExists(file)) === null) {
-    throw new Error('This clip has no post.txt, because it was made without a brief.');
+    throw new Error('This clip has no post.txt: it was made without a brief, a title or a description.');
   }
   await writeFile(file, text.endsWith('\n') ? text : `${text}\n`);
+}
+
+/**
+ * Delete a clip folder and everything in it: the clip, its post text and
+ * its working files. This cannot be undone.
+ *
+ * It refuses a folder that does not hold a clip's meta.json, so a mistaken
+ * path cannot remove something else.
+ *
+ * @param {string} clipDir
+ */
+export async function removeClip(clipDir) {
+  const dir = path.resolve(clipDir);
+  await findWorkDir(dir); // throws unless this is a clip folder
+  await rm(dir, { recursive: true });
 }
 
 /**
@@ -311,6 +334,7 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
     const ass = buildAss({
       groups,
       hook: shown.hook,
+      hookSeconds: meta.hookSeconds,
       disclosure: shown.disclosure,
       endCard: shown.endCard ? { text: shown.endCard, seconds: card.seconds } : null,
       layout: meta.layout,
@@ -412,7 +436,7 @@ async function checkAgainst(clipDir, workDir, meta, brief, clip) {
  * @param {string | null} hook
  * @param {Brief | null} brief
  */
-function onScreenTexts(hook, brief) {
+export function onScreenTexts(hook, brief) {
   return {
     hook,
     disclosure: brief?.disclosure.mode === 'onscreen' ? brief.disclosure.text : null,
@@ -447,6 +471,7 @@ async function readMeta(workDir) {
     trim: 0,
     cam: null,
     hook: null,
+    hookSeconds: HOOK_SECONDS,
     captions: false,
     lang: 'en',
     briefPath: null,
@@ -500,20 +525,49 @@ export function checkRange(start, end, duration) {
   }
 }
 
+// Long enough to recognise the clip by, short enough for a folder name.
+const SLUG_MAX_LENGTH = 50;
+
 /**
- * Create and return the next free `clip-NNN` folder inside `outDir`.
+ * Turn a hook into a folder name: lower case, with a dash wherever there
+ * was anything other than a letter or a digit. "Barca wants WHO?" becomes
+ * "barca-wants-who". Returns '' when nothing usable is left.
+ *
+ * @param {string} hook
+ * @returns {string}
+ */
+export function clipSlug(hook) {
+  const slug = hook.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
+  if (slug.length <= SLUG_MAX_LENGTH) return slug;
+  // Too long: cut at the last whole word that fits.
+  const cut = slug.slice(0, SLUG_MAX_LENGTH + 1).replace(/-[^-]*$/, '');
+  return cut || slug.slice(0, SLUG_MAX_LENGTH);
+}
+
+/**
+ * Create and return a new clip folder inside `outDir`.
+ *
+ * With a hook the folder is named after it, with "-2", "-3" and so on added
+ * when that name is taken. Without a hook it is the next free `clip-NNN`.
  *
  * @param {string} outDir
+ * @param {string | null} [hook]
  * @returns {Promise<string>}
  */
-export async function nextClipDir(outDir) {
+export async function nextClipDir(outDir, hook = null) {
   await mkdir(outDir, { recursive: true });
-  const numbers = (await readdir(outDir))
-    .map((name) => /^clip-(\d+)$/.exec(name))
-    .filter(Boolean)
-    .map((match) => Number(match[1]));
-  const next = Math.max(0, ...numbers) + 1;
-  const clipDir = path.join(outDir, `clip-${String(next).padStart(3, '0')}`);
+  const taken = await readdir(outDir);
+
+  const slug = hook ? clipSlug(hook) : '';
+  let name = slug;
+  if (slug) {
+    for (let n = 2; taken.includes(name); n++) name = `${slug}-${n}`;
+  } else {
+    const numbers = taken.map((entry) => /^clip-(\d+)$/.exec(entry)).filter(Boolean).map((match) => Number(match[1]));
+    name = `clip-${String(Math.max(0, ...numbers) + 1).padStart(3, '0')}`;
+  }
+
+  const clipDir = path.join(outDir, name);
   await mkdir(clipDir);
   return clipDir;
 }

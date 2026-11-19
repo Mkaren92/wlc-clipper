@@ -23,13 +23,15 @@ export function buildHashtags(brief) {
 
 /**
  * post.txt: the title on the first line, then the description, then the
- * hashtags on the last line, with a blank line between the three.
+ * hashtags on the last line, with a blank line between the three. Without
+ * hashtags (a clip made with no brief) the last block is left out.
  *
  * @param {{ title: string, description: string, hashtags: string[] }} post
  * @returns {string}
  */
 export function buildPostText({ title, description, hashtags }) {
-  return `${[title, description, hashtags.join(' ')].join('\n\n')}\n`;
+  const blocks = hashtags.length > 0 ? [title, description, hashtags.join(' ')] : [title, description];
+  return `${blocks.join('\n\n').trimEnd()}\n`;
 }
 
 /**
