@@ -121,8 +121,8 @@ export async function extractAudio({ source, start, seconds, workDir }) {
     [
       '-hide_banner', '-loglevel', 'error', '-y',
       '-ss', toSeconds(start),
-      '-i', source,
       '-t', toSeconds(seconds),
+      '-i', source,
       '-vn', '-map', '0:a:0',
       '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
       AUDIO_FILE,

@@ -34,7 +34,9 @@ node src/cli.js cut in/video.mp4 --start 1:00 --end 1:30 --hook "He did NOT expe
 xdg-open out/clip-001/clip.mp4
 ```
 
-Run `npm link` once if you would rather type `clipper` than `node src/cli.js`.
+Run `npm link` once if you would rather type `clipper` than `node src/cli.js`. It adds the command to your global npm setup.
+
+Put your source videos in a folder named `in/` (create it yourself; it is git-ignored). `xdg-open` is the Linux command for opening a file; use your system's own on another platform.
 
 ## Commands
 
@@ -89,11 +91,13 @@ out/clip-001/
   post.txt            title, description and hashtags (only with --brief)
   work/
     transcript.json   the words that were heard, with their times
-    meta.json         every option of the run, and the check results
+    meta.json         the options of the run, and the check results
     captions.ass      the subtitle file that was burned in
 ```
 
 You only need `clip.mp4` to post. The `work` folder is what lets `render` and `check` run on the clip later.
+
+A clip folder belongs to the machine it was made on: `meta.json` stores the full path of the source video, so `render` needs that video to still be there.
 
 ## Fixing a caption
 
@@ -108,7 +112,7 @@ node src/cli.js render out/clip-001
 
 This skips transcription, so it is quicker than a new `cut`. If the render fails, the old `clip.mp4` is left as it was.
 
-For a word that is wrong in every clip, such as a brand name, put a fix in the brief's `replacements` instead.
+For a word that is wrong in every clip, such as a brand name, put a fix in the brief's `replacements`. It is applied when a clip is cut, so it fixes clips made from then on; clips that already exist still need their transcript edited.
 
 ## Briefs
 
@@ -172,9 +176,10 @@ node src/cli.js check out/clip-001 --brief briefs/other.json
 ## Captions
 
 - Words are grouped into lines of at most three words or 18 characters.
-- A new line starts after a pause or at the end of a sentence.
+- A new line starts after a gap of more than 0.4 seconds between words, or at the end of a sentence.
 - Text is upper case, white with a black outline, in the lower part of the frame.
 - The font is Liberation Sans Bold, bundled in `assets/fonts` so clips look the same on every machine.
+- Line widths are known for the letters A to Z, digits and a few signs. Other letters are treated as very wide, so captions in another alphabet come out smaller than they need to be.
 
 Transcription uses the Whisper `small` model on the CPU. On the machine this was built on, a 30-second clip takes about 5 seconds to transcribe and about a minute in total.
 
