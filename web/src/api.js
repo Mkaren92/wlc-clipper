@@ -17,7 +17,9 @@ const enc = encodeURIComponent;
 
 export const api = {
   videos: () => request('/api/videos'),
-  video: (name, trim = 0) => request(`/api/videos/${enc(name)}?trim=${trim}`),
+  deleteVideo: (name) => request(`/api/videos/${enc(name)}`, { method: 'DELETE' }),
+  video: (name, trim = 0, cropWidth) =>
+    request(`/api/videos/${enc(name)}?trim=${trim}${cropWidth ? `&cropWidth=${cropWidth}` : ''}`),
   videoUrl: (name) => `/media/in/${enc(name)}`,
   briefs: () => request('/api/briefs'),
   clips: () => request('/api/clips'),
@@ -46,6 +48,9 @@ export const api = {
     if (!response.ok) throw new Error(data.error ?? `The server answered ${response.status}.`);
     return data;
   },
+  sources: () => request('/api/sources'),
+  saveSources: (sources) => request('/api/sources', { method: 'PUT', body: sources }),
+  fetchVideo: (options) => request('/api/fetch', { method: 'POST', body: options }),
   parts: () => request('/api/parts'),
   partUrl: (name) => `/media/parts/${enc(name)}`,
   savePart: (options) => request('/api/parts', { method: 'POST', body: options }),

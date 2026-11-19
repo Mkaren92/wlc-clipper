@@ -6,6 +6,7 @@ import NewClip from './components/NewClip.vue';
 import TrashButton from './components/TrashButton.vue';
 import CardMaker from './pages/CardMaker.vue';
 import CompilationBuilder from './pages/CompilationBuilder.vue';
+import Sources from './pages/Sources.vue';
 import { clock, fileSize } from './format.js';
 import { describe, isActive, jobs, refresh as refreshJobs, visibleJobs } from './jobs.js';
 
@@ -15,7 +16,7 @@ const parts = ref([]);
 const briefs = ref([]);
 const error = ref('');
 // Which page is open. Kept in the address after #, so a reload stays on it.
-const PAGES = [['clips', 'Clips'], ['cards', 'Cards'], ['compilations', 'Compilations']];
+const PAGES = [['clips', 'Clips'], ['cards', 'Cards'], ['compilations', 'Compilations'], ['sources', 'Sources']];
 const page = ref(PAGES.some(([id]) => id === location.hash.slice(1)) ? location.hash.slice(1) : 'clips');
 function go(id) {
   page.value = id;
@@ -55,6 +56,23 @@ async function deleteClip(name) {
   }
 }
 
+async function deleteVideo(name) {
+  try {
+    await api.deleteVideo(name);
+    confirming.value = '';
+    await refresh();
+    // If the deleted video was on screen, show another one.
+    if (view.value.kind === 'video' && view.value.name === name) {
+      view.value = videos.value.length > 0 ? { kind: 'video', name: videos.value[0].name } : { kind: 'none' };
+    }
+  } catch (e) {
+    confirming.value = '';
+    error.value = e.message;
+  }
+}
+// How many clips were cut from a video: they lose the ability to be rendered again when it goes.
+const clipsFrom = (name) => clips.value.filter((clip) => clip.source === name).length;
+
 async function deletePart(name) {
   try {
     await api.deletePart(name);
@@ -80,6 +98,10 @@ watch(() => jobs.list.filter((job) => !isActive(job)).length, refresh);
 function openJob(job) {
   jobs.dismissed.push(job.id);
   if (job.kind === 'compile') return go('compilations');
+  if (job.kind === 'fetch') {
+    go('clips');
+    return refresh().then(() => (view.value = { kind: 'video', name: job.result.name }));
+  }
   if (job.kind === 'suggest') view.value = { kind: 'video', name: job.label };
   else if (job.kind === 'part') view.value = { kind: 'part', name: job.result.name };
   else openClip(job.kind === 'cut' ? job.result.clip : job.label);
@@ -104,14 +126,27 @@ onMounted(async () => {
       <section>
         <h3>Videos</h3>
         <p v-if="videos.length === 0" class="muted">No videos yet. Put video files in the <code>in</code> folder, then reload.</p>
-        <button
-          v-for="video in videos" :key="video.name" class="item"
-          :class="{ current: view.kind === 'video' && view.name === video.name }"
-          @click="view = { kind: 'video', name: video.name }"
-        >
-          <span class="name">{{ video.name }}</span>
-          <span class="muted">{{ fileSize(video.size) }}</span>
-        </button>
+        <div v-for="video in videos" :key="video.name" class="clip-row">
+          <button
+            class="item" :class="{ current: view.kind === 'video' && view.name === video.name }"
+            @click="view = { kind: 'video', name: video.name }"
+          >
+            <span class="name">{{ video.name }}</span>
+            <span class="muted">{{ fileSize(video.size) }}</span>
+          </button>
+          <TrashButton v-if="confirming !== `video:${video.name}`" :label="`Delete ${video.name}`" @click="confirming = `video:${video.name}`" />
+          <div v-else class="confirm" role="alertdialog" :aria-label="`Delete ${video.name}?`">
+            <span>
+              Delete {{ video.name }} from your videos? This cannot be undone.
+              <template v-if="clipsFrom(video.name) > 0">
+                {{ clipsFrom(video.name) === 1 ? '1 clip was cut from it. It stays' : `${clipsFrom(video.name)} clips were cut from it. They stay` }},
+                but can no longer be rendered again or have caption words fixed.
+              </template>
+            </span>
+            <button class="small danger" @click="deleteVideo(video.name)">Delete</button>
+            <button class="small" @click="confirming = ''">Cancel</button>
+          </div>
+        </div>
       </section>
 
       <section>
@@ -172,6 +207,7 @@ onMounted(async () => {
       </ul>
       <CardMaker v-if="page === 'cards'" />
       <CompilationBuilder v-else-if="page === 'compilations'" />
+      <Sources v-else-if="page === 'sources'" />
       <template v-else>
       <p v-if="error" class="error">{{ error }}</p>
       <NewClip v-if="view.kind === 'video'" :key="view.name" :video="view.name" :briefs="briefs" @done="openClip" />

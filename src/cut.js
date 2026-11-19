@@ -53,6 +53,7 @@ const LENGTH_TOLERANCE = 0.1;
  * @param {number} options.end
  * @param {string} [options.layout]
  * @param {number} [options.cropX]
+ * @param {number} [options.cropWidth]
  * @param {number} [options.trim]
  * @param {{ x: number, y: number, width: number, height: number }} [options.cam]
  * @param {string} [options.hook]
@@ -75,6 +76,7 @@ export async function cut({
   end,
   layout = 'center',
   cropX,
+  cropWidth,
   trim = 0,
   cam,
   hook,
@@ -97,7 +99,7 @@ export async function cut({
     throw new Error('The hook time must be 0 or more seconds. 0 keeps the hook for the whole clip.');
   }
   // Built here only to reject bad options before anything is written.
-  const filter = buildFilter({ layout, source: info, cropX, trim, cam });
+  const filter = buildFilter({ layout, source: info, cropX, cropWidth, trim, cam });
 
   /** @type {Brief | null} */
   let brief = null;
@@ -153,6 +155,7 @@ export async function cut({
     end,
     layout,
     cropX: filter.cropX,
+    cropWidth: filter.cropWidth,
     trim,
     cam: cam ?? null,
     hook: hookText,
@@ -349,6 +352,7 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
     layout: meta.layout,
     source: info,
     cropX: meta.cropX ?? undefined,
+    cropWidth: meta.cropWidth ?? undefined,
     trim: meta.trim,
     cam: meta.cam ?? undefined,
     subtitles,
@@ -468,6 +472,7 @@ async function readMeta(workDir) {
   }
   /** @type {Meta} */
   const meta = {
+    cropWidth: null,
     trim: 0,
     cam: null,
     hook: null,

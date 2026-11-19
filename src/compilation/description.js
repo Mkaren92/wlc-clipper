@@ -6,9 +6,10 @@ import { goalType, minuteLabel, redType } from '../cards/config.js';
  *
  * @param {{ kind: 'video' | 'card', seconds: number, credit?: string, title?: string }[]} items
  *   in order, with the length each one really came out at
+ * @param {Record<string, string>} [links]   a channel link for a credited name, by the name in lower case
  * @returns {string}
  */
-export function buildDescription(items) {
+export function buildDescription(items, links = {}) {
   // Every streamer once, in the order they first appear.
   const credits = [];
   for (const item of items) {
@@ -27,7 +28,8 @@ export function buildDescription(items) {
   if (chapters.length === 0 || Math.floor(chapters[0].at) > 0) chapters.unshift({ at: 0, title: 'Start' });
 
   const lines = ['Credits:'];
-  lines.push(...(credits.length > 0 ? credits.map((name) => `- ${name}`) : ['- (no credits were entered)']));
+  const credit = (name) => (links[name.toLowerCase()] ? `- ${name}: ${links[name.toLowerCase()]}` : `- ${name}`);
+  lines.push(...(credits.length > 0 ? credits.map(credit) : ['- (no credits were entered)']));
   lines.push('', 'Chapters:', ...chapters.map((chapter) => `${chapterTime(chapter.at)} ${chapter.title}`));
   return `${lines.join('\n')}\n`;
 }

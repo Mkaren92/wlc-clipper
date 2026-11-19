@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildFilter } from '../src/layout.js';
+import { buildFilter, describeLayouts } from '../src/layout.js';
 
 const landscape = { width: 1920, height: 1080 };
 
@@ -35,6 +35,58 @@ describe('center layout', () => {
     expect(() => buildFilter({ layout: 'center', source: { width: 720, height: 1280 }, cropX: 10 })).toThrow(
       /wider than 9:16/,
     );
+  });
+});
+
+describe('center layout with a wider crop', () => {
+  it('shows a wider crop whole, over a blurred copy of itself', () => {
+    const { graph, cropX, cropWidth } = buildFilter({ layout: 'center', source: landscape, cropWidth: 1000 });
+    expect(graph).toBe([
+      '[0:v]fps=30,crop=1000:1080:460:0,split=2[a][b]',
+      '[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:5[bg]',
+      '[b]scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2[fg]',
+      '[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]',
+    ].join(';'));
+    expect([cropX, cropWidth]).toEqual([460, 1000]);
+  });
+
+  it('moves the wider crop with --crop-x and keeps it inside the frame', () => {
+    expect(buildFilter({ layout: 'center', source: landscape, cropWidth: 1000, cropX: 100 }).graph).toContain('crop=1000:1080:100:0');
+    expect(buildFilter({ layout: 'center', source: landscape, cropWidth: 1000, cropX: 5000 }).cropX).toBe(920);
+    // After a trim, the frame it has to stay inside is smaller.
+    expect(buildFilter({ layout: 'center', source: landscape, cropWidth: 1000, cropX: 0, trim: 10 }).graph).toContain('crop=1000:1060:10:10');
+  });
+
+  it('is the plain column at the smallest width, with the graph unchanged', () => {
+    const plain = buildFilter({ layout: 'center', source: landscape });
+    for (const cropWidth of [606, 607, 100, 0]) {
+      expect(buildFilter({ layout: 'center', source: landscape, cropWidth })).toEqual(plain);
+    }
+    expect(plain.cropWidth).toBeNull();
+  });
+
+  it('takes at most the whole width, and an even number of pixels', () => {
+    const whole = buildFilter({ layout: 'center', source: landscape, cropWidth: 5000 });
+    expect(whole.graph).toContain('crop=1920:1080:0:0');
+    expect([whole.cropX, whole.cropWidth]).toEqual([0, 1920]);
+    expect(buildFilter({ layout: 'center', source: landscape, cropWidth: 1001 }).cropWidth).toBe(1000);
+  });
+
+  it('refuses a width on the other layouts, and on a source that is not wider than 9:16', () => {
+    expect(() => buildFilter({ layout: 'blur', source: landscape, cropWidth: 1000 })).toThrow(/--crop-width only applies to the center layout/);
+    expect(() => buildFilter({ layout: 'facecam', source: landscape, cropWidth: 1000, cam: { x: 0, y: 0, width: 400, height: 237 } })).toThrow(/center layout/);
+    expect(() => buildFilter({ layout: 'center', source: { width: 720, height: 1280 }, cropWidth: 700 })).toThrow(/--crop-width needs a source wider than 9:16/);
+  });
+
+  it('describes the same window for a screen to draw, with the range the width can take', () => {
+    expect(describeLayouts(landscape).center).toEqual({ x: 657, y: 0, width: 606, height: 1080, minX: 0, maxX: 1314 });
+    expect(describeLayouts(landscape).centerWidths).toEqual({ min: 606, max: 1920 });
+    expect(describeLayouts(landscape, 0, 1000).center).toEqual({ x: 460, y: 0, width: 1000, height: 1080, minX: 0, maxX: 920 });
+    expect(describeLayouts(landscape, 10, 1000)).toMatchObject({
+      center: { x: 460, y: 10, width: 1000, height: 1060, minX: 10, maxX: 910 },
+      centerWidths: { min: 596, max: 1900 },
+    });
+    expect(describeLayouts({ width: 720, height: 1280 }, 0, 700)).toMatchObject({ center: { width: 720, minX: null }, centerWidths: null });
   });
 });
 

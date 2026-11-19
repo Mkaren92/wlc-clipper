@@ -92,7 +92,7 @@ function resizeCam(event) {
       @error="$emit('unplayable')"
     />
 
-    <!-- center: everything outside the 9:16 window is dimmed -->
+    <!-- center: everything outside the crop is dimmed -->
     <div
       v-if="layout === 'center'" class="window dim" :class="{ slide: canSlide }"
       :style="place(centerBox)" @pointerdown="slideCenter"

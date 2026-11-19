@@ -1,5 +1,5 @@
-// Installs the transcriber: a Python virtual environment in .venv with
-// faster-whisper inside it. Run with: npm run setup
+// Installs the transcriber and the downloader: a Python virtual environment
+// in .venv with faster-whisper and yt-dlp inside it. Run with: npm run setup
 import { spawnSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
@@ -27,7 +27,14 @@ if (!existsSync(path.join(venv, 'bin', 'pip'))) {
   }
 }
 
-if (!step('Installing faster-whisper into .venv', python, ['-m', 'pip', 'install', 'faster-whisper'])) {
+// faster-whisper turns speech into text for captions. It is left at the
+// version already installed, so running this again does not change captions.
+// yt-dlp is the downloader behind "fetch"; it is brought up to date every
+// time, because YouTube changes often and old versions stop working.
+const installed =
+  step('Installing faster-whisper into .venv', python, ['-m', 'pip', 'install', 'faster-whisper']) &&
+  step('Installing or updating yt-dlp in .venv', python, ['-m', 'pip', 'install', '--upgrade', 'yt-dlp']);
+if (!installed) {
   console.error('\nThe install failed. Fix the error above, then run "npm run setup" again.');
   process.exit(1);
 }

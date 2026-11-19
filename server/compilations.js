@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import { buildCompilation } from '../src/compilation/build.js';
 import { compilationDir, deleteCompilation, listCompilations, newCompilationId, readTimeline, saveTimeline } from '../src/compilation/timeline.js';
 import { probe } from '../src/probe.js';
+import { creditLinks, readSources } from '../src/sources.js';
 import { HttpError } from './http.js';
 
 /**
@@ -74,6 +75,7 @@ export function addCompilationRoutes(app, { dataDir, inDir, jobs, resolveVideo, 
       onStep('items', { items: states });
       const built = await buildCompilation({
         timeline, dataDir, resolveVideo,
+        links: creditLinks(await readSources(dataDir)),
         onProgress: (progress) => {
           if (progress.joining) return onStep('joining', { items: [...states] });
           states[progress.index] = progress.status;

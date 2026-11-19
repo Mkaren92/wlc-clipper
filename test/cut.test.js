@@ -118,6 +118,26 @@ describe('cut', () => {
     });
   }, 120_000);
 
+  it('renders a wider crop as 1080x1920, in step, and again from its saved settings', async () => {
+    // 1006 px of a 1080 px high frame comes to 1159.4 px high on screen, an
+    // odd number that the encoder would refuse if it were not made even.
+    const { clipDir, meta } = await cut({
+      source, start: 1, end: 4, layout: 'center', cropWidth: 1006, cropX: 300,
+      outDir: path.join(dir, 'out-wide'), toolVersion: 'test', captions: false,
+    });
+    expect(meta).toMatchObject({ layout: 'center', cropX: 300, cropWidth: 1006 });
+    const clipFile = path.join(clipDir, 'clip.mp4');
+    const clip = await probe(clipFile);
+    expect([clip.width, clip.height, clip.fps]).toEqual([1080, 1920, 30]);
+    const frame = 1 / 30;
+    expect(Math.abs((await firstBrightFrame(clipFile)) - (SIGNAL_AT - 1))).toBeLessThan(frame);
+    expect(Math.abs((await firstSound(clipFile)) - (SIGNAL_AT - 1))).toBeLessThan(frame);
+
+    const again = await rerender(clipDir);
+    expect(again.meta).toMatchObject({ cropX: 300, cropWidth: 1006 });
+    expect((await probe(clipFile)).height).toBe(1920);
+  }, 120_000);
+
   it('numbers clip folders in order', async () => {
     const outDir = path.join(dir, 'out-numbering');
     const first = await cut({ source, start: 0, end: 0.5, outDir, toolVersion: 'test', captions: false });
@@ -221,7 +241,7 @@ describe('captions and hook', () => {
     // Rebuild the old shape: every file next to clip.mp4, and a meta.json
     // without the fields that were added later.
     const work = path.join(clipDir, 'work');
-    const { cam, hook, hookSeconds, lang, trim, brief, briefPath, checks, ...oldMeta } = JSON.parse(
+    const { cam, cropWidth, hook, hookSeconds, lang, trim, brief, briefPath, checks, ...oldMeta } = JSON.parse(
       await readFile(path.join(work, 'meta.json'), 'utf8'),
     );
     await writeFile(path.join(clipDir, 'meta.json'), JSON.stringify(oldMeta));
@@ -229,7 +249,7 @@ describe('captions and hook', () => {
     await rm(work, { recursive: true });
 
     const again = await rerender(clipDir);
-    expect(again.meta).toMatchObject({ trim: 0, cam: null, hook: null, hookSeconds: 2.5, captions: true, lang: 'en', brief: null });
+    expect(again.meta).toMatchObject({ cropWidth: null, trim: 0, cam: null, hook: null, hookSeconds: 2.5, captions: true, lang: 'en', brief: null });
     expect(again.meta.output.captionGroups).toBe(1);
     expect((await readdir(clipDir)).sort()).toEqual(['captions.ass', 'clip.mp4', 'meta.json', 'transcript.json']);
     await expect(checkClip(clipDir)).rejects.toThrow(/made without a brief/);

@@ -7,6 +7,9 @@ const STEP_NAMES = {
   transcribing: 'transcribing the speech',
   rendering: 'rendering',
   items: 'making the segments',
+  looking: 'looking the video up',
+  fetching: 'downloading the part',
+  tidying: 'preparing the video',
   joining: 'joining them',
   checking: 'checking the result',
   thinking: 'waiting for the AI service',
@@ -86,6 +89,7 @@ export function describe(job) {
     cut: `Cutting ${job.label}`,
     part: `Saving part of ${job.label}`,
     compile: `Generating ${job.label}`,
+    fetch: `Fetching ${job.label}`,
     render: `Rendering ${job.label} again`,
     suggest: `Finding moments in ${job.label}`,
   }[job.kind] ?? job.label;
@@ -99,6 +103,7 @@ export function describe(job) {
     cut: `${job.result.clip} is ready.`,
     part: `${job.result.name} is saved.`,
     compile: `${job.label} is ready.`,
+    fetch: `${job.result?.name} is in your videos.${job.result?.early > 0.05 ? ` It starts ${job.result.early.toFixed(1)} s before the time you asked.` : ''}`,
     render: `${job.label} was rendered again.`,
     suggest: `Suggestions for ${job.label} are ready.`,
   }[job.kind];

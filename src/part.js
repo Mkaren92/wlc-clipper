@@ -76,11 +76,11 @@ export async function savePart({ source, start, end, outDir = './parts' }) {
  */
 export function partName(source, start, end) {
   const base = clipSlug(path.basename(source, path.extname(source))) || 'video';
-  return `${base}_${stamp(start)}-${stamp(end)}.mp4`;
+  return `${base}_${rangeStamp(start)}-${rangeStamp(end)}.mp4`;
 }
 
 /** Seconds as a compact time for a file name: 1m00s, 1m02.5s, 1h02m03s. */
-function stamp(seconds) {
+export function rangeStamp(seconds) {
   const tenths = Math.round(seconds * 10);
   const s = (tenths % 600) / 10;
   const m = Math.floor(tenths / 600) % 60;

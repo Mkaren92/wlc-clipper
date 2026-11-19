@@ -15,14 +15,14 @@ Read these before changing behaviour:
 
 ```bash
 npm install                 # Node dependencies
-npm run setup               # Python .venv with faster-whisper; ask the owner first (see below)
+npm run setup               # Python .venv with faster-whisper and yt-dlp; ask the owner first (see below)
 npm test                    # vitest; some tests run the real ffmpeg
-node src/cli.js --help      # the command line: probe, cut, render, check, suggest, extract
+node src/cli.js --help      # the command line: probe, cut, render, check, suggest, extract, fetch
 npm run dashboard           # build the pages, then serve them at http://127.0.0.1:4517
 npm run dev:web             # only while editing the pages: live reload on port 4518
 ```
 
-Needs Node 22.12 or later, and `ffmpeg` and `ffprobe` on the PATH built with libass. Captions also need Python 3 with the venv module. It has only been run on Linux.
+Needs Node 22.12 or later, and `ffmpeg` and `ffprobe` on the PATH built with libass. Captions and `fetch` also need Python 3 with the venv module. It has only been run on Linux.
 
 ## On a new machine
 
@@ -30,7 +30,7 @@ Needs Node 22.12 or later, and `ffmpeg` and `ffprobe` on the PATH built with lib
 2. Check `ffmpeg -version`. The measurements in `docs/decisions.md` were taken on 4.4.2.
 3. Captions need three things that each install or download something. Ask the owner before each one:
    - the system's Python venv package, if it is missing (`sudo apt install python3-venv` on Ubuntu)
-   - `npm run setup`, which installs faster-whisper with pip into `.venv`
+   - `npm run setup`, which installs faster-whisper and yt-dlp with pip into `.venv`
    - the first `cut` with captions on, which downloads the speech model (about 460 MB) to `~/.cache/huggingface`
 4. Source videos go in `in/`. Clips come out in `out/`, plain parts in `parts/`, and saved matches, cards and compilations in `data/`. The tool creates all four. They are git-ignored, so none comes with a clone.
 
@@ -57,12 +57,14 @@ A `cut` runs these steps in order (`src/cut.js`):
 
 `src/cards/` draws match cards: `templates.js` has one function per kind of card that returns SVG, `measure.js` fits text without a browser, `config.js` holds the lists of goal and red-card types, and `match.js` saves a match with its cards. `src/compilation/` joins videos and cards into one video: `timeline.js` is the saved format, `build.js` renders it, `description.js` writes the credits and chapters. Both are used only from the dashboard.
 
+`src/sources.js` is the list of channels and whether each has agreed, and `src/fetch.js` brings part of a YouTube video into `in/` with `yt-dlp`. They are the only code that takes anything from outside.
+
 `src/cli.js` defines the commands and flags. `src/run.js` spawns programs. `src/time.js` parses and formats timestamps. `src/types.js` holds the shared JSDoc types.
 
 ### The dashboard
 
 - `server/` is an Express server (`server/app.js`) that exposes the same engine functions over HTTP. It adds nothing of its own beyond listing files and running slow work as background jobs (`server/jobs.js`). `server/index.js` starts it.
-- `server/cards.js` and `server/compilations.js` hold the routes for the two extra pages, and `web/src/pages/` holds the pages (`CardMaker.vue`, `CompilationBuilder.vue`). The buttons at the top of the left column switch pages; the page is kept after `#` in the address.
+- `server/cards.js`, `server/compilations.js` and `server/sources.js` hold the routes for the three extra pages, and `web/src/pages/` holds the pages (`CardMaker.vue`, `CompilationBuilder.vue`, `Sources.vue`). The buttons at the top of the left column switch pages; the page is kept after `#` in the address.
 - `web/` is a Vue 3 app built with Vite into `web/dist`, which the server serves. `NewClip.vue` is the cutting screen, `FramePicker.vue` draws the layout over the video, `ClipView.vue` shows a finished clip, `api.js` holds every call to the server, and `jobs.js` keeps the list of work in progress that the status bar and both screens read.
 - The command line and the dashboard are two front ends to `src/`. Behaviour belongs in `src/`, so both get it.
 
@@ -87,7 +89,7 @@ Each of these exists because something broke or the spec demands it. The evidenc
 - **The dashboard listens on `127.0.0.1` only**, and `onlyThisMachine` in `server/app.js` refuses requests whose `Host` or `Origin` is not its own. Without that, any web page open in the owner's browser could start cuts.
 - **The browser sends names, never paths.** A video is a file name in `in/`, a clip a folder name in `out/`, a brief a file name in `briefs/`; the server resolves them.
 - **One job at a time.** Two cuts at once could pick the same clip folder.
-- **A clip is deleted only through `removeClip` in `src/cut.js`**, which refuses any folder without a clip's `meta.json`. The page asks for confirmation first, in the page itself and not with a browser dialog, and the server refuses while a job is running.
+- **A clip is deleted only through `removeClip` in `src/cut.js`**, which refuses any folder without a clip's `meta.json`. The page asks for confirmation first, in the page itself and not with a browser dialog, and the server refuses while a job is running. A video in `in/` and a part are deleted by name with the same two safeguards.
 - **Work in progress is not kept inside a screen.** The pages read it from `web/src/jobs.js`, which asks the server (`GET /api/jobs`), so progress is still shown after moving to another screen or reloading.
 - **The pages do not redo the engine's arithmetic.** The crop windows drawn over the video come from `describeLayouts` in `src/layout.js`.
 - **A re-rendered clip keeps its address**, so the pages add a version number to it and the server sends it uncached. Otherwise the browser replays the old clip.
@@ -103,7 +105,12 @@ Each of these exists because something broke or the spec demands it. The evidenc
 - **Every segment of a compilation has the same settings and an explicit length**, which is what lets them be joined without encoding again. A change to the segment settings in `src/compilation/build.js` must also change `RECIPE`, or old segments would be reused.
 - **A segment is reused only when everything that went into it is unchanged.** Its file name is a hash of those things, and it is written under a partial name first.
 - **Paths handed to ffmpeg from `build.js` are absolute**, because ffmpeg runs inside the work folder. `list.txt` holds only names the tool made, never one a person typed.
-- **Guardrails from the spec:** local files only, no downloading; no uploading or posting; no feature whose purpose is removing watermarks or logos. `--trim` is capped at 5% of the shorter side for that reason.
+- **`fetch` is the one exception to "local files only", and it stays narrow.** It takes YouTube links to a single video, a time range of at most 20 minutes and never a whole video, and only from a channel whose entry in the sources list is marked `agreed`. The channel is read from the video's own data, not from anything typed. Do not widen any of these, add other sites, or add a way around the sources list, without the owner asking for exactly that. Marking a channel as agreed is the owner's to do, on their word.
+- **A link handed to the downloader goes after `--`** and has been rebuilt from a checked video id, so it can never be read as an option.
+- **A fetched part has nothing hidden at its start.** `removeHiddenLeadIn` in `src/fetch.js` rewrites every download so the picture and the sound both begin at zero; the picture is copied, never encoded again. Without it the sound played almost 3 s away from the picture. A download that cannot be rewritten is removed, not kept.
+- **A fetched file is named by the tool**: the channel's name from the sources list, the video id that was checked in the link, and the range. Nothing the downloader reports goes into a file name.
+- **Running `npm run setup` again must not change the transcriber.** It updates `yt-dlp` only; faster-whisper stays at the version the captions were tested with.
+- **Guardrails from the spec:** local files only apart from `fetch`; no uploading or posting; no feature whose purpose is removing watermarks or logos. `--trim` is capped at 5% of the shorter side for that reason.
 
 ## Adding a flag to `cut`
 

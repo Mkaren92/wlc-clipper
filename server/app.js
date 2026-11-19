@@ -16,6 +16,7 @@ import { addCardRoutes } from './cards.js';
 import { addCompilationRoutes } from './compilations.js';
 import { HttpError } from './http.js';
 import { createJobs } from './jobs.js';
+import { addSourceRoutes } from './sources.js';
 
 const VIDEO_TYPES = new Set(['.mp4', '.mov', '.mkv', '.webm', '.m4v', '.avi']);
 // A clip's folder name: its hook turned into a slug, or clip-NNN. Letters,
@@ -41,6 +42,7 @@ const cutRequest = z.strictObject({
   end: time,
   layout: z.enum(LAYOUTS).default('center'),
   cropX: pixels.optional(),
+  cropWidth: pixels.optional(),
   cam: z.strictObject({ x: pixels, y: pixels, width: pixels, height: pixels }).optional(),
   trim: pixels.default(0),
   hook: optionalText,
@@ -78,8 +80,9 @@ const suggestRequest = z.strictObject({
  * @param {string} options.toolVersion
  * @param {import('../src/transcribe/index.js').Transcriber} [options.transcriber]   replaced in tests
  * @param {import('../src/ai/client.js').Ai} [options.ai]   replaced in tests
+ * @param {import('../src/fetch.js').Downloader} [options.downloader]   replaced in tests
  */
-export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, webDir, toolVersion, transcriber, ai = getAi() }) {
+export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, webDir, toolVersion, transcriber, ai = getAi(), downloader }) {
   const app = express();
   const jobs = createJobs();
 
@@ -106,8 +109,12 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, webDir,
     const file = await videoPath(req.params.name);
     const trim = Number(req.query.trim ?? 0);
     if (!Number.isInteger(trim) || trim < 0) throw new HttpError(400, 'trim must be a whole number of pixels.');
+    const cropWidth = req.query.cropWidth === undefined ? undefined : Number(req.query.cropWidth);
+    if (cropWidth !== undefined && (!Number.isInteger(cropWidth) || cropWidth < 0)) {
+      throw new HttpError(400, 'cropWidth must be a whole number of pixels.');
+    }
     const { path: _path, ...info } = await probe(file);
-    res.json({ name: req.params.name, ...info, layouts: describeLayouts(info, trim) });
+    res.json({ name: req.params.name, ...info, layouts: describeLayouts(info, trim, cropWidth) });
   });
 
   app.get('/media/in/:name', async (req, res) => {
@@ -237,6 +244,13 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, webDir,
 
   // --- Parts: a time range of a video, saved as it is --------------------------
 
+  // Deletes one video from the videos folder. Clips already cut from it stay.
+  app.delete('/api/videos/:name', async (req, res) => {
+    notWhileBusy();
+    await rm(await videoPath(req.params.name));
+    res.json({ ok: true });
+  });
+
   app.get('/api/parts', async (req, res) => {
     const names = (await listDir(partsDir)).filter(isPartName);
     const parts = await Promise.all(
@@ -336,6 +350,10 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, webDir,
   }
   const isVideoName = (name) => isPlainName(name) && VIDEO_TYPES.has(extension(name));
   addCompilationRoutes(app, { dataDir, inDir, jobs, resolveVideo, isVideoName });
+
+  // --- Sources and fetching (server/sources.js) ------------------------------
+
+  addSourceRoutes(app, { dataDir, inDir, jobs, downloader });
 
   // --- The pages themselves -------------------------------------------------
 

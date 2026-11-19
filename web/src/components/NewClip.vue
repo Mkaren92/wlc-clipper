@@ -28,6 +28,8 @@ const start = ref('0');
 const end = ref('');
 const layout = ref('center');
 const cropX = ref(undefined);
+// Width of the center crop in source pixels; undefined is the 9:16 column.
+const cropWidth = ref(undefined);
 const cam = ref(undefined);
 const trim = ref(0);
 const hook = ref('');
@@ -103,20 +105,36 @@ function useMoment(moment) {
   seek(moment.start);
 }
 
+// The windows are asked for again on every change of the trim or the crop
+// width. Only the latest answer is used, so a slow one cannot undo a newer one.
+let asked = 0;
 async function loadInfo() {
+  const mine = ++asked;
   try {
-    info.value = await api.video(props.video, trim.value || 0);
+    const answer = await api.video(props.video, trim.value || 0, cropWidth.value);
+    if (mine !== asked) return;
+    info.value = answer;
     loadError.value = '';
     duration.value ||= info.value.duration;
     if (!end.value) end.value = String(Math.min(30, Math.floor(info.value.duration)));
     // A crop chosen before the trim changed may now lie outside the frame.
     const { minX, maxX } = info.value.layouts.center;
     if (cropX.value !== undefined && minX !== null) cropX.value = Math.min(Math.max(cropX.value, minX), maxX);
+    // The same for a width chosen before the trim changed.
+    const widths = info.value.layouts.centerWidths;
+    if (cropWidth.value !== undefined && (!widths || cropWidth.value <= widths.min)) cropWidth.value = undefined;
+    else if (cropWidth.value !== undefined && cropWidth.value > widths.max) cropWidth.value = widths.max;
   } catch (error) {
-    loadError.value = error.message;
+    if (mine === asked) loadError.value = error.message;
   }
 }
-watch(trim, loadInfo, { immediate: true });
+watch([trim, cropWidth], loadInfo, { immediate: true });
+
+// The slider's lowest position is the 9:16 column, which is "no width chosen".
+const widthSlider = computed({
+  get: () => cropWidth.value ?? info.value?.layouts.centerWidths?.min,
+  set: (value) => (cropWidth.value = value <= info.value.layouts.centerWidths.min ? undefined : value),
+});
 
 // Give the webcam box a starting place the first time facecam is chosen.
 watch(layout, (name) => {
@@ -197,6 +215,7 @@ async function cut() {
       end: end.value,
       layout: layout.value,
       cropX: layout.value === 'center' ? cropX.value : undefined,
+      cropWidth: layout.value === 'center' ? cropWidth.value : undefined,
       cam: layout.value === 'facecam' ? cam.value : undefined,
       trim: trim.value || 0,
       hook: hook.value,
@@ -344,6 +363,20 @@ async function cut() {
             <label for="trim">Trim each edge (pixels)</label>
             <input id="trim" v-model.number="trim" type="number" min="0" />
           </div>
+        </div>
+        <div v-if="layout === 'center' && info?.layouts.centerWidths" class="wider">
+          <label for="crop-width">Show more of the picture</label>
+          <input
+            id="crop-width" v-model.number="widthSlider" type="range" step="2"
+            :min="info.layouts.centerWidths.min" :max="info.layouts.centerWidths.max"
+          />
+          <p class="muted length">
+            <template v-if="cropWidth === undefined">The crop is the 9:16 column and fills the screen.</template>
+            <template v-else>
+              The crop is {{ info.layouts.center.width }} px wide. It is shown whole, with a blurred copy above and below.
+              <button class="small" @click="cropWidth = undefined">Back to the column</button>
+            </template>
+          </p>
         </div>
         <p v-if="layout === 'center' && cropX !== undefined" class="muted length">
           Crop starts {{ cropX }} px from the left. <button class="small" @click="cropX = undefined">Centre it</button>

@@ -11,13 +11,13 @@ Optionally, an AI service can suggest which moments to clip and fix caption mist
 
 The dashboard also has two pages for building a longer video out of several pieces: [match cards and compilations](#match-cards-and-compilations).
 
-It works on files already on your disk. It does not download videos and it does not post anything.
+It works on files on your disk and it does not post anything. The one way video comes in from outside is [`fetch`](#sources-and-fetching), which takes part of a YouTube video from a channel you have marked as agreed.
 
 ## Requirements
 
 - Node.js 22.12 or later
 - `ffmpeg` and `ffprobe` on the PATH, built with libass (check: `ffmpeg -filters | grep subtitles`)
-- Python 3 with the venv module, only for captions (on Ubuntu: `sudo apt install python3-venv`)
+- Python 3 with the venv module, only for captions and for fetching from YouTube (on Ubuntu: `sudo apt install python3-venv`)
 
 ## Setup
 
@@ -26,9 +26,11 @@ npm install
 npm run setup
 ```
 
-`npm run setup` creates a `.venv` folder in the project and installs faster-whisper into it. The speech model (about 460 MB) is downloaded to `~/.cache/huggingface` the first time a clip is transcribed.
+`npm run setup` creates a `.venv` folder in the project and installs two things into it: faster-whisper, which turns speech into text for captions, and yt-dlp, the downloader behind [`fetch`](#sources-and-fetching). The speech model (about 460 MB) is downloaded to `~/.cache/huggingface` the first time a clip is transcribed.
 
-Without the setup step the tool still works: clips are made without captions and a warning says why.
+Running it again leaves faster-whisper as it is and brings yt-dlp up to date.
+
+Without the setup step the tool still works: clips are made without captions and a warning says why, and fetching is switched off.
 
 ## Quick start
 
@@ -57,8 +59,9 @@ npm run dashboard
 
 Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 
-- **Cut:** pick a video from `in/`, play it, press "Set start here" and "Set end here", choose the layout, and drag the frame over the video to place the crop (or the webcam box for the facecam layout). Add a hook and a brief if you want them, then press "Cut the clip".
+- **Cut:** pick a video from `in/`, play it, press "Set start here" and "Set end here", choose the layout, and drag the frame over the video to place the crop (or the webcam box for the facecam layout). With the center layout, the "Show more of the picture" slider makes the crop wider, for a person who moves out of the narrow column. Add a hook and a brief if you want them, then press "Cut the clip".
 - **Status bar:** while a clip is being cut, rendered again, or searched for moments, a bar at the top says what is happening and at which step. It stays there when you move to another video or clip, and after a page reload. You can start another cut meanwhile; it waits its turn. When a clip is ready, the bar offers "Open".
+- **Deleting a video:** each video in the left column has a trash icon. It asks once, then deletes the file from `in/`. Clips already cut from it stay, but can no longer be rendered again, because rendering reads the source. A compilation that uses the video will not build until the item is taken out. It is not possible while a clip is being made.
 - **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
 - **Clip:** watch the result, see each brief rule as Pass or Fail, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
 
@@ -72,7 +75,7 @@ CLIPPER_PORT=4600 npm run dashboard
 
 `npm run dashboard` builds the pages each time it starts, which takes a second or two. While a clip renders, ffmpeg uses every CPU core for about a minute.
 
-The Clips page and the command line do the same things and share the same `out/` and `parts/` folders, so you can mix them. The Cards and Compilations pages exist only in the dashboard.
+The Clips page and the command line do the same things and share the same `out/` and `parts/` folders, so you can mix them. The Cards and Compilations pages exist only in the dashboard, and so does the sources list; fetching works from both.
 
 ## Match cards and compilations
 
@@ -102,13 +105,36 @@ To add a goal type, add a line to `GOAL_TYPES` in `src/cards/config.js`.
 4. Put the items in order by dragging them, or with "Up" and "Down". For each video you can set a start and end in seconds and a credit, the streamer's name, which is shown in the bottom left corner for the whole clip. For each card you set how long it is shown (3 seconds by default). The total length is shown under the list.
 5. Press "Generate the video". Each item shows its progress. When it is done the video plays on the page, with a download link.
 
-Next to the video, `description.txt` lists the credits (each streamer once, in order) and chapter times taken from where the cards fall, starting at 0:00. Players usually want at least three chapters of ten seconds or more before they show them.
+Next to the video, `description.txt` lists the credits (each streamer once, in order, with the channel's address when the name matches an agreed channel in your [sources list](#sources-and-fetching)) and chapter times taken from where the cards fall, starting at 0:00. Players usually want at least three chapters of ten seconds or more before they show them.
 
 Each compilation in the list has a trash icon, which deletes it with its final video and description after asking once. The trash icon on a timeline item only takes that item out of the timeline.
 
 Everything is kept in `data/`: matches in `data/matches`, and each compilation in `data/compilations/<name>` with its `timeline.json`, `final.mp4` and `description.txt`. A compilation can be reopened, changed and generated again. Only the items you changed are made again, so a second run is quick, and a run that failed carries on from where it stopped.
 
 Clips of any size and frame rate can be mixed. Each is fitted inside the chosen size with black bars where needed, and its loudness is levelled so that clips from different streams sit together.
+
+## Sources and fetching
+
+The Sources page keeps a list of the channels you take clips from: name, channel address, a status (asked, agreed or declined) and a note of where and when they answered.
+
+"Fetch part of a video" on the same page brings a part of a YouTube video into `in/`:
+
+- **Only from a channel marked "Agreed".** The channel is read from the video itself, so a link to anyone else's video is refused.
+- **A part, not the whole video.** You give a start and an end, up to 20 minutes. Long watchalongs are several gigabytes; a part is small.
+- **Up to 1080p, with the picture exactly as YouTube sends it.** A video can only be cut without loss at certain frames, so the part starts up to a few seconds before the time you gave; the tool says by how much. Set the exact start when you cut.
+- **YouTube links to one video only.** Playlists and channel links are refused.
+
+The file is named after the channel, the video and the range, such as `channel-name_<video id>_1h02m00s-1h05m00s.mp4`, and then works like any other video in `in/`. When you add it to a compilation, its credit is filled in with the channel's name, and `description.txt` lists that channel's link next to the credit.
+
+From the command line:
+
+```bash
+node src/cli.js fetch "https://www.youtube.com/watch?v=..." --start 1:02:00 --end 1:05:00
+```
+
+It needs the downloader program `yt-dlp`, which `npm run setup` installs into `.venv` next to the transcriber. YouTube changes often; when fetching stops working, run `npm run setup` again to update it.
+
+The list is saved in `data/sources.json`, which is not part of the repository.
 
 ## AI help
 
@@ -177,6 +203,7 @@ It prints each moment with a `cut` command for its range. Videos longer than 60 
 | `check <clip-folder>` | Checks an existing clip and its `post.txt` against a brief |
 | `suggest <file>` | Asks an AI service for moments worth clipping (see [AI help](#ai-help)) |
 | `extract <file>` | Saves a part of a video as it is, at the original size (see [Plain parts](#plain-parts)) |
+| `fetch <link>` | Brings part of a YouTube video into `in/`, from an agreed channel (see [Sources and fetching](#sources-and-fetching)) |
 
 Every command has built-in help: `node src/cli.js cut --help`.
 
@@ -188,6 +215,7 @@ Every command has built-in help: `node src/cli.js cut --help`.
 | `--end <time>` | End of the range | required |
 | `--layout <name>` | `center`, `blur` or `facecam` | `center` |
 | `--crop-x <pixels>` | Left edge of the crop in source pixels, `center` layout only | centred |
+| `--crop-width <pixels>` | Width of the crop in source pixels, `center` layout only. Wider than the 9:16 column shows more of the picture, over a blurred copy | the 9:16 column |
 | `--cam <x,y,w,h>` | Webcam rectangle in source pixels, required for `facecam` | none |
 | `--trim <pixels>` | Cut this many pixels off every edge of the source first | `0` |
 | `--hook <text>` | Line shown at the top at the start of the clip, up to 60 characters | none |
@@ -203,7 +231,7 @@ Times can be seconds (`754.5`), `mm:ss` (`12:34.5`) or `hh:mm:ss` (`1:02:03`).
 
 ### Layouts
 
-- **`center`** crops a 9:16 column out of the frame. Move it sideways with `--crop-x`.
+- **`center`** crops a 9:16 column out of the frame. Move it sideways with `--crop-x`. The column is about a third of a 16:9 picture, so a person who moves can leave it. `--crop-width` makes the crop wider: it is then shown whole in the middle of the screen, with a blurred copy of itself above and below. At the full width of the video it looks like `blur`.
 - **`blur`** keeps the whole frame in the middle, over a blurred copy that fills the screen. Use it when nothing may be cropped away.
 - **`facecam`** stacks the webcam rectangle (given with `--cam`) above the middle of the gameplay.
 
@@ -212,6 +240,7 @@ Times can be seconds (`754.5`), `mm:ss` (`12:34.5`) or `hh:mm:ss` (`1:02:03`).
 ```bash
 node src/cli.js cut in/video.mp4 --start 1:00 --end 1:30 --layout blur --trim 14
 node src/cli.js cut in/video.mp4 --start 1:00 --end 1:30 --crop-x 700
+node src/cli.js cut in/video.mp4 --start 1:00 --end 1:30 --crop-width 1000 --crop-x 200
 node src/cli.js cut in/video.mp4 --start 1:00 --end 1:30 --layout facecam --cam 1400,40,480,270
 ```
 
@@ -341,7 +370,7 @@ To use a different Python than `.venv/bin/python`, set the `CLIPPER_PYTHON` envi
 npm test
 ```
 
-Some tests run the real `ffmpeg` on a small generated video, so `ffmpeg` and `ffprobe` must be installed. They do not need the transcriber.
+Some tests run the real `ffmpeg` on a small generated video, so `ffmpeg` and `ffprobe` must be installed, built with the `libx264`, `aac` and `libopus` encoders (check: `ffmpeg -encoders | grep -E "libx264|libopus"`). They do not need the transcriber or the downloader, and they never reach YouTube or an AI service.
 
 The tests cover the engine and the dashboard's server. They do not cover the dashboard's pages; check those by opening them in a browser.
 
@@ -349,7 +378,7 @@ To work on the pages with live reload, run the dashboard in one terminal and `np
 
 ## What it does not do
 
-- Download video from any site
+- Download whole videos, or anything from a channel not marked as agreed
 - Upload or post anywhere
 - Cut a clip on its own: the AI only suggests moments, and you choose
 - Follow a moving speaker

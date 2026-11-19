@@ -7,8 +7,10 @@ import { suggestMoments } from './ai/suggest.js';
 import { loadBrief } from './brief/schema.js';
 import { checkClip, cut, rerender } from './cut.js';
 import { loadEnv } from './env.js';
+import { fetchVideo } from './fetch.js';
 import { LAYOUTS } from './layout.js';
 import { savePart } from './part.js';
+import { readSources } from './sources.js';
 import { probe } from './probe.js';
 import { formatClock, parseTime } from './time.js';
 import { getTranscriber } from './transcribe/index.js';
@@ -76,6 +78,7 @@ program
   .requiredOption('--end <time>', 'end of the range, same formats', timeOption)
   .addOption(new Option('--layout <name>', 'how to fit the picture into 9:16').choices(LAYOUTS).default('center'))
   .option('--crop-x <pixels>', 'left edge of the crop in source pixels, for the center layout', pixelOption)
+  .option('--crop-width <pixels>', 'width of the crop in source pixels, for the center layout; wider than the 9:16 column shows more of the picture over a blurred copy', pixelOption)
   .option('--cam <x,y,w,h>', 'webcam rectangle in source pixels, required for the facecam layout', camOption)
   .option('--trim <pixels>', 'cut this many pixels off every edge of the source first, to remove a frame baked into the recording', pixelOption, 0)
   .option('--hook <text>', 'line shown at the top at the start of the clip')
@@ -94,6 +97,7 @@ program
         end: options.end,
         layout: options.layout,
         cropX: options.cropX,
+        cropWidth: options.cropWidth,
         cam: options.cam,
         trim: options.trim,
         hook: options.hook,
@@ -120,6 +124,25 @@ program
     const part = await savePart({ source: file, start: options.start, end: options.end, outDir: options.out });
     console.log(`Wrote ${part.file}`);
     console.log(`${part.width}x${part.height}, ${part.fps} fps, ${part.seconds.toFixed(2)} s`);
+  });
+
+program
+  .command('fetch')
+  .description('Bring part of a YouTube video into the videos folder. Only from a channel marked as agreed in the sources list')
+  .argument('<link>', 'link to one YouTube video')
+  .requiredOption('--start <time>', 'start of the part: seconds, mm:ss or hh:mm:ss', timeOption)
+  .requiredOption('--end <time>', 'end of the part, same formats', timeOption)
+  .option('--out <dir>', 'folder the video is saved in', './in')
+  .option('--data <dir>', 'folder that holds sources.json', './data')
+  .action(async (link, options) => {
+    const fetched = await fetchVideo({
+      url: link, start: options.start, end: options.end, outDir: options.out,
+      sources: await readSources(path.resolve(options.data)),
+      onStep: (step) => console.log({ looking: 'Looking the video up...', fetching: 'Fetching...', tidying: 'Preparing the video...' }[step]),
+    });
+    console.log(`Wrote ${fetched.file}`);
+    console.log(`${fetched.seconds.toFixed(2)} s from ${fetched.source.name}: ${fetched.title}`);
+    if (fetched.early > 0.05) console.log(`It starts ${fetched.early.toFixed(1)} s before the time you asked, where the video could be cut without losing quality.`);
   });
 
 program

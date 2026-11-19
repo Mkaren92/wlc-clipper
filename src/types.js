@@ -44,6 +44,8 @@
  * @property {number} end      seconds into the source
  * @property {string} layout
  * @property {number | null} cropX   left edge of the crop in source pixels
+ * @property {number | null} cropWidth   width of the center layout's crop in source pixels
+ *   when it is wider than the 9:16 column; null for the column
  * @property {number} trim     pixels cut off every edge of the source first
  * @property {{ x: number, y: number, width: number, height: number } | null} cam
  *   webcam rectangle in source pixels, facecam layout only

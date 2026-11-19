@@ -35,6 +35,9 @@ const MAX_TRIM_SHARE = 0.05;
  * @param {string} options.layout
  * @param {VideoInfo} options.source
  * @param {number} [options.cropX]   left edge of the crop, center layout only
+ * @param {number} [options.cropWidth]   width of the crop in source pixels, center
+ *   layout only. Wider than the 9:16 column shows more of the picture, over a
+ *   blurred copy that fills the rest of the screen.
  * @param {number} [options.trim]    pixels cut off every edge of the source first
  * @param {{ x: number, y: number, width: number, height: number }} [options.cam]
  *   webcam rectangle in source pixels, facecam layout only
@@ -43,17 +46,21 @@ const MAX_TRIM_SHARE = 0.05;
  *   show the card for `seconds` after the footage ends at `at`. The card's
  *   plain background is ffmpeg's second input; with `image`, a picture is the
  *   third input and is centred on that background.
- * @returns {{ graph: string, cropX: number | null, audioLabel: string | null }}
+ * @returns {{ graph: string, cropX: number | null, cropWidth: number | null, audioLabel: string | null }}
  *   `cropX` is the left edge that was used, or null when the layout does not
- *   crop sideways. `audioLabel` names the sound output when the graph makes
- *   one; otherwise the source's sound is used as it is.
+ *   crop sideways. `cropWidth` is the width that was used when it is wider
+ *   than the 9:16 column, or null. `audioLabel` names the sound output when
+ *   the graph makes one; otherwise the source's sound is used as it is.
  */
-export function buildFilter({ layout, source, cropX, trim = 0, cam, subtitles = false, endCard }) {
+export function buildFilter({ layout, source, cropX, cropWidth, trim = 0, cam, subtitles = false, endCard }) {
   if (!LAYOUTS.includes(layout)) {
     throw new Error(`Unknown layout "${layout}". Use one of: ${LAYOUTS.join(', ')}.`);
   }
   if (cropX !== undefined && layout !== 'center') {
     throw new Error('--crop-x only applies to the center layout.');
+  }
+  if (cropWidth !== undefined && layout !== 'center') {
+    throw new Error('--crop-width only applies to the center layout.');
   }
   if (cam && layout !== 'facecam') {
     throw new Error('--cam only applies to the facecam layout.');
@@ -63,9 +70,9 @@ export function buildFilter({ layout, source, cropX, trim = 0, cam, subtitles = 
   const end = pictureEnd({ subtitles, endCard });
 
   let picture;
-  if (layout === 'center') picture = centerFilter(area, cropX, end);
-  else if (layout === 'blur') picture = { graph: blurGraph(area, end), cropX: null };
-  else picture = { graph: facecamGraph(source, area, cam, end), cropX: null };
+  if (layout === 'center') picture = centerFilter(area, cropX, cropWidth, end);
+  else if (layout === 'blur') picture = { graph: blurGraph(area, end), cropX: null, cropWidth: null };
+  else picture = { graph: facecamGraph(source, area, cam, end), cropX: null, cropWidth: null };
 
   // The card adds time after the footage, so the sound needs silence to match.
   if (endCard && source.audioStreams > 0) {
@@ -107,19 +114,26 @@ function pictureEnd({ subtitles, endCard }) {
  *
  * @param {VideoInfo} source
  * @param {number} [trim]
+ * @param {number} [cropWidth]   the center layout's crop width, when one was chosen
  * @returns {{
  *   area: { x: number, y: number, width: number, height: number },
  *   center: CropWindow,
+ *   centerWidths: { min: number, max: number } | null,
  *   game: CropWindow,
  *   camAspect: number,
- * }} `center` is the 9:16 window of the center layout, `game` the lower
- *   panel of the facecam layout, `camAspect` the shape of its webcam panel.
+ * }} `center` is the window of the center layout: the 9:16 column, or the
+ *   wider crop when `cropWidth` asks for one. `centerWidths` is the range that
+ *   width can take, or null when the source is not wider than 9:16. `game` is
+ *   the lower panel of the facecam layout, `camAspect` the shape of its
+ *   webcam panel.
  */
-export function describeLayouts(source, trim = 0) {
+export function describeLayouts(source, trim = 0, cropWidth) {
   const area = usableArea(source, trim);
+  const column = cropWindow(area, OUT_WIDTH / OUT_HEIGHT);
   return {
     area: { x: area.x, y: area.y, width: area.width, height: area.height },
-    center: cropWindow(area, OUT_WIDTH / OUT_HEIGHT),
+    center: centerWindow(area, cropWidth),
+    centerWidths: column.minX === null ? null : { min: column.width, max: toEven(area.width) },
     game: cropWindow(area, OUT_WIDTH / GAME_HEIGHT),
     camAspect: OUT_WIDTH / CAM_HEIGHT,
   };
@@ -169,19 +183,49 @@ function usableArea(source, trim) {
   };
 }
 
-/** Crop a 9:16 window out of the source, then scale it to the output size. */
-function centerFilter(area, cropX, end) {
-  const fit = fitCrop(area, OUT_WIDTH / OUT_HEIGHT, cropX);
-  if (cropX !== undefined && fit.cropX === null) {
-    throw new Error('--crop-x needs a source wider than 9:16; this one has nothing to crop sideways.');
+/**
+ * The window the center layout takes: the 9:16 column, or a wider one of the
+ * same height when `cropWidth` asks for it. A width outside what the frame
+ * allows is brought inside, as --crop-x is.
+ *
+ * @returns {CropWindow}
+ */
+function centerWindow(area, cropWidth) {
+  const column = cropWindow(area, OUT_WIDTH / OUT_HEIGHT);
+  if (cropWidth === undefined || column.minX === null) return column;
+  const width = clamp(toEven(cropWidth), column.width, toEven(area.width));
+  const maxX = area.x + area.width - width;
+  return { x: area.x + Math.floor((maxX - area.x) / 2), y: area.y, width, height: area.height, minX: area.x, maxX };
+}
+
+/**
+ * Crop a 9:16 column out of the source and scale it to the output size. With
+ * a wider crop, the crop is shown whole over a blurred copy of itself.
+ */
+function centerFilter(area, cropX, cropWidth, end) {
+  const column = cropWindow(area, OUT_WIDTH / OUT_HEIGHT);
+  if (column.minX === null && (cropX !== undefined || cropWidth !== undefined)) {
+    const option = cropX !== undefined ? '--crop-x' : '--crop-width';
+    throw new Error(`${option} needs a source wider than 9:16; this one has nothing to crop sideways.`);
   }
+  const window = centerWindow(area, cropWidth);
+  if (window.width > column.width) {
+    const x = clamp(cropX ?? window.x, window.minX, window.maxX);
+    return { graph: blurGraph({ ...window, x, trimmed: true }, end), cropX: x, cropWidth: window.width };
+  }
+  const fit = fitCrop(area, OUT_WIDTH / OUT_HEIGHT, cropX);
   return {
     graph: `${INPUT},${fit.step}scale=${OUT_WIDTH}:${OUT_HEIGHT},${end}`,
     cropX: fit.cropX,
+    cropWidth: null,
   };
 }
 
-/** The whole frame in the middle, over a blurred copy that fills the screen. */
+/**
+ * The whole of `area` in the middle, over a blurred copy that fills the
+ * screen. `area` is the frame for the blur layout, or the center layout's
+ * wider crop.
+ */
 function blurGraph(area, end) {
   const size = `${OUT_WIDTH}:${OUT_HEIGHT}`;
   const trim = area.trimmed ? `,${cropStep(area)}` : '';

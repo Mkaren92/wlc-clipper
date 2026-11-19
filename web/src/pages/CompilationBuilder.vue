@@ -14,6 +14,8 @@ const STATE_NAMES = { waiting: 'Waiting', working: 'Working…', done: 'Done', r
 const compilations = ref([]);
 const current = ref(null); // the compilation being edited: a copy, saved with Save or Generate
 const matches = ref([]);
+const sources = ref([]); // for filling in the credit of a fetched video
+const prefixes = ref({}); // source id -> what its fetched files are named after
 const library = reactive({ in: [], parts: [], clips: [] });
 const pick = reactive({ in: '', parts: '', clips: '', match: '', card: '' });
 const lengths = reactive({}); // "folder/name" -> seconds, for the running total
@@ -31,7 +33,9 @@ const key = (item) => `${item.library}/${item.name}`;
 
 async function load() {
   try {
-    const [saved, savedMatches, videos, parts, clips] = await Promise.all([api.compilations(), api.matches(), api.videos(), api.parts(), api.clips()]);
+    const [saved, savedMatches, videos, parts, clips, sourceList] = await Promise.all([api.compilations(), api.matches(), api.videos(), api.parts(), api.clips(), api.sources()]);
+    sources.value = sourceList.sources;
+    prefixes.value = sourceList.prefixes;
     compilations.value = saved;
     matches.value = savedMatches;
     library.in = videos.map((v) => v.name);
@@ -86,9 +90,12 @@ async function learnLength(item) {
   }
 }
 
+// A fetched video is named after its channel, so its credit can be filled in.
+const creditFor = (name) => sources.value.find((source) => name.startsWith(`${prefixes.value[source.id]}_`))?.name ?? '';
+
 function addVideo(folder, name) {
   if (!name) return;
-  const item = { id: newId(), kind: 'video', library: folder, name, start: null, end: null, credit: '' };
+  const item = { id: newId(), kind: 'video', library: folder, name, start: null, end: null, credit: creditFor(name) };
   current.value.items.push(item);
   learnLength(item);
 }

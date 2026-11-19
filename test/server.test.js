@@ -34,6 +34,15 @@ const fakeAi = {
   }),
 };
 
+// Stands in for the downloader: every video is from "@agreed", and a download is a small test video.
+const fakeDownloader = {
+  isInstalled: async () => true,
+  info: async () => ({ id: 'dQw4w9WgXcQ', title: 'A watchalong', channel: 'Agreed Channel', channelId: 'UCxxx', handle: '@agreed', duration: 600 }),
+  download: async (job) => {
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-t', '1', '-pix_fmt', 'yuv420p', path.join(job.dir, `${job.name}.mp4`)]);
+  },
+};
+
 beforeAll(async () => {
   dir = await mkdtemp(path.join(os.tmpdir(), 'clipper-server-'));
   for (const name of ['in', 'out', 'briefs']) await mkdir(path.join(dir, name));
@@ -62,6 +71,7 @@ beforeAll(async () => {
     toolVersion: 'test',
     transcriber: fakeTranscriber,
     ai: fakeAi,
+    downloader: fakeDownloader,
   });
   jobs = built.jobs;
   server = built.app.listen(0, '127.0.0.1');
@@ -116,12 +126,34 @@ describe('videos', () => {
     expect(data.map((video) => video.name)).toEqual(['game.mp4']);
   });
 
+  it('deletes a video by name, and nothing else', async () => {
+    await writeFile(path.join(dir, 'in', 'spare.mp4'), await readFile(path.join(dir, 'in', 'game.mp4')));
+    expect((await api('/api/videos')).data.map((video) => video.name)).toEqual(['game.mp4', 'spare.mp4']);
+
+    // A name that is not a video in the folder is refused.
+    for (const name of ['..%2Fout%2Fx.mp4', 'notes.txt', 'missing.mp4', '..%2F..%2Fetc%2Fpasswd']) {
+      expect((await api(`/api/videos/${name}`, { method: 'DELETE' })).status).toBe(404);
+    }
+    expect((await api('/api/videos/spare.mp4', { method: 'DELETE', headers: { Origin: 'https://example.com' } })).status).toBe(403);
+    expect((await readdir(path.join(dir, 'in'))).sort()).toContain('spare.mp4');
+
+    expect((await api('/api/videos/spare.mp4', { method: 'DELETE' })).status).toBe(200);
+    expect((await api('/api/videos')).data.map((video) => video.name)).toEqual(['game.mp4']);
+    expect((await api('/api/videos/spare.mp4', { method: 'DELETE' })).status).toBe(404);
+  });
+
   it('describes a video and where each layout falls on it', async () => {
     const { data } = await api('/api/videos/game.mp4?trim=10');
     expect(data).toMatchObject({ name: 'game.mp4', width: 1920, height: 1080, fps: 30, audioStreams: 1 });
     expect(data.path).toBeUndefined();
     expect(data.layouts.center).toEqual({ x: 662, y: 10, width: 596, height: 1060, minX: 10, maxX: 1314 });
     expect(data.layouts.area).toEqual({ x: 10, y: 10, width: 1900, height: 1060 });
+    expect(data.layouts.centerWidths).toEqual({ min: 596, max: 1900 });
+
+    // With a wider crop chosen, the window to draw is that crop.
+    const wide = await api('/api/videos/game.mp4?trim=10&cropWidth=1000');
+    expect(wide.data.layouts.center).toEqual({ x: 460, y: 10, width: 1000, height: 1060, minX: 10, maxX: 910 });
+    expect((await api('/api/videos/game.mp4?cropWidth=wide')).status).toBe(400);
   });
 
   it('rejects a trim that is too large', async () => {
@@ -299,6 +331,37 @@ describe('compilations', () => {
   }, 60_000);
 });
 
+describe('sources and fetching', () => {
+  const link = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  const source = (status) => [{ id: 'a', name: 'Agreed Channel', url: 'https://www.youtube.com/@agreed', status, note: '' }];
+
+  it('keeps the sources list, and fetches only from a channel marked as agreed', async () => {
+    expect((await api('/api/sources')).data).toEqual({ sources: [], prefixes: {}, downloaderInstalled: true });
+    expect((await api('/api/sources', { method: 'PUT', body: [{ id: 'a', name: 'X', url: 'https://example.com/@x' }] })).status).toBe(400);
+
+    // Asked, but not agreed yet: the fetch is refused and nothing is written.
+    await api('/api/sources', { method: 'PUT', body: source('asked') });
+    const early = await api('/api/fetch', { method: 'POST', body: { url: link, start: '1:00', end: '1:30' } });
+    expect(await finished(early.data.id)).toMatchObject({ status: 'failed', error: expect.stringMatching(/not marked as agreed/) });
+    expect((await api('/api/videos')).data.map((video) => video.name)).toEqual(['game.mp4']);
+
+    const saved = await api('/api/sources', { method: 'PUT', body: source('agreed') });
+    expect(saved.data.sources[0].status).toBe('agreed');
+    expect(saved.data.prefixes).toEqual({ a: 'agreed-channel' });
+    const started = await api('/api/fetch', { method: 'POST', body: { url: link, start: '1:00', end: '1:30' } });
+    expect(started.status).toBe(202);
+    expect(await finished(started.data.id)).toMatchObject({ status: 'done', kind: 'fetch', result: { name: 'agreed-channel_dQw4w9WgXcQ_1m00s-1m30s.mp4', source: 'Agreed Channel' } });
+    expect((await api('/api/videos')).data.map((video) => video.name)).toEqual(['agreed-channel_dQw4w9WgXcQ_1m00s-1m30s.mp4', 'game.mp4']);
+
+    expect((await api('/api/fetch', { method: 'POST', body: { url: 'https://example.com/x.mp4', start: 0, end: 5 } })).status).toBe(202);
+    expect((await api('/api/fetch', { method: 'POST', body: { url: link, start: 'x', end: 5 } })).status).toBe(400);
+    expect((await api('/api/fetch', { method: 'POST', body: { url: link, start: 0, end: 5 }, headers: { Origin: 'https://example.com' } })).status).toBe(403);
+    await jobs.idle();
+    await rm(path.join(dir, 'in', 'agreed-channel_dQw4w9WgXcQ_1m00s-1m30s.mp4'));
+    await api('/api/sources', { method: 'PUT', body: [] });
+  }, 60_000);
+});
+
 describe('AI suggestions', () => {
   it('says which service is set up', async () => {
     expect((await api('/api/ai')).data).toEqual({ configured: true, service: 'Fake', model: 'fake-1', help: 'Set it up.' });
@@ -326,9 +389,9 @@ describe('cutting', () => {
   });
 
   it('cuts two clips one after the other, then shows, edits, re-renders and checks one', async () => {
-    const request = { video: 'game.mp4', start: '0:01', end: 3, layout: 'center', cropX: 100, hook: 'Watch this', hookSeconds: 0, brief: 'demo.json' };
+    const request = { video: 'game.mp4', start: '0:01', end: 3, layout: 'center', cropX: 100, cropWidth: 1000, hook: 'Watch this', hookSeconds: 0, brief: 'demo.json' };
     const first = await api('/api/cut', { method: 'POST', body: request });
-    const second = await api('/api/cut', { method: 'POST', body: { ...request, layout: 'blur', cropX: undefined } });
+    const second = await api('/api/cut', { method: 'POST', body: { ...request, layout: 'blur', cropX: undefined, cropWidth: undefined } });
     expect([first.status, second.status]).toEqual([202, 202]);
     expect(second.data.status).toBe('queued');
 
@@ -352,7 +415,7 @@ describe('cutting', () => {
     expect(list[1]).toMatchObject({ source: 'game.mp4', start: 1, end: 3, layout: 'center', brief: 'demo', failedChecks: 0, rendered: true });
 
     const clip = (await api('/api/clips/watch-this')).data;
-    expect(clip.meta).toMatchObject({ cropX: 100, hook: 'Watch this', hookSeconds: 0, captions: true });
+    expect(clip.meta).toMatchObject({ cropX: 100, cropWidth: 1000, hook: 'Watch this', hookSeconds: 0, captions: true });
     const negative = await api('/api/cut', { method: 'POST', body: { ...request, hookSeconds: -2 } });
     expect(negative.status).toBe(400);
     expect(clip.postText).toBe('Watch this\n\n\n\n#demo\n');

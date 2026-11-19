@@ -44,11 +44,12 @@ const BYTES_PER_SECOND = 2_500_000;
  * @param {string} options.dataDir
  * @param {(library: string, name: string) => Promise<string>} options.resolveVideo
  *   turns a video's folder and name into the file's path
+ * @param {Record<string, string>} [options.links]   channel links for the credits (see creditLinks in src/sources.js)
  * @param {(progress: { index: number, status: 'working' | 'done' | 'reused' } | { joining: true }) => void} [options.onProgress]
  * @returns {Promise<{ file: string, seconds: number, description: string,
  *   items: { id: string, seconds: number, reused: boolean }[] }>}
  */
-export async function buildCompilation({ timeline, dataDir: givenDataDir, resolveVideo, onProgress = () => {} }) {
+export async function buildCompilation({ timeline, dataDir: givenDataDir, resolveVideo, links = {}, onProgress = () => {} }) {
   if (timeline.items.length === 0) throw new Error('Add at least one video or card before generating.');
   // ffmpeg runs inside the work folder, so every path handed to it must be a
   // full one: a path relative to where the tool was started would not be found.
@@ -110,7 +111,7 @@ export async function buildCompilation({ timeline, dataDir: givenDataDir, resolv
   }
 
   // Chapter times come from the lengths the segments really have.
-  const description = buildDescription(items);
+  const description = buildDescription(items, links);
   await writeFile(path.join(dir, 'description.txt'), description);
   const final = await probe(path.join(dir, 'final.mp4'));
   return {
