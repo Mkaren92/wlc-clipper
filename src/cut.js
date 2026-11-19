@@ -33,6 +33,8 @@ import { checkTranscript, getTranscriber } from './transcribe/index.js';
 // Everything the tool needs to render or check the clip again is in a
 // subfolder.
 const WORK_DIR = 'work';
+/** The slow parts of a run, reported through `onStep`. @typedef {'transcribing' | 'rendering' | 'checking'} Step */
+
 const META_FILE = 'meta.json';
 const TRANSCRIPT_FILE = 'transcript.json';
 const POST_FILE = 'post.txt';
@@ -62,6 +64,7 @@ const LENGTH_TOLERANCE = 0.1;
  * @param {string} [options.outDir]
  * @param {string} options.toolVersion
  * @param {Transcriber} [options.transcriber]   replaced in tests
+ * @param {(step: Step) => void} [options.onStep]   called as each slow step starts
  * @returns {Promise<ClipResult>}
  */
 export async function cut({
@@ -81,6 +84,7 @@ export async function cut({
   outDir = './out',
   toolVersion,
   transcriber = getTranscriber(),
+  onStep = () => {},
 }) {
   const sourcePath = path.resolve(source);
   const info = await probe(sourcePath);
@@ -158,6 +162,7 @@ export async function cut({
   if (post) await writeFile(path.join(clipDir, POST_FILE), buildPostText(post));
 
   if (wantCaptions) {
+    onStep('transcribing');
     try {
       const audioFile = await extractAudio({ source: sourcePath, start, seconds: end - start, workDir });
       const transcript = checkTranscript(await transcriber.transcribe(audioFile, { lang }));
@@ -170,7 +175,7 @@ export async function cut({
     }
   }
 
-  return renderClip(clipDir, workDir, meta, info, warnings);
+  return renderClip(clipDir, workDir, meta, info, warnings, onStep);
 }
 
 /**
@@ -179,9 +184,10 @@ export async function cut({
  * work/transcript.json, then re-render. post.txt is left as it is.
  *
  * @param {string} clipDir
+ * @param {{ onStep?: (step: Step) => void }} [options]
  * @returns {Promise<ClipResult>}
  */
-export async function rerender(clipDir) {
+export async function rerender(clipDir, { onStep = () => {} } = {}) {
   const dir = path.resolve(clipDir);
   const workDir = await findWorkDir(dir);
   const meta = await readMeta(workDir);
@@ -191,7 +197,7 @@ export async function rerender(clipDir) {
   } catch (error) {
     throw new Error(`The source video for this clip cannot be used any more.\n${error.message}`);
   }
-  return renderClip(dir, workDir, meta, info, []);
+  return renderClip(dir, workDir, meta, info, [], onStep);
 }
 
 /**
@@ -214,6 +220,68 @@ export async function checkClip(clipDir, briefFile) {
 }
 
 /**
+ * Read a clip folder for display: its options, post text and transcript.
+ * The post text and transcript are null when the clip has none.
+ *
+ * @param {string} clipDir
+ * @returns {Promise<{ clipDir: string, meta: Meta, postText: string | null,
+ *   transcript: import('./types.js').Transcript | null }>}
+ */
+export async function readClip(clipDir) {
+  const dir = path.resolve(clipDir);
+  const workDir = await findWorkDir(dir);
+  const meta = await readMeta(workDir);
+  const transcript = meta.captions ? await readTranscript(workDir) : null;
+  return { clipDir: dir, meta, postText: await readIfExists(path.join(dir, POST_FILE)), transcript };
+}
+
+/**
+ * Replace a clip's transcript, for example with corrected words. The clip
+ * itself changes only when it is rendered again.
+ *
+ * @param {string} clipDir
+ * @param {unknown} transcript
+ */
+export async function saveTranscript(clipDir, transcript) {
+  const workDir = await findWorkDir(path.resolve(clipDir));
+  const meta = await readMeta(workDir);
+  if (!meta.captions) throw new Error('This clip has no captions to edit.');
+  await writeJson(path.join(workDir, TRANSCRIPT_FILE), checkTranscript(transcript));
+}
+
+/**
+ * Replace a clip's post.txt. Only clips made with a brief have one.
+ *
+ * @param {string} clipDir
+ * @param {string} text
+ */
+export async function savePostText(clipDir, text) {
+  const file = path.join(path.resolve(clipDir), POST_FILE);
+  if ((await readIfExists(file)) === null) {
+    throw new Error('This clip has no post.txt, because it was made without a brief.');
+  }
+  await writeFile(file, text.endsWith('\n') ? text : `${text}\n`);
+}
+
+/**
+ * Run the clip's own brief on it again and save the result in meta.json,
+ * for example after its post text was edited. Does nothing for a clip
+ * without a brief.
+ *
+ * @param {string} clipDir
+ * @returns {Promise<CheckResult[]>}
+ */
+export async function recheck(clipDir) {
+  const dir = path.resolve(clipDir);
+  const workDir = await findWorkDir(dir);
+  const meta = await readMeta(workDir);
+  if (!meta.brief) return [];
+  meta.checks = await checkAgainst(dir, workDir, meta, meta.brief, await probe(path.join(dir, CLIP_FILE)));
+  await writeJson(path.join(workDir, META_FILE), meta);
+  return meta.checks;
+}
+
+/**
  * Steps shared by `cut` and `rerender`: build the subtitle file, run ffmpeg,
  * check the result and record it in meta.json.
  *
@@ -222,9 +290,10 @@ export async function checkClip(clipDir, briefFile) {
  * @param {Meta} meta
  * @param {VideoInfo} info   the source video
  * @param {string[]} warnings
+ * @param {(step: Step) => void} onStep
  * @returns {Promise<ClipResult>}
  */
-async function renderClip(clipDir, workDir, meta, info, warnings) {
+async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
   const seconds = meta.end - meta.start;
   const card = meta.brief?.endCard ?? null;
   const total = seconds + (card?.seconds ?? 0);
@@ -262,6 +331,7 @@ async function renderClip(clipDir, workDir, meta, info, warnings) {
     endCard: card ? { at: seconds, seconds: card.seconds, image: Boolean(card.image) } : undefined,
   });
 
+  onStep('rendering');
   try {
     await render({
       source: meta.source,
@@ -278,6 +348,7 @@ async function renderClip(clipDir, workDir, meta, info, warnings) {
     throw new Error(`${error.message}\nThe run's files are in ${clipDir}.`);
   }
 
+  onStep('checking');
   const result = await probe(path.join(clipDir, CLIP_FILE));
   if (result.width !== OUT_WIDTH || result.height !== OUT_HEIGHT) {
     throw new Error(

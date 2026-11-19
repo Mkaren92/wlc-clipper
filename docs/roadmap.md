@@ -11,8 +11,9 @@ Version 1 of the spec is complete: all three "evenings".
 - `render` to rebuild a clip after editing its transcript
 - Briefs: validation, `post.txt`, the rule checks, on-screen disclosure, end card, `check`
 - Beyond the spec: `--trim`, `keepFullFrame`, `replacements`, the `work/` subfolder
+- A dashboard in the browser (`npm run dashboard`): cut with a visual range and crop, view clips with their checks and post text, fix caption words
 
-156 tests pass on the first development machine (Linux, ffmpeg 4.4.2).
+174 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages.
 
 ## Waiting on the owner
 
@@ -28,11 +29,14 @@ Version 1 of the spec is complete: all three "evenings".
 - The `facecam` layout was not tried on a recording that has a real webcam box.
 - The end card was tried with generated test pictures, not with a real logo.
 - Captions in a language other than English. Caption widths are only known for A to Z, digits and a few signs.
+- The dashboard was tried in Chrome only, and its facecam box was placed but never used for a real cut.
 - Nothing has been run on Windows or macOS. Windows would need work first: the transcriber's path is `.venv/bin/python`, and each render makes a symbolic link to the fonts folder.
 
 ## Next: version 1.1, suggested moments
 
 `clipper suggest <file> --count 5 --brief <file>` is in the spec and is not built. It would transcribe the whole source, send the transcript to an LLM through OpenRouter, and print candidate ranges for `clipper cut`. The reply is to be validated with `zod`, and each range snapped to word boundaries and to the brief's length limits.
+
+In the dashboard, the suggestions would appear as marked ranges on the timeline that can be previewed and cut. The owner was also offered AI-written hooks, titles and descriptions, and AI correction of transcript mistakes; none of that is decided.
 
 It needs an OpenRouter API key from the owner and sends transcripts to an outside service, so it starts only on the owner's explicit go. Keep the key in an environment variable, never in a brief or in the repository. The variable's name and the model to use are not decided; settle both with the owner. It does not depend on the items under "Waiting on the owner".
 
@@ -42,5 +46,4 @@ From the spec:
 
 - Visual highlight detection with a video-understanding model
 - Face detection to choose the crop position automatically
-- A small review interface for approving and adjusting clips (the only item that would need a port; pick an uncommon one, make it configurable, and check it is free)
 - Batch mode: several ranges from one source in one run

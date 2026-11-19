@@ -11,7 +11,7 @@ On a different ffmpeg version, `npm test` re-checks size, frame rate, length, pi
 - **Node.js with a small Python script.** Python alone would have been simpler, since faster-whisper is a Python library. The owner is a JavaScript developer and wants to take part in development, so everything except `scripts/transcribe.py` is JavaScript.
 - **Node 22.12 or later**, not 20 as in the spec. `commander` 15 and `vitest` 5 require it.
 - **`child_process` through `src/run.js`**, not `execa`. One small wrapper was enough.
-- **`npm audit` reports high-severity findings** in `picomatch`, inside `vitest`'s development-only dependencies. The only offered fix is downgrading `vitest`, so it was left alone.
+- **`npm audit` is clean** as of 2026-11-19. Earlier it reported high-severity findings in `picomatch`, inside `vitest`'s development-only dependencies, with a downgrade of `vitest` as the only offered fix; that was left alone, and a later install resolved it.
 
 ## Rendering
 
@@ -58,6 +58,25 @@ On a different ffmpeg version, `npm test` re-checks size, frame rate, length, pi
 - **`platforms` is only printed in the to-do list**, and all optional hashtags are appended after the required ones. The spec did not say what either did.
 - **Brief files are validated strictly.** A misspelled field is an error, not a rule that silently never runs.
 - **Each clip's `meta.json` keeps a copy of the brief** it was made with, so a later render does not depend on the brief file. It also stores the source video and the end-card image as absolute paths, so a clip folder cannot be re-rendered on another machine.
+
+## Dashboard
+
+The spec ruled out a web interface for version 1 and listed "a small review interface" under later ideas. The owner asked for a dashboard with Vue and a Node API once version 1 worked, because choosing times and crop positions from the command line means guessing.
+
+- **Two front ends, one engine.** `server/` calls the same functions as `src/cli.js`. The only additions to `src/` were an optional progress callback, `describeLayouts`, and three small functions for reading and saving a clip folder's files.
+- **Express and Vue with Vite**, chosen with the owner. No UI library, router or store: there are two screens.
+- **Port 4517**, because 3000, 8000 and 8080 are taken on the owner's machine. `CLIPPER_PORT` changes it.
+- **It listens on `127.0.0.1` and checks `Host` and `Origin`.** The server can start ffmpeg and read the `in/` folder, so it must not be reachable from the network or from other web pages in the browser. Express listens on every network interface unless told otherwise.
+- **Express passes a failure to start to the `listen` callback.** The first version printed "dashboard running" when the port was already in use.
+- **One background job at a time**, polled by the page. A cut takes about a minute, far too long for one request.
+- **The crop frame drawn over the video uses the engine's own numbers.** Checked by dragging the frame in the browser, cutting, and comparing a frame of the clip with the same crop taken from the source: they matched, and `cropX` in `meta.json` equalled the value on screen.
+- **Custom player buttons instead of the browser's own controls**, because the crop frame lies over the video and would cover them.
+- **The start and end can always be typed**, so a file the browser cannot play can still be cut.
+- **Clips are served uncached with a version number in the address.** A re-render replaces `clip.mp4` in place, and the browser would otherwise show the old one.
+- **Saving the post text re-runs the clip's checks and stores them** (`recheck` in `src/cut.js`), so the clip page and the clip list show the result of the edit. The command line's `check` still changes nothing.
+- **`npm run dev:web` drops the browser's `Origin` header in its proxy.** The pages are then served from port 4518, and the API would otherwise refuse them as another site. Checked: a POST through the proxy reaches the API, the same POST sent straight to the API is refused.
+- **Verified in Chrome on the first development machine**, by pressing the page's own controls: the slider, the step buttons, "Set start here" and "Set end here", Play and Pause, "Play the range" stopping at the end mark and Play continuing after it; a cut with a dragged crop and a trim; a caption fix with re-render; a cut with the example brief; and an edit to the post text turning a rule to Fail on the clip page and in the clip list. The first version passed a scripted check while "Set start here", "Save and check again" and replay after "Play the range" were all broken, because the script had filled in the fields directly. Press the real controls.
+- **Not verified:** a cut made with the facecam box from the page, any browser other than Chrome, and narrow screens.
 
 ## Clip folder
 

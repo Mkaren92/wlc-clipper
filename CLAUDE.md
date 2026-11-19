@@ -1,6 +1,6 @@
 # WLC Clipper
 
-A Node.js command-line tool that turns a local video file and a time range into a finished vertical clip: 1080×1920, 30 fps, burned-in captions, an optional hook line, and the on-screen text and hashtags a campaign brief requires. It is a personal tool for one owner. It has no server and opens no ports.
+A Node.js tool that turns a local video file and a time range into a finished vertical clip: 1080×1920, 30 fps, burned-in captions, an optional hook line, and the on-screen text and hashtags a campaign brief requires. It is a personal tool for one owner. It can be used from the command line or from a dashboard in the browser, which is a small web server that only this machine can reach.
 
 The repository is https://github.com/Mkaren92/wlc-clipper and it is public.
 
@@ -17,7 +17,9 @@ Read these before changing behaviour:
 npm install                 # Node dependencies
 npm run setup               # Python .venv with faster-whisper; ask the owner first (see below)
 npm test                    # vitest; some tests run the real ffmpeg
-node src/cli.js --help      # the tool itself: probe, cut, render, check
+node src/cli.js --help      # the command line: probe, cut, render, check
+npm run dashboard           # build the pages, then serve them at http://127.0.0.1:4517
+npm run dev:web             # only while editing the pages: live reload on port 4518
 ```
 
 Needs Node 22.12 or later, and `ffmpeg` and `ffprobe` on the PATH built with libass. Captions also need Python 3 with the venv module. It has only been run on Linux.
@@ -51,6 +53,12 @@ A `cut` runs these steps in order (`src/cut.js`):
 
 `src/cli.js` defines the commands and flags. `src/run.js` spawns programs. `src/time.js` parses and formats timestamps. `src/types.js` holds the shared JSDoc types.
 
+### The dashboard
+
+- `server/` is an Express server (`server/app.js`) that exposes the same engine functions over HTTP. It adds nothing of its own beyond listing files and running slow work as background jobs (`server/jobs.js`). `server/index.js` starts it.
+- `web/` is a Vue 3 app built with Vite into `web/dist`, which the server serves. `NewClip.vue` is the cutting screen, `FramePicker.vue` draws the layout over the video, `ClipView.vue` shows a finished clip, and `api.js` holds every call to the server.
+- The command line and the dashboard are two front ends to `src/`. Behaviour belongs in `src/`, so both get it.
+
 A clip folder holds `clip.mp4` and `post.txt` for the owner, and a `work/` subfolder with `meta.json`, `transcript.json` and `captions.ass` for the tool. Folders from before `work/` existed have those files next to `clip.mp4` and must keep working.
 
 ## Rules that must hold
@@ -69,11 +77,16 @@ Each of these exists because something broke or the spec demands it. The evidenc
 - **The brief wins.** Where a brief and one of the tool's defaults disagree, the brief's value is used, and the checks report anything the tool could not satisfy.
 - **Brief files are validated strictly.** An unknown field is an error, so a misspelled rule cannot silently never run.
 - **Do not invent a campaign's rules.** A brief is written from text the owner supplies.
+- **The dashboard listens on `127.0.0.1` only**, and `onlyThisMachine` in `server/app.js` refuses requests whose `Host` or `Origin` is not its own. Without that, any web page open in the owner's browser could start cuts.
+- **The browser sends names, never paths.** A video is a file name in `in/`, a clip a folder name in `out/`, a brief a file name in `briefs/`; the server resolves them.
+- **One job at a time.** Two cuts at once could pick the same clip folder.
+- **The pages do not redo the engine's arithmetic.** The crop windows drawn over the video come from `describeLayouts` in `src/layout.js`.
+- **A re-rendered clip keeps its address**, so the pages add a version number to it and the server sends it uncached. Otherwise the browser replays the old clip.
 - **Guardrails from the spec:** local files only, no downloading; no uploading or posting; no feature whose purpose is removing watermarks or logos. `--trim` is capped at 5% of the shorter side for that reason.
 
 ## Adding a flag to `cut`
 
-1. Define it in `src/cli.js` and pass it to `cut()`.
+1. Define it in `src/cli.js` and pass it to `cut()`. For the dashboard, add it to `cutRequest` in `server/app.js` and to the form in `web/src/components/NewClip.vue`.
 2. Add the parameter to `cut()` in `src/cut.js`.
 3. If it changes the render: add it to the `meta` object, to the `Meta` type in `src/types.js`, and give it a default in `readMeta` so older clip folders still render.
 4. Add a test, and a row in the options table in `README.md`.
@@ -81,9 +94,10 @@ Each of these exists because something broke or the spec demands it. The evidenc
 
 ## How to work here
 
-- **Plain JavaScript.** The owner is a JavaScript developer and wants to read and change this code. Keep ES modules with JSDoc types: no TypeScript, no build step, and no second language beyond the small Python transcriber script.
+- **Plain JavaScript.** The owner is a JavaScript developer and wants to read and change this code. Keep ES modules with JSDoc types: no TypeScript, and no second language beyond the small Python transcriber script. `src/` and `server/` run as they are, with no build step. Only `web/` is built, by Vite. The pages are plain Vue single-file components with no UI library, router or store.
 - **Tests with every change.** `npm test` must pass before a change is called done. Add a test for each new rule or flag.
 - **Measure ffmpeg behaviour, do not assume it.** `test/cut.test.js` generates a source with a white flash and a beep at a known time; use it to prove timing, sync and silence.
+- **Open the dashboard in a browser after changing it.** Nothing tests the pages; `test/server.test.js` covers only the server. A page that builds is not a page that works: drive one cut and one caption fix, and read the browser console.
 - **Look at the picture.** The tests do not cover where text lands on screen. To check, save a frame and open it:
 
   ```bash
@@ -92,7 +106,19 @@ Each of these exists because something broke or the spec demands it. The evidenc
 
 - **Ask before installing or downloading anything** beyond `npm install`: system packages, pip packages, speech models, global npm changes such as `npm link`. Wait for a clear yes, and do not look for another route if a step is refused.
 - **Ask before anything that sends data out**, such as the planned `suggest` command, which sends transcripts to an LLM service.
-- **Do not commit or push unless asked.** The repository is public, so check new files for names, paths and keys before they go up.
+- **Do not commit or push unless asked.** When asked, follow "Before every push" below.
 - **Say what was verified and what was not.** A passing test suite does not show that a clip looks or sounds right.
 - **Write for the owner in plain language**, with commands ready to copy, including the `cd` into the project folder.
-- **Keep these files current.** When behaviour changes, update `README.md`, `docs/decisions.md` and `docs/roadmap.md` in the same change.
+
+## Before every push
+
+This is the owner's standing rule: the README and the knowledge files are brought up to date before anything is pushed, every time. A push that leaves them describing the old behaviour is not finished.
+
+Go through each file against what changed since the last push (`git diff origin/main` shows it), and edit what is no longer true:
+
+1. `README.md`: commands, flags, the brief fields, how to start things, what a clip folder contains.
+2. `CLAUDE.md`: the description at the top, the commands, how the code is put together, the rules, and the checklists.
+3. `docs/decisions.md`: an entry for each new choice that is not obvious from the code, with the reason and what was measured.
+4. `docs/roadmap.md`: what is built, what is waiting on the owner, what is not verified, what comes next, and the "Last updated" date.
+
+Read the whole of each file, not only the section you expect to change: a new feature usually makes a sentence somewhere else false. Then run `npm test`, check the new files for names, paths and keys (the repository is public), and say in the report which of the four files changed and which needed nothing.

@@ -1,6 +1,11 @@
 # WLC Clipper
 
-A command-line tool that turns a local video file and a time range into a finished vertical clip: 1080×1920, 30 fps, with burned-in captions, an optional hook line, and the on-screen text and hashtags a campaign brief requires.
+A tool that turns a local video file and a time range into a finished vertical clip: 1080×1920, 30 fps, with burned-in captions, an optional hook line, and the on-screen text and hashtags a campaign brief requires.
+
+You can use it two ways, and mix them freely:
+
+- **From the command line**, with `node src/cli.js` (see [Commands](#commands)).
+- **From a dashboard in your browser**, with `npm run dashboard` (see [Dashboard](#dashboard)).
 
 It works on files already on your disk. It does not download videos and it does not post anything.
 
@@ -37,6 +42,31 @@ xdg-open out/clip-001/clip.mp4
 Run `npm link` once if you would rather type `clipper` than `node src/cli.js`. It adds the command to your global npm setup.
 
 Put your source videos in a folder named `in/` (create it yourself; it is git-ignored). `xdg-open` is the Linux command for opening a file; use your system's own on another platform.
+
+## Dashboard
+
+The same tool with a page in your browser, for choosing the range and the crop by looking at the video.
+
+```bash
+npm run dashboard
+```
+
+Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
+
+- **Cut:** pick a video from `in/`, play it, press "Set start here" and "Set end here", choose the layout, and drag the frame over the video to place the crop (or the webcam box for the facecam layout). Add a hook and a brief if you want them, then press "Cut the clip".
+- **Clip:** watch the result, see each brief rule as Pass or Fail, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
+
+Only this computer can reach the dashboard; it is not visible on your network.
+
+It uses port 4517, so it runs alongside other local projects on the usual ports (3000, 8000, 8080). Start it in its own terminal and leave that open. If 4517 is taken, pick another port and open that address instead:
+
+```bash
+CLIPPER_PORT=4600 npm run dashboard
+```
+
+`npm run dashboard` builds the pages each time it starts, which takes a second or two. While a clip renders, ffmpeg uses every CPU core for about a minute.
+
+The dashboard and the command line do the same things and share the same `out/` folder, so you can mix them.
 
 ## Commands
 
@@ -111,6 +141,8 @@ node src/cli.js render out/clip-001
 ```
 
 This skips transcription, so it is quicker than a new `cut`. If the render fails, the old `clip.mp4` is left as it was.
+
+In the dashboard, open the clip, type over the wrong word under "Captions", and press "Save words and render again".
 
 For a word that is wrong in every clip, such as a brand name, put a fix in the brief's `replacements`. It is applied when a clip is cut, so it fixes clips made from then on; clips that already exist still need their transcript edited.
 
@@ -192,6 +224,10 @@ npm test
 ```
 
 Some tests run the real `ffmpeg` on a small generated video, so `ffmpeg` and `ffprobe` must be installed. They do not need the transcriber.
+
+The tests cover the engine and the dashboard's server. They do not cover the dashboard's pages; check those by opening them in a browser.
+
+To work on the pages with live reload, run the dashboard in one terminal and `npm run dev:web` in another, then open http://127.0.0.1:4518.
 
 ## What it does not do
 

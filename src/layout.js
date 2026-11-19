@@ -101,6 +101,56 @@ function pictureEnd({ subtitles, endCard }) {
 }
 
 /**
+ * Describe, in source pixels, the windows the layouts take from a video, so
+ * a screen can draw them over the picture. Uses the same arithmetic as the
+ * filter graphs.
+ *
+ * @param {VideoInfo} source
+ * @param {number} [trim]
+ * @returns {{
+ *   area: { x: number, y: number, width: number, height: number },
+ *   center: CropWindow,
+ *   game: CropWindow,
+ *   camAspect: number,
+ * }} `center` is the 9:16 window of the center layout, `game` the lower
+ *   panel of the facecam layout, `camAspect` the shape of its webcam panel.
+ */
+export function describeLayouts(source, trim = 0) {
+  const area = usableArea(source, trim);
+  return {
+    area: { x: area.x, y: area.y, width: area.width, height: area.height },
+    center: cropWindow(area, OUT_WIDTH / OUT_HEIGHT),
+    game: cropWindow(area, OUT_WIDTH / GAME_HEIGHT),
+    camAspect: OUT_WIDTH / CAM_HEIGHT,
+  };
+}
+
+/**
+ * @typedef {object} CropWindow
+ * @property {number} x        left edge when centred
+ * @property {number} y
+ * @property {number} width
+ * @property {number} height
+ * @property {number | null} minX   smallest and largest left edge --crop-x
+ * @property {number | null} maxX   can take; null when it cannot move sideways
+ */
+
+/** @returns {CropWindow} */
+function cropWindow(area, aspect) {
+  const sourceAspect = area.width / area.height;
+  if (sourceAspect > aspect + ASPECT_TOLERANCE) {
+    const width = toEven(area.height * aspect);
+    const maxX = area.x + area.width - width;
+    return { x: area.x + Math.floor((maxX - area.x) / 2), y: area.y, width, height: area.height, minX: area.x, maxX };
+  }
+  if (sourceAspect < aspect - ASPECT_TOLERANCE) {
+    const height = toEven(area.width / aspect);
+    return { x: area.x, y: area.y + Math.floor((area.height - height) / 2), width: area.width, height, minX: null, maxX: null };
+  }
+  return { x: area.x, y: area.y, width: area.width, height: area.height, minX: null, maxX: null };
+}
+
+/**
  * The part of the source frame the layouts work with, in source pixels.
  *
  * @returns {{ x: number, y: number, width: number, height: number, trimmed: boolean }}
@@ -169,25 +219,14 @@ function facecamGraph(source, area, cam, end) {
  *   followed by a comma, or empty when no crop is needed.
  */
 function fitCrop(area, aspect, cropX) {
-  const { width, height } = area;
-  const sourceAspect = width / height;
-
-  if (sourceAspect > aspect + ASPECT_TOLERANCE) {
-    const cropWidth = toEven(height * aspect);
-    const minX = area.x;
-    const maxX = area.x + width - cropWidth;
-    const x = clamp(cropX ?? minX + Math.floor((maxX - minX) / 2), minX, maxX);
-    return { step: `${cropStep({ x, y: area.y, width: cropWidth, height })},`, cropX: x };
+  const window = cropWindow(area, aspect);
+  if (window.minX !== null) {
+    const x = clamp(cropX ?? window.x, window.minX, window.maxX);
+    return { step: `${cropStep({ ...window, x })},`, cropX: x };
   }
-
-  if (sourceAspect < aspect - ASPECT_TOLERANCE) {
-    // Taller than wanted: take the middle and drop the top and bottom.
-    const cropHeight = toEven(width / aspect);
-    const y = area.y + Math.floor((height - cropHeight) / 2);
-    return { step: `${cropStep({ x: area.x, y, width, height: cropHeight })},`, cropX: null };
-  }
-
-  return { step: area.trimmed ? `${cropStep(area)},` : '', cropX: null };
+  // Nothing to move sideways. Crop only if the window is smaller than the frame.
+  const cropped = window.height !== area.height || area.trimmed;
+  return { step: cropped ? `${cropStep(window)},` : '', cropX: null };
 }
 
 function cropStep({ x, y, width, height }) {
