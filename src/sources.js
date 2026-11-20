@@ -4,15 +4,20 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 
-/** Only a channel marked `agreed` can be fetched from. */
+/**
+ * Only a channel marked `agreed` can be fetched from. Since 2026-11-20 the
+ * owner adds a channel to the list only once it has agreed, so the page no
+ * longer shows a status and every new entry is `agreed`. The other two
+ * values remain for lists saved before that.
+ */
 export const SOURCE_STATUSES = ['asked', 'agreed', 'declined'];
 
 const sourceSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/),
   name: z.string().trim().min(1).max(80),
   url: z.string().trim().max(200).refine((url) => channelKey(url) !== null, 'give the channel address: https://www.youtube.com/@name or https://www.youtube.com/channel/UC...'),
-  status: z.enum(SOURCE_STATUSES).default('asked'),
-  // Where and when they answered, in the owner's words.
+  status: z.enum(SOURCE_STATUSES).default('agreed'),
+  // Where and when they answered, in the owner's words. Kept from earlier lists; the page no longer asks for it.
   note: z.string().trim().max(300).default(''),
 });
 const sourcesSchema = z.array(sourceSchema).max(200);

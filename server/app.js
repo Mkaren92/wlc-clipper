@@ -12,7 +12,9 @@ import { savePart } from '../src/part.js';
 import { probe } from '../src/probe.js';
 import { formatClock, parseTime } from '../src/time.js';
 import { getTranscriber } from '../src/transcribe/index.js';
+import { combinedFile, readCombination } from '../src/combine/combination.js';
 import { addCardRoutes } from './cards.js';
+import { addCombinationRoutes } from './combinations.js';
 import { addCompilationRoutes } from './compilations.js';
 import { HttpError } from './http.js';
 import { createJobs } from './jobs.js';
@@ -75,14 +77,16 @@ const suggestRequest = z.strictObject({
  * @param {string} options.outDir      clip folders
  * @param {string} options.briefsDir   brief files
  * @param {string} options.partsDir    plain parts of videos, kept apart from the clips
+ * @param {string} [options.soundsDir]  audio files to put under cards; next to the data folder when not given
  * @param {string} options.dataDir     saved matches, cards and compilations
  * @param {string} [options.webDir]    built dashboard pages, if they exist
  * @param {string} options.toolVersion
  * @param {import('../src/transcribe/index.js').Transcriber} [options.transcriber]   replaced in tests
  * @param {import('../src/ai/client.js').Ai} [options.ai]   replaced in tests
  * @param {import('../src/fetch.js').Downloader} [options.downloader]   replaced in tests
+ * @param {(address: string) => Promise<Buffer>} [options.pictureDownload]   replaced in tests
  */
-export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, webDir, toolVersion, transcriber, ai = getAi(), downloader }) {
+export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsDir = path.join(dataDir, '..', 'sounds'), webDir, toolVersion, transcriber, ai = getAi(), downloader, pictureDownload }) {
   const app = express();
   const jobs = createJobs();
 
@@ -346,14 +350,25 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, webDir,
       if (!(await stat(file).catch(() => null))?.isFile()) throw new HttpError(404, 'No such clip.');
       return file;
     }
+    // A combined video is named by its combination, and is there once it has been generated.
+    if (library === 'combined') {
+      const combination = await readCombination(dataDir, name).catch(() => null);
+      const file = combination ? combinedFile(dataDir, combination.id) : '';
+      if (!file || !(await stat(file).catch(() => null))?.isFile()) throw new HttpError(404, 'No such combined video. Generate it on the Combine page first.');
+      return file;
+    }
     throw new HttpError(404, 'No such folder of videos.');
   }
   const isVideoName = (name) => isPlainName(name) && VIDEO_TYPES.has(extension(name));
-  addCompilationRoutes(app, { dataDir, inDir, jobs, resolveVideo, isVideoName });
+  addCompilationRoutes(app, { dataDir, inDir, soundsDir, jobs, resolveVideo, isVideoName });
+
+  // --- Combinations (server/combinations.js) ---------------------------------
+
+  addCombinationRoutes(app, { dataDir, jobs, resolveVideo });
 
   // --- Sources and fetching (server/sources.js) ------------------------------
 
-  addSourceRoutes(app, { dataDir, inDir, jobs, downloader });
+  addSourceRoutes(app, { dataDir, inDir, jobs, downloader, pictureDownload });
 
   // --- The pages themselves -------------------------------------------------
 

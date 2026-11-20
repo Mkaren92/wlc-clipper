@@ -20,6 +20,7 @@ const { app } = createApp({
   outDir: path.join(root, 'out'),
   briefsDir: path.join(root, 'briefs'),
   partsDir: path.join(root, 'parts'),
+  soundsDir: path.join(root, 'sounds'),
   dataDir: path.join(root, 'data'),
   webDir: existsSync(webDir) ? webDir : undefined,
   toolVersion: pkg.version,

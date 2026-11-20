@@ -50,6 +50,7 @@ export function chapterTime(seconds) {
  * @param {object} card
  */
 export function cardTitle(match, card) {
+  if (card.type === 'intro') return `${match.home} v ${match.away}`;
   const score = `${match.home} ${card.homeScore}–${card.awayScore} ${match.away}`;
   const minute = minuteLabel(card.minute, card.added);
   if (card.type === 'goal') {

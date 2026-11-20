@@ -38,6 +38,7 @@ const fakeAi = {
 const fakeDownloader = {
   isInstalled: async () => true,
   info: async () => ({ id: 'dQw4w9WgXcQ', title: 'A watchalong', channel: 'Agreed Channel', channelId: 'UCxxx', handle: '@agreed', duration: 600 }),
+  channel: async () => ({ name: 'Agreed Channel', channelId: 'UCxxx', handle: '@agreed', pictureUrl: 'https://yt3.googleusercontent.com/made-up-picture' }),
   download: async (job) => {
     await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-t', '1', '-pix_fmt', 'yuv420p', path.join(job.dir, `${job.name}.mp4`)]);
   },
@@ -72,6 +73,12 @@ beforeAll(async () => {
     transcriber: fakeTranscriber,
     ai: fakeAi,
     downloader: fakeDownloader,
+    // Stands in for fetching a picture: any address gives the test video's first frame as a picture.
+    pictureDownload: async () => {
+      const file = path.join(dir, 'picture.png');
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=400x300', '-frames:v', '1', file]);
+      return readFile(file);
+    },
   });
   jobs = built.jobs;
   server = built.app.listen(0, '127.0.0.1');
@@ -278,7 +285,72 @@ describe('matches and cards', () => {
   }, 60_000);
 });
 
+describe('leagues and clubs', () => {
+  it('keeps the owner\'s leagues and clubs, answering every change with the whole list', async () => {
+    const start = (await api('/api/clubs')).data;
+    expect(start.leagues.map((league) => league.name)).toEqual(['La Liga', 'Premier League', 'Serie A']);
+    expect(start.clubs).toHaveLength(60);
+
+    const withLeague = await api('/api/leagues', { method: 'POST', body: { name: 'Countries' } });
+    expect([withLeague.status, withLeague.data.leagues.at(-1)]).toEqual([201, { id: 'countries', name: 'Countries' }]);
+    expect((await api('/api/leagues/countries', { method: 'PUT', body: { name: 'National teams' } })).data.leagues.at(-1).name).toBe('National teams');
+
+    // The id is made here from the name; one sent in the body is ignored, and so is anything else.
+    const added = await api('/api/clubs', { method: 'POST', body: { id: '../x', name: 'Armenia', league: 'countries', colour: '#d90012', admin: true } });
+    expect(added.status).toBe(201);
+    expect(added.data.clubs.find((club) => club.name === 'Armenia')).toEqual({ id: 'armenia', name: 'Armenia', league: 'countries', colour: '#d90012', icon: '' });
+    expect((await api('/api/clubs/armenia', { method: 'PUT', body: { colour: '#0033a0' } })).data.clubs.find((club) => club.id === 'armenia')).toMatchObject({ name: 'Armenia', colour: '#0033a0' });
+
+    expect((await api('/api/clubs/armenia', { method: 'PUT', body: { icon: 'https://example.com/flag.png' } })).status).toBe(400);
+    expect((await api('/api/clubs', { method: 'POST', body: { name: 'X', league: 'nowhere' } })).status).toBe(400);
+    expect((await api('/api/clubs/no-such-club', { method: 'PUT', body: { name: 'X' } })).status).toBe(404);
+    expect((await api('/api/clubs/..%2Fx', { method: 'DELETE' })).status).toBe(404);
+    expect((await api('/api/clubs', { method: 'POST', body: { name: 'Y', league: 'la-liga' }, headers: { Origin: 'https://example.com' } })).status).toBe(403);
+
+    // Deleting the league takes its club with it and leaves the rest.
+    const after = await api('/api/leagues/countries', { method: 'DELETE' });
+    expect(after.data.leagues).toHaveLength(3);
+    expect(after.data.clubs).toHaveLength(60);
+    expect((await api('/api/leagues/countries', { method: 'DELETE' })).status).toBe(404);
+  });
+});
+
 describe('compilations', () => {
+  it('lists the sounds a card can have, and serves them by name only', async () => {
+    // The sounds folder is made beside the data folder, for the owner to put files in.
+    const first = (await api('/api/sounds')).data;
+    expect(first.builtIn.map((sound) => sound.id)).toEqual(['goal', 'tragic', 'whistle']);
+    expect(first).toMatchObject({ files: [], automatic: { intro: 'none', goal: 'builtin:goal', red: 'builtin:tragic', fulltime: 'builtin:whistle' } });
+    // How long each plays, for a card that lasts as long as its sound.
+    expect(Object.keys(first.lengths).sort()).toEqual(['builtin:goal', 'builtin:tragic', 'builtin:whistle']);
+    expect(first.lengths['builtin:tragic']).toBeCloseTo(4.6, 1);
+    const soundsDir = path.join(dir, 'sounds');
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '0.3', path.join(soundsDir, 'horn.wav')]);
+    await writeFile(path.join(soundsDir, 'notes.txt'), 'not a sound');
+    expect((await api('/api/sounds')).data).toMatchObject({ files: ['horn.wav'], lengths: { 'file:horn.wav': expect.closeTo(0.3, 1) } });
+    // A file named after a kind of card takes the built-in sound's place for that kind.
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=500', '-t', '0.4', path.join(soundsDir, 'goal.wav')]);
+    expect((await api('/api/sounds')).data.automatic).toEqual({ intro: 'none', goal: 'file:goal.wav', red: 'builtin:tragic', fulltime: 'builtin:whistle' });
+
+    const heard = async (address) => {
+      const response = await fetch(`${base}${address}`);
+      return [response.status, response.headers.get('content-type')];
+    };
+    expect(await heard('/media/sounds/file/horn.wav')).toEqual([200, expect.stringMatching(/^audio\//)]);
+    expect(await heard('/media/sounds/builtin/whistle')).toEqual([200, expect.stringMatching(/^audio\//)]);
+    for (const address of ['/media/sounds/file/notes.txt', '/media/sounds/file/missing.mp3', '/media/sounds/file/..%2Fin%2Fgame.mp4', '/media/sounds/builtin/trumpet', '/media/sounds/builtin/..%2Fx']) {
+      expect((await heard(address))[0], address).toBe(404);
+    }
+
+    // A card's sound is saved with the timeline, and one that could lead out of the folder is refused.
+    const made = (await api('/api/compilations', { method: 'POST', body: { name: 'With sound' } })).data;
+    const card = (sound) => api(`/api/compilations/${made.id}`, { method: 'PUT', body: { ...made, items: [{ id: 'c', kind: 'card', matchId: 'm1', cardId: 'g1', sound }] } });
+    expect((await card('file:horn.wav')).data.items[0].sound).toBe('file:horn.wav');
+    expect((await card(undefined)).data.items[0].sound).toBe('auto');
+    expect((await card('file:../horn.wav')).status).toBe(400);
+    expect((await api(`/api/compilations/${made.id}`, { method: 'DELETE' })).status).toBe(200);
+  }, 60_000);
+
   it('saves a timeline, renders it as a job with a state per item, and serves the result', async () => {
     const made = await api('/api/compilations', { method: 'POST', body: { name: 'Goal reactions' } });
     expect([made.status, made.data.id, made.data.final]).toEqual([201, 'goal-reactions', null]);
@@ -309,6 +381,16 @@ describe('compilations', () => {
     expect(media.status).toBe(206);
     await media.arrayBuffer();
 
+    // Once the credited channel has a picture, Generate hands it to the engine: the
+    // clip credited to that channel is made again with it, and the other is reused.
+    await api('/api/sources', { method: 'PUT', body: [{ id: 'ana', name: 'Ana', url: 'https://www.youtube.com/@agreed' }] });
+    expect((await finished((await api('/api/sources/pictures', { method: 'POST' })).data.id)).result).toEqual({ fetched: ['Ana'], failed: [] });
+    const again = await finished((await api('/api/compilations/goal-reactions/generate', { method: 'POST' })).data.id);
+    expect(again).toMatchObject({ status: 'done' });
+    expect(again.result.items.map((item) => item.reused)).toEqual([false, true]);
+    expect((await api('/api/compilations/goal-reactions')).data.description).toBe('Credits:\n- Ana: https://www.youtube.com/@agreed\n\nChapters:\n0:00 Start\n');
+    await api('/api/sources', { method: 'PUT', body: [] });
+
     expect((await api('/api/compilations/goal-reactions', { method: 'DELETE' })).status).toBe(200);
     expect((await api('/api/compilations')).data).toEqual([]);
     expect((await api('/api/compilations/..%2Fmatches', { method: 'DELETE' })).status).toBe(404);
@@ -331,18 +413,71 @@ describe('compilations', () => {
   }, 60_000);
 });
 
+describe('combinations', () => {
+  it('saves two videos side by side, makes one video of them, and offers it to compilations', async () => {
+    expect((await api('/api/combinations')).data).toEqual([]);
+    const made = await api('/api/combinations', { method: 'POST', body: { name: 'Goal and reaction' } });
+    expect([made.status, made.data.id, made.data.result]).toEqual([201, 'goal-and-reaction', null]);
+    const id = made.data.id;
+
+    // Names only: a folder or a path the tool does not know is refused.
+    const side = (changes) => ({ library: 'in', name: 'game.mp4', start: 0, end: 2, ...changes });
+    expect((await api(`/api/combinations/${id}`, { method: 'PUT', body: { ...made.data, left: side({ library: 'etc', name: 'passwd' }) } })).status).toBe(400);
+    expect((await api('/api/combinations/..%2Fmatches', { method: 'PUT', body: made.data })).status).toBe(404);
+    // Nothing can be generated until both videos are chosen.
+    const early = await api(`/api/combinations/${id}/generate`, { method: 'POST' });
+    expect(await finished(early.data.id)).toMatchObject({ status: 'failed', error: expect.stringMatching(/Choose the video for the left side first/) });
+    expect((await fetch(`${base}/media/combinations/${id}/combined.mp4`)).status).toBe(404);
+    // Not offered to a compilation before it exists.
+    expect((await api(`/api/library/combined/${id}`)).status).toBe(404);
+
+    // The page sends back everything it was given, including what the server added.
+    const saved = await api(`/api/combinations/${id}`, { method: 'PUT', body: { ...made.data, left: side({ x: 0.2 }), right: side({ start: 2, end: 3 }), main: 'left' } });
+    expect(saved.data).toMatchObject({ main: 'left', sound: 'low', left: { zoom: 1, x: 0.2, y: 0.5 }, result: null });
+
+    const started = await api(`/api/combinations/${id}/generate`, { method: 'POST' });
+    expect(started.status).toBe(202);
+    expect(await finished(started.data.id)).toMatchObject({ status: 'done', kind: 'combine', label: 'Goal and reaction', result: { combination: id, seconds: 2, split: 1 } });
+    const after = (await api(`/api/combinations/${id}`)).data;
+    expect(after.result).toMatchObject({ changedSince: false });
+    expect(after.result.size).toBeGreaterThan(1000);
+    const media = await fetch(`${base}/media/combinations/${id}/combined.mp4?v=${after.result.version}`, { headers: { Range: 'bytes=0-9' } });
+    expect([media.status, media.headers.get('cache-control')]).toEqual([206, 'no-store']);
+    await media.arrayBuffer();
+    // A change to the settings is marked until the video is made again.
+    expect((await api(`/api/combinations/${id}`, { method: 'PUT', body: { ...after, sound: 'off' } })).data.result).toMatchObject({ changedSince: true });
+
+    // A compilation takes it like any other video, named by the combination.
+    expect((await api(`/api/library/combined/${id}`)).data).toMatchObject({ width: 1920, height: 1080 });
+    const compilation = (await api('/api/compilations', { method: 'POST', body: { name: 'With a combined video' } })).data;
+    await api(`/api/compilations/${compilation.id}`, { method: 'PUT', body: { ...compilation, items: [{ id: 'a', kind: 'video', library: 'combined', name: id }] } });
+    const compiled = await finished((await api(`/api/compilations/${compilation.id}/generate`, { method: 'POST' })).data.id);
+    expect(compiled).toMatchObject({ status: 'done', kind: 'compile' });
+    expect(Math.abs(compiled.result.seconds - 2)).toBeLessThan(0.1);
+    await api(`/api/compilations/${compilation.id}`, { method: 'DELETE' });
+
+    // Only this machine's own pages may ask.
+    for (const [address, method] of [['/api/combinations', 'POST'], [`/api/combinations/${id}/generate`, 'POST'], [`/api/combinations/${id}`, 'DELETE']]) {
+      expect((await api(address, { method, headers: { Origin: 'https://example.com' } })).status, address).toBe(403);
+    }
+    expect((await api(`/api/combinations/${id}`, { method: 'DELETE' })).status).toBe(200);
+    expect((await api('/api/combinations')).data).toEqual([]);
+    expect((await api(`/api/library/combined/${id}`)).status).toBe(404);
+  }, 180_000);
+});
+
 describe('sources and fetching', () => {
   const link = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
   const source = (status) => [{ id: 'a', name: 'Agreed Channel', url: 'https://www.youtube.com/@agreed', status, note: '' }];
 
   it('keeps the sources list, and fetches only from a channel marked as agreed', async () => {
-    expect((await api('/api/sources')).data).toEqual({ sources: [], prefixes: {}, downloaderInstalled: true });
+    expect((await api('/api/sources')).data).toEqual({ sources: [], pictures: {}, prefixes: {}, downloaderInstalled: true });
     expect((await api('/api/sources', { method: 'PUT', body: [{ id: 'a', name: 'X', url: 'https://example.com/@x' }] })).status).toBe(400);
 
     // Asked, but not agreed yet: the fetch is refused and nothing is written.
     await api('/api/sources', { method: 'PUT', body: source('asked') });
     const early = await api('/api/fetch', { method: 'POST', body: { url: link, start: '1:00', end: '1:30' } });
-    expect(await finished(early.data.id)).toMatchObject({ status: 'failed', error: expect.stringMatching(/not marked as agreed/) });
+    expect(await finished(early.data.id)).toMatchObject({ status: 'failed', error: expect.stringMatching(/not in your sources list/) });
     expect((await api('/api/videos')).data.map((video) => video.name)).toEqual(['game.mp4']);
 
     const saved = await api('/api/sources', { method: 'PUT', body: source('agreed') });
@@ -358,6 +493,31 @@ describe('sources and fetching', () => {
     expect((await api('/api/fetch', { method: 'POST', body: { url: link, start: 0, end: 5 }, headers: { Origin: 'https://example.com' } })).status).toBe(403);
     await jobs.idle();
     await rm(path.join(dir, 'in', 'agreed-channel_dQw4w9WgXcQ_1m00s-1m30s.mp4'));
+
+    // The channel's picture: fetched as a job for the saved list, served by the source's id, and gone with the channel.
+    expect((await api('/api/sources')).data.pictures).toEqual({});
+    expect((await fetch(`${base}/media/source-pictures/a`)).status).toBe(404);
+    const pictures = await api('/api/sources/pictures', { method: 'POST' });
+    expect(await finished(pictures.data.id)).toMatchObject({ status: 'done', kind: 'pictures', result: { fetched: ['Agreed Channel'], failed: [] } });
+    expect(Object.keys((await api('/api/sources')).data.pictures)).toEqual(['a']);
+    const served = await fetch(`${base}/media/source-pictures/a`);
+    expect([served.status, served.headers.get('content-type')]).toEqual([200, 'image/png']);
+    expect((await fetch(`${base}/media/source-pictures/..%2Fsources`)).status).toBe(404);
+    expect((await api('/api/sources/pictures', { method: 'POST', headers: { Origin: 'https://example.com' } })).status).toBe(403);
+    await jobs.idle();
+
+    await api('/api/sources', { method: 'PUT', body: [] });
+    expect((await readdir(path.join(dir, 'data', 'source-pictures'))).filter((name) => name.endsWith('.png'))).toEqual([]);
+
+    // Sync on a row with only an address: the name and the picture come from YouTube, and the channel is saved.
+    const synced = await api('/api/sources/sync', { method: 'POST', body: { id: 'snew', url: 'https://www.youtube.com/@agreed', name: '', status: 'declined', note: 'ignored' } });
+    expect(await finished(synced.data.id)).toMatchObject({ status: 'done', kind: 'channel', result: { source: { id: 'snew', name: 'Agreed Channel', status: 'agreed', note: '' }, named: true, picture: true } });
+    const listed = (await api('/api/sources')).data;
+    expect([listed.sources.map((one) => one.name), Object.keys(listed.pictures)]).toEqual([['Agreed Channel'], ['snew']]);
+    const refused = await api('/api/sources/sync', { method: 'POST', body: { id: 'other', url: 'https://example.com/@x' } });
+    expect(await finished(refused.data.id)).toMatchObject({ status: 'failed', error: expect.stringMatching(/Give the channel address first/) });
+    expect((await api('/api/sources/sync', { method: 'POST', body: { id: 'x', url: 'https://www.youtube.com/@agreed' }, headers: { Origin: 'https://example.com' } })).status).toBe(403);
+    await jobs.idle();
     await api('/api/sources', { method: 'PUT', body: [] });
   }, 60_000);
 });

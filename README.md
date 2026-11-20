@@ -9,9 +9,9 @@ You can use it two ways, and mix them freely:
 
 Optionally, an AI service can suggest which moments to clip and fix caption mistakes (see [AI help](#ai-help)).
 
-The dashboard also has two pages for building a longer video out of several pieces: [match cards and compilations](#match-cards-and-compilations).
+The dashboard also has pages for building a longer video out of several pieces: [match cards and compilations](#match-cards-and-compilations), and [Combine](#combine-two-videos), which puts two videos side by side.
 
-It works on files on your disk and it does not post anything. The one way video comes in from outside is [`fetch`](#sources-and-fetching), which takes part of a YouTube video from a channel you have marked as agreed.
+It works on files on your disk and it does not post anything. The one way video comes in from outside is [`fetch`](#sources-and-fetching), which takes part of a YouTube video from a channel in your sources list, where you add only channels that have agreed. The Sources page can also fetch those channels' profile pictures, to show beside their names.
 
 ## Requirements
 
@@ -61,11 +61,11 @@ Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 
 - **Cut:** pick a video in the left column. It plays on the left and stays in view while you set the range, the layout, the text and the brief on the right. Drag the bright window over the video to place the crop (or the yellow box for the facecam layout). With the center layout, the "Show more of the picture" slider makes the crop wider, for a person who moves out of the narrow column. The bar at the bottom of the screen always shows what will be made, anything that is in the way, and "Cut the clip".
 - **Keys for the player:** Space plays and pauses, the left and right arrows move one second (a tenth with Shift), I sets the start, O sets the end, and P plays the range. They do nothing while you are typing in a box, and they go by the key's place on the keyboard, so they work on a keyboard set to another alphabet.
-- **Activity:** while a clip is being cut, rendered again, fetched, or searched for moments, the left column says what is happening and at which step, under "Activity". It is there on every page and after a reload. You can start another cut meanwhile; it waits its turn. When something is ready, it offers "Open".
+- **Activity:** while a clip is being cut, rendered again, fetched, combined, or searched for moments, the left column says what is happening and at which step, under "Activity". It is there on every page and after a reload. You can start another cut meanwhile; it waits its turn. When something is ready, it offers "Open".
 - **Deleting a video:** each video in the left column has a trash icon. It asks once, then deletes the file from `in/`. Clips already cut from it stay, but can no longer be rendered again, because rendering reads the source. A compilation that uses the video will not build until the item is taken out. It is not possible while a clip is being made.
 - **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
 - **Clip:** watch the result, download it, see each brief rule as passed or failed, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
-- **Unsaved changes:** the card, compilation and sources pages show "Changes not saved" until you save, and their Save button stays in view.
+- **Unsaved changes:** the card, combine, compilation and sources pages show "Changes not saved" until you save, and their Save button stays in view.
 
 Only this computer can reach the dashboard; it is not visible on your network.
 
@@ -89,53 +89,112 @@ sunset: { name: 'Sunset', background: '#fff8f1', surface: '#ffe3c8', highlight: 
 
 Everything else (borders, quiet text, hover colours, the text on buttons) is worked out from those five, and moved where needed so that text stays readable. The tint may be a strong colour: it is thinned with the page colour until text reads on it. The highlight marks step numbers, counts and "this one". Results (passed, failed, waiting) are always green, red and amber, whatever the palette, so a palette with an orange highlight does not make "passed" look like a warning. Set `DEFAULT_PALETTE` in the same file to change what a new browser starts with. `npm test` checks every palette for readable contrast.
 
-Two things keep their own colours whatever the palette: match cards, which use the teams' colours, and the crop window drawn over the video, which has to show on any footage.
+Three things keep their own colours whatever the palette: match cards, which use the teams' colours, the crop window drawn over the video, which has to show on any footage, and the black behind a video player.
 
-The Clips page and the command line do the same things and share the same `out/` and `parts/` folders, so you can mix them. The Cards and Compilations pages exist only in the dashboard, and so does the sources list; fetching works from both.
+The Clips page and the command line do the same things and share the same `out/` and `parts/` folders, so you can mix them. The Cards, Combine and Compilations pages exist only in the dashboard, and so does the sources list; fetching works from both.
 
 ## Match cards and compilations
 
-These two dashboard pages are for "goal reaction" compilations: streamers' reaction clips, with a card between them that says what just happened in the match. Open them with the buttons at the top left of the dashboard.
+These dashboard pages are for "goal reaction" compilations: streamers' reaction clips, with a card between them that says what just happened in the match. A third page, [Combine](#combine-two-videos), puts a reaction and the goal itself side by side. Open them with the buttons at the top left of the dashboard.
 
 ### Cards
 
-1. Press "New match" and enter the two teams, their colours, and optionally the competition and date. These are shared by every card of the match.
-2. Add cards:
+1. Press "New match". Choose a league and then the home and away club from your list (see [Leagues and clubs](#leagues-and-clubs)): that fills in each team's name, colour and logo, and the competition. Or type the two teams and pick their colours yourself. You can change anything for this match afterwards, and optionally add a date. These are shared by every card of the match.
+2. Optionally add a club icon for each team: a picture from your own computer, which is shrunk and kept with the match. The tool does not fetch crests. Icons are shown on the intro card.
+3. Add cards:
+   - **Intro:** the opening card. It shows both clubs with their icons and names, and "V" between them, or the score if you switch it on. A team without an icon gets its first letter on its colour.
    - **Goal:** scoring team, scorer, assist, minute (with added time, such as 45+2), goal type, and the score after the goal. The assist is left out for a penalty and an own goal.
    - **Red card:** player, team, minute, straight red or second yellow, and optionally the score.
    - **Full time:** the final score and the scorers. The lists are filled in from the goal cards; you can edit them, and "Fill from the goal cards" refreshes them.
-3. The preview on the right updates as you type, in either size.
-4. "Save match and cards" stores the match and a picture of each card in both sizes, which is what a compilation uses. "Export PNG" downloads one card at 1920×1080 or 1080×1920.
+4. The preview on the right updates as you type, in either size.
+5. "Save match and cards" stores the match and a picture of each card in both sizes, which is what a compilation uses. "Export PNG" downloads one card at 1920×1080 or 1080×1920.
 
 Every match and every card has a trash icon. It asks once, then deletes for good. Deleting a card of a saved match takes effect straight away, without pressing Save; deleting a match removes its cards and their pictures with it.
 
-Cards are text only, with team colours as plain blocks: no crests, logos or photos. They are drawn with the font bundled in `assets/fonts`, so they look the same on every machine.
+Cards are text with team colours as plain blocks. The only pictures are the club icons you add yourself, on the intro card: no league logos or photos, and nothing fetched. Club crests belong to the clubs, so whether to use one is your call. Cards are drawn with the font bundled in `assets/fonts`, so they look the same on every machine.
 
 To add a goal type, add a line to `GOAL_TYPES` in `src/cards/config.js`.
+
+### Leagues and clubs
+
+"Leagues and clubs", at the top of the Cards page, is your own list of teams to choose from when you start a match.
+
+- **It starts with three leagues**, La Liga, the Premier League and Serie A, each with twenty clubs: a name and a main colour. They were written down from memory of the 2025–26 season, as a starting point, so check them: clubs go up and down every year.
+- **A club is a name, a colour and a logo.** The logo is a picture you add from your own computer; none comes with the list and the tool fetches none. Club crests belong to the clubs, so using one is your call.
+- **Add a league** with "New league", for example "Countries" for national teams, and add clubs to whichever league is chosen. Rename or recolour a club by changing it in place, and delete with the trash icon. Deleting a league deletes its clubs.
+- **Changes are saved as you make them**, in `data/clubs.json`.
+- **A match keeps its own copy** of what it took from a club. Changing or deleting a club later does not change matches you already made.
 
 ### Compilations
 
 1. Press "New compilation", name it, and choose the size: 1920×1080 or 1080×1920, both 30 fps.
-2. Add videos. Anything already in the project (`in/`, your parts, your clips) is added without copying. You can also choose files from your computer or drop them on the page; those are copied into `in/`, so they take that much more disk space.
-3. Add cards from a saved match.
-4. Put the items in order by dragging them, or with "Up" and "Down". For each video you can set a start and end in seconds and a credit, the streamer's name, which is shown in the bottom left corner for the whole clip. For each card you set how long it is shown (3 seconds by default). The total length is shown under the list.
+2. Add videos. Anything already in the project (`in/`, your parts, your clips, and the videos made on the [Combine page](#combine-two-videos)) is added without copying. You can also choose files from your computer or drop them on the page; those are copied into `in/`, so they take that much more disk space.
+3. Add cards from a saved match. A card plays a sound while it is shown (see [Sounds under cards](#sounds-under-cards)).
+4. Put the items in order by dragging them, or with "Up" and "Down". For each video you can set a start and end in seconds, [a second video shown beside it](#a-second-video-beside-a-reaction), and a credit, the streamer, chosen from the channels on the [Sources page](#sources-and-fetching). The channel's picture and name are shown in the bottom left corner for the whole clip, on a dark plate with a pale edge and a soft shadow so they stand out on any footage. A channel with no picture yet shows its name only; press sync on its row in Sources to get the picture. For each card you choose its sound and, if you want, how long it is shown (by default, as long as its sound). The total length is shown under the list.
 5. Press "Generate the video". Each item shows its progress. When it is done the video plays on the page, with a download link.
 
-Next to the video, `description.txt` lists the credits (each streamer once, in order, with the channel's address when the name matches an agreed channel in your [sources list](#sources-and-fetching)) and chapter times taken from where the cards fall, starting at 0:00. Players usually want at least three chapters of ten seconds or more before they show them.
+Next to the video, `description.txt` lists the credits (each streamer once, in order, with the channel's address when the name matches a channel in your [sources list](#sources-and-fetching)) and chapter times taken from where the cards fall, starting at 0:00. Players usually want at least three chapters of ten seconds or more before they show them.
 
 Each compilation in the list has a trash icon, which deletes it with its final video and description after asking once. The trash icon on a timeline item only takes that item out of the timeline.
+
+#### A second video beside a reaction
+
+A video in the timeline can have another video shown beside it, for a streamer's reaction with the goal they are reacting to. Tick "Show another video beside it" on the reaction, choose the other video, and set its start and end if you want only part of it.
+
+- **While the second video runs, the screen is split**, and each video fills its half with the middle of its picture. In a wide compilation the reaction is on the left half and the second video on the right: the middle 50% of each. In a tall compilation the second video is on top and the reaction below.
+- **When the second video ends, the reaction fills the screen**, on the very next frame. The reaction plays through without a break; only how it is shown changes. A 10-second reaction with a 5-second goal gives 5 seconds split and 5 seconds full.
+- **Sound:** the reaction's sound runs throughout at its usual level. For the second video's sound there are three choices under "Its sound": quiet, under the reaction (about 70–30, and what a new one starts with); as loud as the reaction (about 50–50); or off.
+- **Both are cropped to their middle** in the split, so a streamer who sits to one side, or a goal near the edge of the picture, is partly cut off there. To choose the part shown, the side, or how the two line up, use the [Combine page](#combine-two-videos) instead.
+- A second video longer than the reaction is cut off when the reaction ends.
+
+Both videos are files already in the project: put the goal footage in `in/` like any other video.
+
+#### Sounds under cards
+
+Every card in a compilation has a sound under it, and is shown exactly as long as that sound plays. Left on "Automatic", a goal card gets a voice saying "Goool", a red card gets a tragic chord, and a full-time card gets a soft whistle. An intro card is silent until you supply a sound for it. On each card in the timeline you can choose another sound or "No sound", and "Listen" plays it before you generate.
+
+- **The built-in sounds are made by the tool**: the voice is the computer voice inside ffmpeg with its vowel stretched, and the other two are plain tones. They are not recordings, so nothing is downloaded and nobody's rights are involved. They are also only stand-ins: listen to them, and use your own where you want the real thing.
+- **Your own sounds, the easy way:** put a file named `intro`, `goal`, `red` or `fulltime` in the project's `sounds/` folder (for example `goal.mp3`, a recording of yourself shouting it). Every card of that kind left on "Automatic" then uses it, with nothing to choose.
+- **Your own sounds, card by card:** any other audio file in `sounds/` (`.mp3`, `.wav`, `.m4a`, `.aac`, `.ogg`, `.opus`, `.flac`) can be chosen on a card after a reload. Use only sounds you are allowed to use. The folder is not part of the repository.
+- **A video as a moving background:** a video file in `sounds/` (`.mp4`, `.mov`, `.mkv`, `.webm`, `.m4v`) can be put under a card too. Its sound plays, and its picture moves behind the card, dimmed a little so the words stay readable. Named after a kind of card, such as `intro.mp4`, it is used for every card of that kind, ahead of a sound file of the same name. The card maker's preview still shows the plain background; the video appears in the compilation. After adding the first video, open the match in the card maker and press "Save match and cards" once, so each card gets the see-through picture this needs.
+- **The card's length follows the sound.** Leave "Shown for" empty and the card lasts as long as its sound, or 3 seconds with no sound. Type a number to fix the length yourself: a longer sound is then faded out as the card ends, and after a shorter one the rest of the card is silent. The sound never carries on into the next clip.
+- **Loudness is levelled**, a little under the clips, so a quiet file and a loud one come out alike. The soft whistle is played quieter still.
+- **Compilations made before this** get the automatic sounds the next time you press "Generate the video". Their cards keep the 3 seconds they were saved with; empty the "Shown for" box to make a card follow its sound.
 
 Everything is kept in `data/`: matches in `data/matches`, and each compilation in `data/compilations/<name>` with its `timeline.json`, `final.mp4` and `description.txt`. A compilation can be reopened, changed and generated again. Only the items you changed are made again, so a second run is quick, and a run that failed carries on from where it stopped.
 
 Clips of any size and frame rate can be mixed. Each is fitted inside the chosen size with black bars where needed, and its loudness is levelled so that clips from different streams sit together.
 
+## Combine two videos
+
+The Combine page puts two videos side by side, such as a streamer's reaction and the goal being reacted to, and makes one video of them. You line them up by watching, not by typing numbers blind.
+
+1. Press "New combination", name it, and choose the size: wide (left and right) or tall (top and bottom).
+2. Choose the left video and the right video from your videos, parts and clips.
+3. Mark one as the **main video**. It sets the length of the result, and it gets the whole screen once the other video has ended.
+4. Set where each video starts with its slider; the preview shows that frame at once. Press "Play both" to watch and hear them together, and nudge a start by 0.1 s or 1 s until they are in step. "Ends at" cuts a video short.
+5. Choose the part of each video that shows while the screen is split: zoom in, and move left or right, up or down. This is how a streamer who sits off-centre is brought into view.
+6. Choose how the screen is shared while it is split: equal (50–50), or the main video larger (60–40 or 70–30).
+7. Choose the sound: the main video in front with the other quieter (about 70 to 30), both about the same, or only the main video. The balance in the preview is only rough.
+8. Press "Make the combined video". It plays on the page when it is done.
+
+The preview and the finished video are worked out by the same code, so what you see is what is made. "Swap sides" puts the two videos the other way round.
+
+To use a combined video, open Compilations and add it from the "Combined" list under "Add videos". It is then an ordinary item: it can have a credit, a start and an end. If you change a combination afterwards, make its video again; the list marks one whose settings have changed since it was made.
+
+Each combination is kept in `data/combinations/<name>` with its settings and `combined.mp4`.
+
 ## Sources and fetching
 
-The Sources page keeps a list of the channels you take clips from: name, channel address, a status (asked, agreed or declined) and a note of where and when they answered.
+The Sources page keeps the list of channels you take clips from: a name and the channel's address for each. Add a channel only once it has agreed to let you use its videos; being in the list is what allows fetching from it.
+
+"Get the channels' pictures" fetches the profile picture of every channel in the saved list from YouTube and keeps each as a small round picture in `data/source-pictures/`. The page shows them next to the names, and a compilation draws a channel's picture beside its name wherever it is credited. Press it again after adding a channel, or when a channel changes its picture; a compilation generated afterwards uses the new one. `description.txt` is plain text, so it has no pictures. Removing a channel removes its picture.
+
+To add a channel quickly, press "Add a channel", paste only its address, and press the round arrows on its row. The channel's name and picture are filled in from YouTube and the channel is saved to the list. A name you typed yourself is kept, so on a channel you already have the button only refreshes the picture. Change the name afterwards if you want another spelling, and press "Save the list".
 
 "Fetch part of a video" on the same page brings a part of a YouTube video into `in/`:
 
-- **Only from a channel marked "Agreed".** The channel is read from the video itself, so a link to anyone else's video is refused.
+- **Only from a channel in your list.** The channel is read from the video itself, so a link to anyone else's video is refused.
 - **A part, not the whole video.** You give a start and an end, up to 20 minutes. Long watchalongs are several gigabytes; a part is small.
 - **Up to 1080p, with the picture exactly as YouTube sends it.** A video can only be cut without loss at certain frames, so the part starts up to a few seconds before the time you gave; the tool says by how much. Set the exact start when you cut.
 - **YouTube links to one video only.** Playlists and channel links are refused.
@@ -219,7 +278,7 @@ It prints each moment with a `cut` command for its range. Videos longer than 60 
 | `check <clip-folder>` | Checks an existing clip and its `post.txt` against a brief |
 | `suggest <file>` | Asks an AI service for moments worth clipping (see [AI help](#ai-help)) |
 | `extract <file>` | Saves a part of a video as it is, at the original size (see [Plain parts](#plain-parts)) |
-| `fetch <link>` | Brings part of a YouTube video into `in/`, from an agreed channel (see [Sources and fetching](#sources-and-fetching)) |
+| `fetch <link>` | Brings part of a YouTube video into `in/`, from a channel in your sources list (see [Sources and fetching](#sources-and-fetching)) |
 
 Every command has built-in help: `node src/cli.js cut --help`.
 
@@ -394,7 +453,7 @@ To work on the pages with live reload, run the dashboard in one terminal and `np
 
 ## What it does not do
 
-- Download whole videos, or anything from a channel not marked as agreed
+- Download whole videos, or anything from a channel that is not in your sources list
 - Upload or post anywhere
 - Cut a clip on its own: the AI only suggests moments, and you choose
 - Follow a moving speaker

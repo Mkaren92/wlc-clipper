@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated 2026-11-19. Update this file when something here changes.
+Last updated 2026-11-20. Update this file when something here changes.
 
 ## Built
 
@@ -14,10 +14,17 @@ Version 1 of the spec is complete: all three "evenings".
 - A dashboard in the browser (`npm run dashboard`): cut with a visual range and crop, view clips with their checks and post text, fix caption words
 - Two more dashboard pages: a card maker (goal, red card and full-time cards, saved per match, exported as PNG in two sizes) and a compilation builder (videos and cards in order, credits, one final video with a description file)
 - A redesigned dashboard on a five-colour palette that can be swapped (`web/src/theme.js`), with a palette chooser, keys for the player, and the cut button always in view
-- A sources list and `fetch`: part of a YouTube video, up to 20 minutes, from a channel marked as agreed
+- Sounds under the cards of a compilation, each card shown as long as its sound: a computer voice saying "Goool", a tragic chord and a soft whistle made by the tool, or the owner's own files from `sounds/`
+- An intro card for a match: both clubs with their icons and names and "V" or the score, with the owner's intro sound under it
+- A video behind a card: a video file in `sounds/` gives the card its sound and a moving background
+- A second video beside a reaction in a compilation: split screen while it runs, then the reaction full screen
+- A Combine page: two videos side by side with a live preview to line them up by eye, a side, a start and a shown part for each, a main video that takes the whole screen at the end, and the result offered to compilations
+- A list of leagues and clubs (name, colour, logo) to fill a match's teams from, starting with La Liga, the Premier League and Serie A
+- A sources list and `fetch`: part of a YouTube video, up to 20 minutes, from a channel in the list (the owner adds a channel only once it has agreed)
+- Channel pictures: the profile picture of each channel in the list, fetched on request and drawn beside its name where it is credited in a compilation; a sync button on a row fills a new channel's name and picture from its address
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-302 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, and none call the real AI service.
+358 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, and none call the real AI service.
 
 ## Waiting on the owner
 
@@ -29,7 +36,13 @@ Version 1 of the spec is complete: all three "evenings".
 
 ## Not verified
 
+- The Combine page in the owner's hands. It was driven by script: a whole run on generated test videos with a frame counter, and a preview of two of the owner's own videos (a fetched part and a phone recording), which played in step within about 0.03 s. Lining up a real reaction by eye and ear is the owner's to judge.
+- How a combined video sounds. Levels were measured, not listened to.
+- The sync button and "Get the channels' pictures" beyond the owner's seven channels. The button was pressed on the owner's real list for the pictures; sync was run on a test copy with one of those channels. The downloader also warned that it will stop supporting Python 3.10, which this machine has.
 - Which player showed the fetched part out of step. The file is now the same for every player, but the owner has not yet confirmed it plays in step.
+- How the second set of built-in card sounds sounds. The owner rejected the first set on 2026-11-19. The second was measured and the voice checked with the speech recogniser, but not listened to. A real "Goool" needs a recording from the owner, as `sounds/goal.mp3`.
+- Whether the owner meant the supplied intro video to play behind the intro card. It was built that way on a reading of one sentence.
+- The starting list of clubs against the current season. It was written from memory of 2025–26.
 - The redesigned dashboard in long use. The owner looked at it and accepted it on 2026-11-19; before that it was looked at in screenshots from a hidden Chrome and its main actions were run by script. A real mouse drag of the crop on the new layout, a screen reader and browsers other than Chrome were not tried.
 - The wider crop (`--crop-width`) on a clip the owner has judged. One frame from a real video was looked at, and one cut was made from the page.
 
@@ -46,6 +59,9 @@ The owner was told about the rest on 2026-11-19 and accepted them as they are, a
 
 Nothing is decided. Ideas the owner has been offered:
 
+- On the Combine page: a delay before the second video comes in, and removing the older "Show another video beside it" option from Compilations if the page replaces it
+- A credits card at the end of a compilation, listing each streamer with their picture
+- A faster encoder setting for compilations (`superfast`: about two thirds of the time, the same quality, twice the file size)
 - A screen for creating and editing briefs, so the JSON is not edited by hand
 - An option to keep the source's frame rate (60 fps) in clips and compilations, offered after the quality check of 2026-11-19 (see `docs/decisions.md`)
 - Cutting several ranges in one go

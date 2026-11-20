@@ -9,6 +9,7 @@ const STEP_NAMES = {
   items: 'making the segments',
   looking: 'looking the video up',
   fetching: 'downloading the part',
+  pictures: 'asking YouTube',
   tidying: 'preparing the video',
   joining: 'joining them',
   checking: 'checking the result',
@@ -89,20 +90,26 @@ export function describe(job) {
     cut: `Cutting ${job.label}`,
     part: `Saving part of ${job.label}`,
     compile: `Generating ${job.label}`,
+    combine: `Combining ${job.label}`,
     fetch: `Fetching ${job.label}`,
+    pictures: 'Getting the channels\' pictures',
+    channel: `Looking up ${job.label}`,
     render: `Rendering ${job.label} again`,
     suggest: `Finding moments in ${job.label}`,
   }[job.kind] ?? job.label;
   if (job.status === 'queued') return `${what}: waiting for the job before it`;
   if (job.status === 'running') {
     const seconds = Math.max(0, Math.round((jobs.now - (job.startedAt ?? job.createdAt)) / 1000));
-    return `${what}: ${STEP_NAMES[job.step] ?? (job.kind === 'part' ? 'encoding' : 'starting')}… ${seconds} s`;
+    return `${what}: ${STEP_NAMES[job.step] ?? (job.kind === 'part' || job.kind === 'combine' ? 'encoding' : 'starting')}… ${seconds} s`;
   }
   if (job.status === 'failed') return `${what} failed. ${job.error}`;
   return {
     cut: `${job.result.clip} is ready.`,
     part: `${job.result.name} is saved.`,
     compile: `${job.label} is ready.`,
+    combine: `${job.label} is combined. It is in Compilations, under “Add videos”.`,
+    pictures: `${job.result?.fetched?.length ?? 0} ${job.result?.fetched?.length === 1 ? 'picture' : 'pictures'} fetched.${job.result?.failed?.length ? ` Not fetched: ${job.result.failed.map((one) => `${one.name} (${one.error})`).join('; ')}` : ''}`,
+    channel: `${job.result?.source?.name} is in your channels.${job.result?.pictureError ? ` Its picture was not fetched: ${job.result.pictureError}` : ''}`,
     fetch: `${job.result?.name} is in your videos.${job.result?.early > 0.05 ? ` It starts ${job.result.early.toFixed(1)} s before the time you asked.` : ''}`,
     render: `${job.label} was rendered again.`,
     suggest: `Suggestions for ${job.label} are ready.`,

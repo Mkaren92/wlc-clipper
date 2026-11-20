@@ -8,6 +8,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { isId } from '../cards/match.js';
+import { isSoundChoice } from './sounds.js';
 
 /** The two output shapes, both at 30 frames a second. */
 export const PRESETS = {
@@ -19,18 +20,46 @@ export const DEFAULT_CARD_SECONDS = 3;
 const id = z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/);
 const seconds = z.number().min(0).max(86400).nullable();
 
+// "combined" holds the videos made on the Combine page, each named by its combination's id.
+const library = z.enum(['in', 'parts', 'clips', 'combined']);
+const videoName = z.string().min(1).max(200);
+
+/**
+ * How much of a second video's sound is heard with the first video's:
+ * "even" is about half and half, "low" keeps the first clearly in front
+ * (about 70 to 30), and "off" leaves the second video silent.
+ */
+export const BESIDE_SOUNDS = ['even', 'low', 'off'];
+// Timelines saved before there were three choices have true or false here.
+const besideSound = z.preprocess((value) => (value === true ? 'even' : value === false ? 'off' : value), z.enum(BESIDE_SOUNDS)).default('even');
+
+// A second video shown beside the first while it plays: the goal a streamer
+// is reacting to. For as long as it runs the screen is split between the two,
+// and when it ends the first video fills the screen.
+const besideVideo = z.strictObject({
+  library, name: videoName,
+  start: seconds.default(null),
+  end: seconds.default(null),
+  sound: besideSound,
+});
+
 // A video is named by the folder it is in and its name there, never by a path.
 const videoItem = z.strictObject({
   id, kind: z.literal('video'),
-  library: z.enum(['in', 'parts', 'clips']),
-  name: z.string().min(1).max(200),
+  library,
+  name: videoName,
   start: seconds.default(null), // null means from the beginning
   end: seconds.default(null), // null means to the end
   credit: z.string().trim().max(60).default(''),
+  beside: besideVideo.nullable().default(null), // null means the video is shown alone
 });
 const cardItem = z.strictObject({
   id, kind: z.literal('card'), matchId: id, cardId: id,
-  seconds: z.number().min(0.5).max(60).default(DEFAULT_CARD_SECONDS),
+  // null means "as long as its sound", or DEFAULT_CARD_SECONDS for a silent card.
+  seconds: z.number().min(0.5).max(60).nullable().default(null),
+  // What plays under the card (see sounds.js). "auto" is the sound for its
+  // kind of card; compilations saved before sounds existed get it too.
+  sound: z.string().max(210).refine(isSoundChoice, 'choose "auto", "none", a built-in sound or a file from the sounds folder').default('auto'),
 });
 
 export const timelineSchema = z.strictObject({

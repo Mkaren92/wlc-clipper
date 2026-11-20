@@ -24,6 +24,8 @@ import { formatClock } from './time.js';
  * @property {(url: string) => Promise<{ id: string, title: string, channel: string, channelId: string, handle: string, duration: number }>} info
  * @property {(job: { url: string, start: number, end: number, dir: string, name: string }) => Promise<void>} download
  *   writes `<dir>/<name>.mp4`
+ * @property {(url: string) => Promise<{ name: string, channelId: string, handle: string, pictureUrl: string }>} channel
+ *   what YouTube says about a channel, for its profile picture (see pictures.js)
  */
 
 // Long enough for any goal reaction, short enough that a slip cannot fill the disk.
@@ -87,7 +89,7 @@ export async function fetchVideo({ url, start, end, sources, outDir, downloader 
   // The channel is read from the video itself, so a link cannot claim to be someone else's.
   const source = agreedSourceOf(sources, video);
   if (!source) {
-    throw new Error(`This video is from "${video.channel}", which is not marked as agreed in your sources list. Only channels that have agreed can be fetched from.`);
+    throw new Error(`This video is from "${video.channel}", which is not in your sources list. Only a channel that has agreed, and that you have added there, can be fetched from.`);
   }
   if (video.duration && end > video.duration + 1) {
     throw new Error(`The video is only ${formatClock(video.duration)} long, but the end is set to ${formatClock(end)}.`);
@@ -240,6 +242,16 @@ export function ytDlp() {
         id: data.id, title: data.title ?? '', channel: data.channel ?? data.uploader ?? 'Unknown channel',
         channelId: data.channel_id ?? '', handle: data.uploader_id ?? '', duration: Number(data.duration) || 0,
       };
+    },
+    async channel(url) {
+      // Only the channel's own details: no videos are listed, and nothing is downloaded.
+      const { stdout } = await call(['--skip-download', '--flat-playlist', '--playlist-items', '0', '--dump-single-json', '--', url]).catch(() => {
+        throw new Error('The channel could not be looked up. Check its address.');
+      });
+      const data = JSON.parse(stdout);
+      // The profile picture is named; the same list also holds the banner in several sizes.
+      const picture = (data.thumbnails ?? []).find((thumbnail) => thumbnail.id === 'avatar_uncropped');
+      return { name: data.channel ?? data.title ?? '', channelId: data.channel_id ?? '', handle: data.uploader_id ?? '', pictureUrl: picture?.url ?? '' };
     },
     async download({ url, start, end, dir, name }) {
       await call([

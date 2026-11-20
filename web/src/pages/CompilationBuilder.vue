@@ -9,16 +9,22 @@ import TrashButton from '../components/TrashButton.vue';
 import { isActive, jobs, track } from '../jobs.js';
 
 const PRESET_NAMES = { landscape: '1920×1080 (wide), 30 fps', portrait: '1080×1920 (tall), 30 fps' };
-const LIBRARIES = { in: 'Videos', parts: 'Parts', clips: 'Clips' };
+// "Combined" holds the videos made on the Combine page, each named by its combination.
+const LIBRARIES = { in: 'Videos', parts: 'Parts', clips: 'Clips', combined: 'Combined' };
 const STATE_NAMES = { waiting: 'Waiting', working: 'Working…', done: 'Done', reused: 'Done (kept from last time)' };
 
 const compilations = ref([]);
 const current = ref(null); // the compilation being edited: a copy, saved with Save or Generate
 const matches = ref([]);
+const sounds = ref({ builtIn: [], files: [], automatic: {}, lengths: {} }); // what can play under a card
 const sources = ref([]); // for filling in the credit of a fetched video
 const prefixes = ref({}); // source id -> what its fetched files are named after
-const library = reactive({ in: [], parts: [], clips: [] });
-const pick = reactive({ in: '', parts: '', clips: '', match: '', card: '' });
+const pictures = ref({}); // source id -> a number that changes with the channel's picture
+const library = reactive({ in: [], parts: [], clips: [], combined: [] });
+const pick = reactive({ in: '', parts: '', clips: '', combined: '', match: '', card: '' });
+const combinedNames = reactive({}); // a combination's id -> the name the owner gave it
+/** What a video is called on the page: a combined video by its combination's name, anything else by its file name. */
+const shownName = (folder, name) => (folder === 'combined' ? combinedNames[name] ?? name : name);
 const lengths = reactive({}); // "folder/name" -> seconds, for the running total
 const error = ref('');
 const note = ref('');
@@ -34,7 +40,10 @@ const draft = (value) => JSON.stringify({ name: value.name, preset: value.preset
 const unsaved = computed(() => current.value !== null && draft(current.value) !== savedText.value);
 
 let onScreen = true;
-onUnmounted(() => (onScreen = false));
+onUnmounted(() => {
+  onScreen = false;
+  stopHearing();
+});
 
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const newId = () => `i${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
@@ -42,14 +51,20 @@ const key = (item) => `${item.library}/${item.name}`;
 
 async function load() {
   try {
-    const [saved, savedMatches, videos, parts, clips, sourceList] = await Promise.all([api.compilations(), api.matches(), api.videos(), api.parts(), api.clips(), api.sources()]);
+    const [saved, savedMatches, videos, parts, clips, sourceList, soundList] = await Promise.all([api.compilations(), api.matches(), api.videos(), api.parts(), api.clips(), api.sources(), api.sounds()]);
+    sounds.value = soundList;
     sources.value = sourceList.sources;
     prefixes.value = sourceList.prefixes;
+    pictures.value = sourceList.pictures ?? {};
     compilations.value = saved;
     matches.value = savedMatches;
     library.in = videos.map((v) => v.name);
     library.parts = parts.map((p) => p.name);
     library.clips = clips.filter((c) => c.rendered).map((c) => c.name);
+    // Only the combinations whose video has been made. Each is kept by its id and shown by its name.
+    const combined = (await api.combinations()).filter((one) => one.result);
+    library.combined = combined.map((one) => one.id);
+    for (const one of combined) combinedNames[one.id] = one.name;
     error.value = '';
   } catch (e) {
     error.value = e.message;
@@ -65,7 +80,11 @@ function open(saved) {
   savedText.value = draft(current.value);
   lastResult.value = null;
   note.value = '';
-  for (const item of current.value.items) if (item.kind === 'video') learnLength(item);
+  for (const item of current.value.items) {
+    if (item.kind !== 'video') continue;
+    learnLength(item);
+    if (item.beside) learnLength(item.beside);
+  }
 }
 
 async function create() {
@@ -101,18 +120,86 @@ async function learnLength(item) {
 }
 
 // A fetched video is named after its channel, so its credit can be filled in.
+// A credit is chosen from the channels on the Sources page. It is matched on the
+// name whatever its capitals, as the engine matches it for the link and the picture.
+const creditSource = (credit) => sources.value.find((source) => source.name.toLowerCase() === (credit ?? '').trim().toLowerCase()) ?? null;
 const creditFor = (name) => sources.value.find((source) => name.startsWith(`${prefixes.value[source.id]}_`))?.name ?? '';
+
+// --- A second video beside the first ---------------------------------------------
+
+// Every video in the project, as "folder/name", for choosing the one shown beside another.
+const everyVideo = computed(() => Object.keys(LIBRARIES).flatMap((folder) => library[folder].map((name) => `${folder}/${name}`)));
+const besideKey = (item) => `${item.beside.library}/${item.beside.name}`;
+function setBeside(item, value) {
+  const at = value.indexOf('/');
+  Object.assign(item.beside, { library: value.slice(0, at), name: value.slice(at + 1), start: null, end: null });
+  learnLength(item.beside);
+}
+function toggleBeside(item, on) {
+  if (!on) {
+    item.beside = null;
+    return;
+  }
+  // Start with another video than the one it is beside, if there is one.
+  const first = everyVideo.value.find((value) => value !== key(item)) ?? everyVideo.value[0];
+  // The streamer in front, the other video under it: what a reaction usually wants.
+  item.beside = { library: 'in', name: '', start: null, end: null, sound: 'low' };
+  setBeside(item, first);
+}
+/** How long the second video runs beside the first, for the note under it. */
+function besideSeconds(item) {
+  const whole = lengths[key(item.beside)];
+  if (whole === undefined || whole === null) return null;
+  return Math.max(0, Math.min((item.beside.end ?? whole) - (item.beside.start ?? 0), seconds(item)));
+}
 
 function addVideo(folder, name) {
   if (!name) return;
-  const item = { id: newId(), kind: 'video', library: folder, name, start: null, end: null, credit: creditFor(name) };
+  const item = { id: newId(), kind: 'video', library: folder, name, start: null, end: null, credit: creditFor(name), beside: null };
   current.value.items.push(item);
   learnLength(item);
 }
 
 function addCard() {
   if (!pick.match || !pick.card) return;
-  current.value.items.push({ id: newId(), kind: 'card', matchId: pick.match, cardId: pick.card, seconds: 3 });
+  // No length of its own: the card is shown exactly as long as its sound.
+  current.value.items.push({ id: newId(), kind: 'card', matchId: pick.match, cardId: pick.card, seconds: null, sound: 'auto' });
+}
+
+// --- Sounds under cards ---------------------------------------------------------
+
+const cardOf = (item) => matches.value.find((m) => m.id === item.matchId)?.cards.find((c) => c.id === item.cardId);
+/** The sound "Automatic" stands for on this card: your file named after its kind, or the built-in one. */
+const autoSound = (item) => sounds.value.automatic[cardOf(item)?.type] ?? 'none';
+/** The sound a card really plays, whatever its setting says. */
+const soundOf = (item) => (item.sound === 'auto' ? autoSound(item) : item.sound);
+function soundName(choice) {
+  if (choice.startsWith('file:')) return `${choice.slice(5)} (your file)`;
+  return sounds.value.builtIn.find((sound) => `builtin:${sound.id}` === choice)?.name ?? 'no sound';
+}
+const missingFile = (item) => item.sound.startsWith('file:') && !sounds.value.files.includes(item.sound.slice(5));
+
+// One sound at a time can be listened to. Pressing the button again stops it.
+let player = null;
+const hearing = ref('');
+function stopHearing() {
+  player?.pause();
+  player = null;
+  hearing.value = '';
+}
+function hear(item) {
+  const again = hearing.value === item.id;
+  stopHearing();
+  const url = again ? null : api.soundUrl(item.sound, autoSound(item));
+  if (!url) return;
+  player = new Audio(url);
+  hearing.value = item.id;
+  player.addEventListener('ended', stopHearing);
+  player.addEventListener('error', () => {
+    stopHearing();
+    error.value = 'That sound could not be played. If it is one of your files, check that it is still in the sounds folder.';
+  });
+  player.play().catch(stopHearing);
 }
 
 // A file chosen here is copied into the project's videos folder first: a
@@ -141,18 +228,20 @@ function onDrop(event) {
 const pickedMatch = computed(() => matches.value.find((m) => m.id === pick.match));
 
 function cardLabel(card) {
+  if (card.type === 'intro') return 'Intro';
   if (card.type === 'goal') return `Goal: ${minuteLabel(card.minute, card.added)} ${card.scorer}`.trim();
   if (card.type === 'red') return `Red card: ${minuteLabel(card.minute, card.added)} ${card.player}`.trim();
   return `Full time ${card.homeScore}–${card.awayScore}`;
 }
 function title(item) {
-  if (item.kind === 'video') return item.name;
+  if (item.kind === 'video') return shownName(item.library, item.name);
   const match = matches.value.find((m) => m.id === item.matchId);
   const card = match?.cards.find((c) => c.id === item.cardId);
   return card ? `${cardLabel(card)} (${match.home} v ${match.away})` : 'A card that was deleted';
 }
 function seconds(item) {
-  if (item.kind === 'card') return Number(item.seconds) || 0;
+  // A card with no length of its own lasts as long as its sound, or 3 seconds when it has none.
+  if (item.kind === 'card') return Number(item.seconds) || sounds.value.lengths[soundOf(item)] || 3;
   const whole = lengths[key(item)];
   if (whole === undefined || whole === null) return 0;
   return Math.max(0, (item.end ?? whole) - (item.start ?? 0));
@@ -276,7 +365,7 @@ async function generate() {
             <label :for="`pick-${folder}`">{{ text }}</label>
             <select :id="`pick-${folder}`" v-model="pick[folder]">
               <option value="">{{ library[folder].length > 0 ? 'Choose…' : 'None yet' }}</option>
-              <option v-for="name in library[folder]" :key="name" :value="name">{{ name }}</option>
+              <option v-for="name in library[folder]" :key="name" :value="name">{{ shownName(folder, name) }}</option>
             </select>
           </div>
           <button class="fixed" :disabled="!pick[folder]" @click="addVideo(folder, pick[folder])"><Icon name="plus" /> Add</button>
@@ -294,6 +383,15 @@ async function generate() {
 
       <section class="panel">
         <h2>Add a card</h2>
+        <p class="hint first">
+          A card plays a sound and is shown exactly as long as that sound: a voice saying “Goool” under a goal, a
+          tragic chord under a red card and a soft whistle under full time. These are made by the tool (the voice is a
+          computer's), so listen before you rely on them. To use your own, put audio files in the project's
+          <code>sounds</code> folder and reload. A file named <code>intro</code>, <code>goal</code>, <code>red</code>
+          or <code>fulltime</code> (for example <code>goal.mp3</code>) is used for every card of that kind without
+          choosing anything. An intro card is silent unless there is such a file. A video file there works too
+          (for example <code>intro.mp4</code>): its sound plays and its picture moves behind the card.
+        </p>
         <p v-if="matches.length === 0" class="empty">No saved cards yet. Make some on the Cards page first.</p>
         <div v-else class="row adder">
           <div>
@@ -347,14 +445,89 @@ async function generate() {
                 <input :id="`end-${item.id}`" type="number" min="0" step="0.1" placeholder="end" :value="item.end ?? ''" @input="blankIsNull(item, 'end', $event.target.value)" />
               </div>
               <div>
-                <label :for="`credit-${item.id}`">Credit: the streamer's name, shown in a corner</label>
-                <input :id="`credit-${item.id}`" v-model="item.credit" type="text" maxlength="60" />
+                <label :for="`credit-${item.id}`">Credit: the streamer, shown in a corner</label>
+                <div class="credit">
+                  <img
+                    v-if="creditSource(item.credit) && pictures[creditSource(item.credit).id]" class="face"
+                    :src="api.sourcePictureUrl(creditSource(item.credit).id, pictures[creditSource(item.credit).id])" alt=""
+                  />
+                  <select :id="`credit-${item.id}`" :value="creditSource(item.credit)?.name ?? item.credit ?? ''" @change="item.credit = $event.target.value">
+                    <option value="">No credit</option>
+                    <option v-for="source in sources" :key="source.id" :value="source.name">{{ source.name }}</option>
+                    <!-- A name typed before credits were chosen from the list is kept until another is chosen. -->
+                    <option v-if="item.credit && !creditSource(item.credit)" :value="item.credit">{{ item.credit }} (not in Sources: name only)</option>
+                  </select>
+                </div>
               </div>
+            </div>
+            <div v-if="item.kind === 'video'" class="beside">
+              <label class="check">
+                <input type="checkbox" :checked="Boolean(item.beside)" :disabled="everyVideo.length === 0" @change="toggleBeside(item, $event.target.checked)" />
+                Show another video beside it, such as the goal being reacted to
+              </label>
+              <template v-if="item.beside">
+                <div class="row fields">
+                  <div>
+                    <label :for="`beside-${item.id}`">The video shown beside it</label>
+                    <select :id="`beside-${item.id}`" :value="besideKey(item)" @change="setBeside(item, $event.target.value)">
+                      <optgroup v-for="(text, folder) in LIBRARIES" :key="folder" :label="text">
+                        <option v-for="name in library[folder]" :key="name" :value="`${folder}/${name}`">{{ shownName(folder, name) }}</option>
+                      </optgroup>
+                    </select>
+                  </div>
+                  <div class="narrow">
+                    <label :for="`beside-start-${item.id}`">Its start (seconds)</label>
+                    <input :id="`beside-start-${item.id}`" type="number" min="0" step="0.1" placeholder="beginning" :value="item.beside.start ?? ''" @input="blankIsNull(item.beside, 'start', $event.target.value)" />
+                  </div>
+                  <div class="narrow">
+                    <label :for="`beside-end-${item.id}`">Its end (seconds)</label>
+                    <input :id="`beside-end-${item.id}`" type="number" min="0" step="0.1" placeholder="end" :value="item.beside.end ?? ''" @input="blankIsNull(item.beside, 'end', $event.target.value)" />
+                  </div>
+                  <div>
+                    <label :for="`beside-sound-${item.id}`">Its sound</label>
+                    <select :id="`beside-sound-${item.id}`" v-model="item.beside.sound">
+                      <option value="low">Quiet, under this video's sound (about 70–30)</option>
+                      <option value="even">As loud as this video's sound (about 50–50)</option>
+                      <option value="off">Off: only this video is heard</option>
+                    </select>
+                  </div>
+                </div>
+                <p class="hint">
+                  <template v-if="besideSeconds(item) !== null">For the first {{ clock(besideSeconds(item)) }}, the</template>
+                  <template v-else>While it runs, the</template>
+                  screen is split in two, and each video fills its half with the middle of its picture: this video on
+                  the left and the other on the right (bottom and top in a tall video). After that this video fills
+                  the screen.
+                </p>
+              </template>
             </div>
             <div v-else class="row fields">
               <div class="narrow">
                 <label :for="`seconds-${item.id}`">Shown for (seconds)</label>
-                <input :id="`seconds-${item.id}`" v-model.number="item.seconds" type="number" min="0.5" max="60" step="0.5" />
+                <input
+                  :id="`seconds-${item.id}`" type="number" min="0.5" max="60" step="0.5" placeholder="as the sound" :value="item.seconds ?? ''"
+                  title="Leave empty to show the card exactly as long as its sound plays"
+                  @input="item.seconds = $event.target.value === '' ? null : Math.min(60, Math.max(0.5, Number($event.target.value)))"
+                />
+              </div>
+              <div>
+                <label :for="`sound-${item.id}`">Sound, or video, under the card</label>
+                <div class="joined">
+                  <select :id="`sound-${item.id}`" v-model="item.sound" @change="stopHearing">
+                    <option value="auto">Automatic: {{ soundName(autoSound(item)) }}</option>
+                    <option value="none">No sound</option>
+                    <optgroup label="Made by the tool">
+                      <option v-for="sound in sounds.builtIn" :key="sound.id" :value="`builtin:${sound.id}`">{{ sound.name }}</option>
+                    </optgroup>
+                    <optgroup v-if="sounds.files.length > 0 || missingFile(item)" label="Your files, from the sounds folder">
+                      <option v-for="name in sounds.files" :key="name" :value="`file:${name}`">{{ name }}</option>
+                      <option v-if="missingFile(item)" :value="item.sound">{{ item.sound.slice(5) }} (not in the folder any more)</option>
+                    </optgroup>
+                  </select>
+                  <button :disabled="item.sound === 'none' || missingFile(item)" :aria-label="`${hearing === item.id ? 'Stop' : 'Listen to'} the sound of item ${index + 1}`" @click="hear(item)">
+                    <Icon :name="hearing === item.id ? 'pause' : 'play'" /> {{ hearing === item.id ? 'Stop' : 'Listen' }}
+                  </button>
+                </div>
               </div>
             </div>
           </li>
@@ -391,6 +564,9 @@ async function generate() {
 </template>
 
 <style scoped>
+/* The credited channel's picture beside the box that chooses it. */
+.credit { display: flex; align-items: center; gap: 8px; }
+.credit .face { width: 36px; height: 36px; flex: none; border-radius: 50%; }
 .builder { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: var(--gap); align-items: start; }
 .list .primary { width: 100%; }
 .empty.wide { align-self: start; margin: 0; padding: 28px; }
@@ -415,6 +591,11 @@ async function generate() {
 .number { color: var(--muted); font-weight: 650; min-width: 1.4em; text-align: right; }
 .what { word-break: break-all; font-weight: 600; }
 .fields { margin-top: 10px; }
+.beside { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+.beside .check { padding-bottom: 0; }
+.joined { display: flex; }
+.joined select { border-radius: var(--radius) 0 0 var(--radius); min-width: 0; }
+.joined button { flex: none; border-left: 0; border-radius: 0 var(--radius) var(--radius) 0; white-space: nowrap; }
 .narrow { flex: 0 1 150px; }
 .result video { width: 100%; max-height: 60vh; background: black; border-radius: var(--radius); display: block; }
 .result video.portrait { max-width: 300px; }

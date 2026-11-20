@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildDescription } from '../src/compilation/description.js';
 import { fetchVideo, leadInOf, removeHiddenLeadIn, videoUrl } from '../src/fetch.js';
 import { run } from '../src/run.js';
+import { channelAddress, checkPictureUrl, creditPictures, fetchPicture, fetchPictures, listPictures, PICTURE_PIXELS, pictureFile, removeOtherPictures, syncSource } from '../src/pictures.js';
 import { agreedSourceOf, channelKey, creditLinks, parseSources, readSources, saveSources } from '../src/sources.js';
 
 const sources = parseSources([
@@ -68,6 +69,8 @@ describe('sources', () => {
     await rm(dir, { recursive: true });
     expect(() => parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }])).toThrow(/channel address/);
     expect(() => parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x', status: 'maybe' }])).toThrow(/not valid/);
+    // A channel is added only once it has agreed, so an entry with no status is one that can be fetched from.
+    expect(parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x' }])).toEqual([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x', status: 'agreed', note: '' }]);
     expect(() => parseSources([sources[0], { ...sources[1], id: 'northstand' }])).toThrow(/share an id/);
   });
 
@@ -134,9 +137,9 @@ describe('fetchVideo', () => {
       { channel: 'Away Day Dave', handle: '@awaydaydave', channelId: 'UCzzz' },
       { channel: 'Somebody Else', handle: '@somebody', channelId: 'UCqqq' },
     ]) {
-      await expect(ask({ downloader: downloader(video) })).rejects.toThrow(new RegExp(`from "${video.channel}", which is not marked as agreed`));
+      await expect(ask({ downloader: downloader(video) })).rejects.toThrow(new RegExp(`from "${video.channel}", which is not in your sources list`));
     }
-    await expect(ask({ sources: [] })).rejects.toThrow(/not marked as agreed/);
+    await expect(ask({ sources: [] })).rejects.toThrow(/not in your sources list/);
     expect(calls.length).toBe(before);
   });
 
@@ -256,4 +259,126 @@ describe('removeHiddenLeadIn', () => {
     expect((await signals(file, true, false)).flash).toBeCloseTo(2, 2);
     expect((await signals(file, false, false)).flash).toBeCloseTo(2, 2);
   }, 60_000);
+});
+
+// The profile pictures of channels in the list. A stand-in answers for
+// YouTube and another for the picture itself, so nothing here leaves the machine.
+describe('channel pictures', () => {
+  let dir;
+  let picture;
+  const asked = [];
+  const northstand = sources[0];
+  const kopend = sources[1];
+  const youtube = (answer = {}) => ({
+    channel: async (url) => {
+      asked.push(url);
+      return { name: 'Northstand', channelId: 'UCxxx', handle: '@NorthStandTV', pictureUrl: 'https://yt3.googleusercontent.com/made-up-picture=s900', ...answer };
+    },
+  });
+  const download = async () => picture;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'clipper-pictures-'));
+    const file = path.join(dir, 'wide.jpg');
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=900x600', '-frames:v', '1', file]);
+    picture = await (await import('node:fs/promises')).readFile(file);
+  });
+  afterAll(() => rm(dir, { recursive: true, force: true }));
+
+  it('asks about the channel by an address rebuilt from the list, never as typed', () => {
+    expect(channelAddress({ name: 'X', url: 'https://www.youtube.com/@NorthStandTV/' })).toBe('https://www.youtube.com/@northstandtv');
+    expect(channelAddress(kopend)).toBe('https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa');
+    expect(() => channelAddress({ name: 'X', url: 'https://example.com/@x' })).toThrow(/no channel address/);
+  });
+
+  it('takes a picture only from where YouTube serves channel pictures', () => {
+    expect(checkPictureUrl('https://yt3.googleusercontent.com/abc=s900')).toBe('https://yt3.googleusercontent.com/abc=s900');
+    expect(checkPictureUrl('https://yt3.ggpht.com/abc')).toBe('https://yt3.ggpht.com/abc');
+    for (const bad of ['http://yt3.googleusercontent.com/abc', 'https://example.com/a.png', 'https://yt3.googleusercontent.com.example.com/a', 'https://user@yt3.ggpht.com/a', 'https://yt3.ggpht.com:8443/a', 'file:///etc/passwd', '', undefined]) {
+      expect(() => checkPictureUrl(bad), String(bad)).toThrow(/picture/);
+    }
+  });
+
+  it('keeps a round picture of fixed size, made here from what came', async () => {
+    const file = await fetchPicture({ source: northstand, dataDir: dir, downloader: youtube(), download });
+    expect(file).toBe(pictureFile(dir, 'northstand'));
+    expect(asked.at(-1)).toBe('https://www.youtube.com/@northstandtv');
+    const { stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,width,height,pix_fmt', '-of', 'csv=p=0', file]);
+    expect(stdout.trim()).toBe(`png,${PICTURE_PIXELS},${PICTURE_PIXELS},rgba`);
+    // Round: a corner is clear and the middle is not.
+    const alpha = async (x, y) => {
+      const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', file, '-vf', `crop=2:2:${x}:${y},alphaextract,signalstats,metadata=print:key=lavfi.signalstats.YAVG`, '-f', 'null', '-']);
+      return Number(/YAVG=([\d.]+)/.exec(stderr)[1]);
+    };
+    expect(await alpha(2, 2)).toBeLessThan(20);
+    expect(await alpha(PICTURE_PIXELS / 2, PICTURE_PIXELS / 2)).toBeGreaterThan(230);
+    // Nothing else is left in the folder: not the bytes that came, nor anything half made.
+    expect(await readdir(path.dirname(file))).toEqual(['northstand.png']);
+  });
+
+  it('refuses a picture from another channel, a bad address, or something that is no picture', async () => {
+    const attempt = (options) => fetchPicture({ source: northstand, dataDir: dir, downloader: youtube(), download, ...options });
+    await expect(attempt({ downloader: youtube({ name: 'Somebody Else', handle: '@somebody', channelId: 'UCqqq' }) })).rejects.toThrow(/leads to another channel, "Somebody Else"/);
+    await expect(attempt({ downloader: youtube({ pictureUrl: 'https://example.com/a.png' }) })).rejects.toThrow(/not at an address this tool takes pictures from/);
+    await expect(attempt({ downloader: youtube({ pictureUrl: '' }) })).rejects.toThrow(/gave no picture/);
+    await expect(attempt({ download: async () => Buffer.from('<html>not a picture</html>') })).rejects.toThrow(/not a picture that can be read/);
+    // A channel that has not agreed is not asked about at all.
+    const before = asked.length;
+    await expect(attempt({ source: sources[2] })).rejects.toThrow(/not a channel that has agreed/);
+    expect(asked.length).toBe(before);
+    // The picture fetched earlier is still there and whole.
+    expect(await readdir(path.join(dir, 'source-pictures'))).toEqual(['northstand.png']);
+  });
+
+  it('fetches for every channel that has agreed, and says which could not be fetched', async () => {
+    const byChannel = { channel: async (url) => (url.includes('@northstandtv')
+      ? { name: 'Northstand', channelId: 'UCxxx', handle: '@northstandtv', pictureUrl: 'https://yt3.ggpht.com/a' }
+      : { name: 'Kopend', channelId: 'UCaaaaaaaaaaaaaaaaaaaaaa', handle: '@kopend', pictureUrl: '' }) };
+    const steps = [];
+    const result = await fetchPictures({ sources, dataDir: dir, downloader: byChannel, download, onStep: (step, detail) => steps.push(detail.name) });
+    expect(result).toEqual({ fetched: ['Northstand'], failed: [{ name: 'Kopend', error: 'YouTube gave no picture for this channel.' }] });
+    expect(steps).toEqual(['Northstand', 'Kopend']); // the two that have agreed, and neither of the others
+
+    expect(Object.keys(await listPictures(dir, sources))).toEqual(['northstand']);
+    // For credits, by the name in lower case, and only for channels that have agreed.
+    expect(await creditPictures(dir, sources)).toEqual({ northstand: pictureFile(dir, 'northstand') });
+    // A channel taken out of the list takes its picture with it.
+    await removeOtherPictures(dir, sources.slice(1));
+    expect(await readdir(path.join(dir, 'source-pictures'))).toEqual([]);
+  });
+
+  // "Sync" on a row: the owner pastes an address and the rest is filled in.
+  it('fills a channel in from its address: the name when none was typed, the picture, and a place in the saved list', async () => {
+    const data = path.join(dir, 'sync');
+    const calls = asked.length;
+    const sync = (source, answer) => syncSource({ source, dataDir: data, downloader: youtube(answer), download });
+
+    const added = await sync({ id: 'snew', url: ' https://www.youtube.com/@NorthStandTV ', name: '' }, { name: 'North\n Stand  TV\u0007' });
+    expect(added).toEqual({ source: { id: 'snew', name: 'North Stand TV', url: 'https://www.youtube.com/@NorthStandTV', status: 'agreed', note: '' }, named: true, picture: true, pictureError: '' });
+    expect(await readSources(data)).toEqual([added.source]);
+    expect(await readdir(path.join(data, 'source-pictures'))).toEqual(['snew.png']);
+    expect(asked.length).toBe(calls + 1); // YouTube was asked once for both the name and the picture
+
+    // A name the owner typed is kept, and the note written earlier stays.
+    await saveSources(data, [{ ...added.source, note: 'Said yes by email' }]);
+    const kept = await sync({ id: 'snew', url: 'https://www.youtube.com/@northstandtv', name: 'Northstand' }, { name: 'Another Name' });
+    expect(kept).toMatchObject({ source: { name: 'Northstand', note: 'Said yes by email' }, named: false, picture: true });
+    expect(await readSources(data)).toHaveLength(1);
+
+    // The channel is saved even when its picture cannot be had, and the reason is given.
+    const bare = await sync({ id: 'kop', url: 'https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa' }, { name: 'Kopend', channelId: 'UCaaaaaaaaaaaaaaaaaaaaaa', handle: '@kopend', pictureUrl: '' });
+    expect(bare).toMatchObject({ source: { id: 'kop', name: 'Kopend' }, picture: false, pictureError: 'YouTube gave no picture for this channel.' });
+    expect((await readSources(data)).map((source) => source.id)).toEqual(['snew', 'kop']);
+
+    // Refused, with nothing saved: no address, a channel already in the list, another channel, no name, a bad id.
+    const before = asked.length;
+    await expect(sync({ id: 'x', url: 'https://example.com/@x' })).rejects.toThrow(/Give the channel address first/);
+    await expect(sync({ id: 'x', url: 'https://www.youtube.com/@NORTHSTANDTV' })).rejects.toThrow(/already in your list, as "Northstand"/);
+    expect(asked.length).toBe(before); // neither reached YouTube
+    await expect(sync({ id: 'x', url: 'https://www.youtube.com/@someoneelse' })).rejects.toThrow(/leads to another channel, "Northstand"/);
+    await expect(sync({ id: 'x', url: 'https://www.youtube.com/@someoneelse' }, { handle: '@someoneelse', name: ' \n ' })).rejects.toThrow(/gave no name/);
+    await expect(sync({ id: '../x', url: 'https://www.youtube.com/@someoneelse' }, { handle: '@someoneelse', name: 'Someone' })).rejects.toThrow(/not valid/);
+    expect((await readSources(data)).map((source) => source.id)).toEqual(['snew', 'kop']);
+    expect((await readdir(path.join(data, 'source-pictures'))).sort()).toEqual(['snew.png']);
+  });
 });

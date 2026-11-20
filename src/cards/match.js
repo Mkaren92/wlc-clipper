@@ -8,7 +8,7 @@
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { CARD_SIZES, GOAL_TYPES, goalType, minuteLabel, RED_TYPES } from './config.js';
+import { CARD_SIZES, GOAL_TYPES, goalType, isIcon, minuteLabel, RED_TYPES } from './config.js';
 
 const ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const id = z.string().regex(ID, 'an id is lower-case letters, digits and dashes');
@@ -19,6 +19,14 @@ const added = z.number().int().min(0).max(60).nullable();
 const score = z.number().int().min(0).max(99);
 const side = z.enum(['home', 'away']);
 
+// A club icon: nothing, or a small PNG as text (see ICON in config.js).
+const icon = z.string().refine((value) => value === '' || isIcon(value), 'an icon is a PNG picture of modest size').default('');
+
+const introCard = z.strictObject({
+  id, type: z.literal('intro'),
+  // With the score off, the card shows "V" between the two clubs.
+  showScore: z.boolean().default(false), homeScore: score.default(0), awayScore: score.default(0),
+});
 const goalCard = z.strictObject({
   id, type: z.literal('goal'), team: side, scorer: name, assist: name.default(''),
   minute, added: added.default(null),
@@ -42,7 +50,9 @@ export const matchSchema = z.strictObject({
   competition: name.default(''),
   date: name.default(''),
   colours: z.strictObject({ home: colour, away: colour }),
-  cards: z.array(z.discriminatedUnion('type', [goalCard, redCard, fullTimeCard])).max(100).default([]),
+  // Chosen by the owner from their own files. Matches saved before icons existed have none.
+  icons: z.strictObject({ home: icon, away: icon }).default({ home: '', away: '' }),
+  cards: z.array(z.discriminatedUnion('type', [introCard, goalCard, redCard, fullTimeCard])).max(100).default([]),
 }).superRefine((match, ctx) => {
   const seen = new Set();
   for (const card of match.cards) {
@@ -63,8 +73,13 @@ export const isId = (value) => typeof value === 'string' && ID.test(value);
 export const isCardSize = (value) => Object.hasOwn(CARD_SIZES, value);
 
 const matchDir = (dataDir, matchId) => path.join(dataDir, 'matches', matchId);
-/** Where a card's picture is kept. */
-export const cardPngPath = (dataDir, matchId, cardId, size) => path.join(matchDir(dataDir, matchId), 'cards', `${cardId}-${size}.png`);
+/**
+ * Where a card's picture is kept. Each card has two in each size: the
+ * ordinary one, and a `clear` one with a see-through background, which is
+ * laid over a video when the card has one behind it.
+ */
+export const cardPngPath = (dataDir, matchId, cardId, size, clear = false) =>
+  path.join(matchDir(dataDir, matchId), 'cards', `${cardId}-${size}${clear ? '-clear' : ''}.png`);
 
 /** Every saved match, newest name first is not needed: sorted by team names. */
 export async function listMatches(dataDir) {
@@ -95,7 +110,7 @@ export async function saveMatch(dataDir, data) {
   const dir = matchDir(dataDir, match.id);
   await mkdir(path.join(dir, 'cards'), { recursive: true });
   await writeFile(path.join(dir, 'match.json'), `${JSON.stringify(match, null, 2)}\n`);
-  const kept = new Set(match.cards.flatMap((card) => Object.keys(CARD_SIZES).map((size) => `${card.id}-${size}.png`)));
+  const kept = new Set(match.cards.flatMap((card) => Object.keys(CARD_SIZES).flatMap((size) => [`${card.id}-${size}.png`, `${card.id}-${size}-clear.png`])));
   for (const file of await readdir(path.join(dir, 'cards'))) {
     if (!kept.has(file)) await rm(path.join(dir, 'cards', file), { force: true });
   }
@@ -111,8 +126,9 @@ export async function deleteMatch(dataDir, matchId) {
  * Save a card's picture. It must be a PNG of exactly the size it claims.
  *
  * @param {Buffer} png
+ * @param {boolean} [clear]   the picture with the see-through background
  */
-export async function saveCardPng(dataDir, matchId, cardId, size, png) {
+export async function saveCardPng(dataDir, matchId, cardId, size, png, clear = false) {
   const match = await readMatch(dataDir, matchId);
   if (!match.cards.some((card) => card.id === cardId)) throw new Error('No such card in this match.');
   if (!isCardSize(size)) throw new Error('A card is "landscape" or "portrait".');
@@ -122,7 +138,7 @@ export async function saveCardPng(dataDir, matchId, cardId, size, png) {
   if (!isPng || png.readUInt32BE(16) !== width || png.readUInt32BE(20) !== height) {
     throw new Error(`The ${size} picture must be a PNG of ${width}x${height}.`);
   }
-  const file = cardPngPath(dataDir, matchId, cardId, size);
+  const file = cardPngPath(dataDir, matchId, cardId, size, clear);
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, png);
 }

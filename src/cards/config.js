@@ -16,6 +16,15 @@ export const RED_TYPES = [
   { id: 'second-yellow', label: 'Second yellow' },
 ];
 
+/**
+ * A club icon as it is stored with a match: a small PNG written out as text.
+ * The page shrinks whatever picture the owner chooses to this before saving,
+ * so nothing but a plain PNG of modest size ever reaches a card.
+ */
+export const ICON_PIXELS = 320;
+const ICON_PATTERN = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
+export const isIcon = (value) => typeof value === 'string' && value.length <= 400_000 && ICON_PATTERN.test(value);
+
 /** The two sizes a card is exported in. */
 export const CARD_SIZES = {
   landscape: { width: 1920, height: 1080 },

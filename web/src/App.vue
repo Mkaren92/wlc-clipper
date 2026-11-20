@@ -6,6 +6,7 @@ import Icon from './components/Icon.vue';
 import NewClip from './components/NewClip.vue';
 import TrashButton from './components/TrashButton.vue';
 import CardMaker from './pages/CardMaker.vue';
+import Combiner from './pages/Combiner.vue';
 import CompilationBuilder from './pages/CompilationBuilder.vue';
 import Sources from './pages/Sources.vue';
 import { clock, fileSize } from './format.js';
@@ -23,8 +24,9 @@ const loaded = ref(false);
 const PAGES = [
   { id: 'clips', name: 'Clips', icon: 'scissors' },
   { id: 'cards', name: 'Cards', icon: 'card', title: 'Match cards', about: 'Still cards shown between reaction clips: a goal, a red card, the final score. Saved per match, and used on the Compilations page.' },
+  { id: 'combine', name: 'Combine', icon: 'split', title: 'Combine two videos', about: 'Put a reaction and the thing reacted to side by side, line them up by eye, and make one video of the two to use in a compilation.' },
   { id: 'compilations', name: 'Compilations', icon: 'layers', title: 'Compilations', about: 'Put videos and cards in order and make one video out of them, with credits and a description file.' },
-  { id: 'sources', name: 'Sources', icon: 'link', title: 'Sources', about: 'The channels you take clips from and whether each has agreed, and the place to fetch part of a video from one that has.' },
+  { id: 'sources', name: 'Sources', icon: 'link', title: 'Sources', about: 'The channels that have agreed to let you use their videos, and the place to fetch part of a video from one of them.' },
 ];
 const isPage = (id) => PAGES.some((known) => known.id === id);
 const page = ref(isPage(location.hash.slice(1)) ? location.hash.slice(1) : 'clips');
@@ -127,6 +129,8 @@ watch(() => jobs.list.filter((job) => !isActive(job)).length, refresh);
 function openJob(job) {
   jobs.dismissed.push(job.id);
   if (job.kind === 'compile') return go('compilations');
+  if (job.kind === 'combine') return go('combine');
+  if (job.kind === 'pictures' || job.kind === 'channel') return go('sources');
   go('clips');
   if (job.kind === 'fetch') return refresh().then(() => (view.value = { kind: 'video', name: job.result.name }));
   if (job.kind === 'suggest') view.value = { kind: 'video', name: job.label };
@@ -265,6 +269,7 @@ onMounted(async () => {
       </header>
 
       <CardMaker v-if="page === 'cards'" />
+      <Combiner v-else-if="page === 'combine'" />
       <CompilationBuilder v-else-if="page === 'compilations'" />
       <Sources v-else-if="page === 'sources'" />
       <template v-else>

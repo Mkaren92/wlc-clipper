@@ -2,8 +2,10 @@
 // picture as text. The page shows that SVG as the preview and turns the very
 // same SVG into the PNG, so the two cannot differ.
 //
-// Text only: no crests, logos or photos. Team colours are plain blocks.
-import { CARD_SIZES, goalType, minuteLabel, redType } from './config.js';
+// Text and plain blocks of team colour, with one exception: the intro card
+// shows a club icon for each team when the owner has added one to the match.
+// Nothing here fetches a picture; an icon is only ever what the owner chose.
+import { CARD_SIZES, goalType, isIcon, minuteLabel, redType } from './config.js';
 import { fitSize, textWidth } from './measure.js';
 
 /** Name the page and the PNG export give the bundled font. */
@@ -14,17 +16,45 @@ const PANEL = '#1c212b';
 const TEXT = '#f4f5f7';
 const MUTED = '#a7afbd';
 const RED = '#d0202f';
+// The end of the one rectangle that fills a card. renderCard swaps it for a see-through one.
+const SOLID_BACKGROUND = `fill="${BACKGROUND}"/>`;
+
+// How much of the card's dark background stays when a video plays behind it:
+// enough to keep the words readable, little enough to see the video.
+const SEE_THROUGH = 0.45;
 
 /**
  * Draw any card.
  *
- * @param {{ match: object, card: object, size: 'landscape' | 'portrait' }} options
+ * @param {{ match: object, card: object, size: 'landscape' | 'portrait', clear?: boolean }} options
+ *   `clear` draws the card to lie over a video: its background is see-through,
+ *   and everything else is the same.
  * @returns {string} SVG
  */
-export function renderCard({ match, card, size }) {
-  const draw = { goal: goalCard, red: redCard, fulltime: fullTimeCard }[card.type];
+export function renderCard({ match, card, size, clear = false }) {
+  const draw = { intro: introCard, goal: goalCard, red: redCard, fulltime: fullTimeCard }[card.type];
   if (!draw) throw new Error(`Unknown kind of card: ${card.type}`);
-  return draw({ match, card, size });
+  const svg = draw({ match, card, size });
+  return clear ? svg.replace(SOLID_BACKGROUND, `fill="${BACKGROUND}" fill-opacity="${SEE_THROUGH}"/>`) : svg;
+}
+
+/** The opening card: the two clubs, each with its icon and name, and "V" or the score between them. */
+export function introCard({ match, card, size }) {
+  const c = canvas(size);
+  const middle = card.showScore ? `${card.homeScore ?? 0} – ${card.awayScore ?? 0}` : 'V';
+  const parts = [header(c, match)];
+  const sides = c.portrait
+    ? [{ side: 'home', x: c.w / 2, y: c.introHomeY }, { side: 'away', x: c.w / 2, y: c.introAwayY }]
+    : [{ side: 'home', x: c.w / 2 - c.introSpread, y: c.introY }, { side: 'away', x: c.w / 2 + c.introSpread, y: c.introY }];
+  for (const { side, x, y } of sides) {
+    parts.push(icon(c, match, side, { x, y, size: c.introIcon }));
+    parts.push(team(c, match, side, { x, y: y + c.introIcon / 2 + c.teamSize * 1.25, anchor: 'middle', width: c.introNameWidth }));
+  }
+  parts.push(text(middle, {
+    x: c.w / 2, y: c.introMiddleY, anchor: 'middle', fill: card.showScore ? TEXT : MUTED,
+    size: fitSize(middle, card.showScore ? c.scoreSize : c.scoreSize * 0.8, c.introMiddleWidth),
+  }));
+  return frame(c, parts);
 }
 
 export function goalCard({ match, card, size }) {
@@ -99,6 +129,8 @@ function canvas(size) {
         nameY: 950 * u, nameSize: 120 * u, detailY: 1060 * u, detailSize: 52 * u,
         scoreY: 1560 * u, fullTimeScoreY: 1000 * u, scoreSize: 230 * u, teamSize: 76 * u, barH: 16 * u,
         scorersY: 1360 * u, scorersGap: 290 * u, scorerStep: 68 * u, scorerSize: 52 * u, maxScorers: 3,
+        introIcon: 400 * u, introHomeY: 430 * u, introAwayY: 1340 * u, introMiddleY: 1040 * u,
+        introNameWidth: w - 2 * margin, introMiddleWidth: w - 2 * margin, introSpread: 0,
       }
     : {
         w, h, u, portrait, margin, gutter: 150 * u,
@@ -107,13 +139,15 @@ function canvas(size) {
         nameY: 590 * u, nameSize: 130 * u, detailY: 690 * u, detailSize: 52 * u,
         scoreY: 940 * u, fullTimeScoreY: 660 * u, scoreSize: 170 * u, teamSize: 76 * u, barH: 14 * u,
         scorersY: 800 * u, scorersGap: 0, scorerStep: 62 * u, scorerSize: 46 * u, maxScorers: 4,
+        introIcon: 400 * u, introY: 480 * u, introMiddleY: 540 * u, introSpread: 560 * u,
+        introNameWidth: 700 * u, introMiddleWidth: 420 * u,
       };
 }
 
 function frame(c, parts) {
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${c.w} ${c.h}" width="${c.w}" height="${c.h}" font-family="'${CARD_FONT}', 'Liberation Sans', Arial, sans-serif" font-weight="bold">`,
-    `<rect width="${c.w}" height="${c.h}" fill="${BACKGROUND}"/>`,
+    `<rect width="${c.w}" height="${c.h}" ${SOLID_BACKGROUND}`,
     ...parts.filter(Boolean),
     '</svg>',
   ].join('');
@@ -172,6 +206,24 @@ function team(c, match, side, { x, y, anchor, width, lit }) {
   return [
     text(name, { x, y, size, anchor, fill }),
     `<rect x="${round(barX)}" y="${round(y + size * 0.28)}" width="${round(barWidth)}" height="${round(c.barH)}" fill="${safeColour(match.colours[side])}"/>`,
+  ].join('');
+}
+
+/**
+ * A team's icon in a square of `size` centred on x, y. Without an icon, a
+ * disc of the team's colour with the first letter of its name stands in, so
+ * the card is whole either way.
+ */
+function icon(c, match, side, { x, y, size }) {
+  const picture = match.icons?.[side];
+  if (isIcon(picture)) {
+    return `<image href="${picture}" x="${round(x - size / 2)}" y="${round(y - size / 2)}" width="${round(size)}" height="${round(size)}" preserveAspectRatio="xMidYMid meet"/>`;
+  }
+  const fill = safeColour(match.colours[side]);
+  const letter = teamName(match, side).trim().charAt(0).toUpperCase();
+  return [
+    `<circle cx="${round(x)}" cy="${round(y)}" r="${round(size / 2)}" fill="${fill}"/>`,
+    text(letter, { x, y: y + size * 0.18, size: size * 0.5, anchor: 'middle', fill: readableOn(fill) }),
   ].join('');
 }
 

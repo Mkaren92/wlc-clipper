@@ -2,7 +2,8 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GOAL_TYPES, minuteLabel } from '../src/cards/config.js';
+import { readLibrary, removeClub, removeLeague, saveClub, saveLeague, startingLibrary } from '../src/cards/clubs.js';
+import { GOAL_TYPES, isIcon, minuteLabel } from '../src/cards/config.js';
 import { deleteMatch, listMatches, newMatchId, parseMatch, readMatch, saveCardPng, saveMatch, scorersFromGoals } from '../src/cards/match.js';
 import { fitSize, textWidth } from '../src/cards/measure.js';
 import { renderCard } from '../src/cards/templates.js';
@@ -15,6 +16,9 @@ const match = {
 const goal = { id: 'g1', type: 'goal', team: 'home', scorer: 'Robert Lewandowski', assist: 'Lamine Yamal', minute: 45, added: 2, goalType: 'header', homeScore: 1, awayScore: 0 };
 const red = { id: 'r1', type: 'red', team: 'away', player: 'Lisandro Martínez', minute: 67, added: null, redType: 'second-yellow', showScore: true, homeScore: 2, awayScore: 1 };
 const fullTime = { id: 'f1', type: 'fulltime', homeScore: 3, awayScore: 1, homeScorers: ["Lewandowski 12', 45+2'"], awayScorers: ["Fernandes 60' (pen)"] };
+const intro = { id: 'i1', type: 'intro', showScore: false, homeScore: 0, awayScore: 0 };
+// The smallest PNG there is, written the way an icon is stored: one clear pixel.
+const ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const texts = (svg) => [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
 
 describe('card templates', () => {
@@ -22,7 +26,7 @@ describe('card templates', () => {
     ['landscape', 1920, 1080],
     ['portrait', 1080, 1920],
   ])('draws every kind of card at the %s size', (size, width, height) => {
-    for (const card of [goal, red, fullTime]) {
+    for (const card of [intro, goal, red, fullTime]) {
       const svg = renderCard({ match, card, size });
       expect(svg).toMatch(new RegExp(`^<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"`));
       expect(svg.endsWith('</svg>')).toBe(true);
@@ -51,6 +55,55 @@ describe('card templates', () => {
   it('lists the scorers on a full-time card', () => {
     const shown = texts(renderCard({ match, card: fullTime, size: 'portrait' }));
     expect(shown).toEqual(expect.arrayContaining(['FULL TIME', '3 – 1', 'Lewandowski 12&#39;, 45+2&#39;', 'Fernandes 60&#39; (pen)']));
+  });
+
+  it('opens with an intro card: both clubs by name, and "V" or the score between them', () => {
+    for (const size of ['landscape', 'portrait']) {
+      const plain = texts(renderCard({ match, card: intro, size }));
+      expect(plain).toEqual(expect.arrayContaining(['CHAMPIONS LEAGUE  ·  19 NOV 2026', 'FC BARCELONA', 'MANCHESTER UNITED', 'V']));
+      const scored = texts(renderCard({ match, card: { ...intro, showScore: true, homeScore: 3, awayScore: 1 }, size }));
+      expect(scored).toContain('3 – 1');
+      expect(scored).not.toContain('V');
+    }
+  });
+
+  it('shows a club icon the owner added, and the team\'s first letter on its colour when there is none', () => {
+    const without = renderCard({ match, card: intro, size: 'landscape' });
+    expect(without).not.toContain('<image');
+    expect((without.match(/<circle/g) ?? []).length).toBe(2);
+    expect(without).toContain('fill="#a50044"');
+    expect(texts(without)).toEqual(expect.arrayContaining(['F', 'M']));
+
+    const withIcons = renderCard({ match: { ...match, icons: { home: ICON, away: '' } }, card: intro, size: 'landscape' });
+    expect((withIcons.match(/<image /g) ?? []).length).toBe(1);
+    expect(withIcons).toContain(`<image href="${ICON}"`);
+    expect((withIcons.match(/<circle/g) ?? []).length).toBe(1);
+    // Other cards stay as they were: icons are for the intro card.
+    expect(renderCard({ match: { ...match, icons: { home: ICON, away: ICON } }, card: goal, size: 'landscape' })).not.toContain('<image');
+  });
+
+  it('draws nothing as an icon that is not a plain PNG written as text', () => {
+    for (const bad of ['javascript:alert(1)', 'https://example.com/crest.png', 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=', `${ICON}" onload="x`, 'data:image/png;base64,', 7]) {
+      expect(isIcon(bad), String(bad)).toBe(false);
+      const svg = renderCard({ match: { ...match, icons: { home: bad, away: '' } }, card: intro, size: 'landscape' });
+      expect(svg).not.toContain('<image');
+      expect(svg).not.toContain('onload');
+      expect(svg).not.toContain('example.com');
+    }
+    expect(isIcon(ICON)).toBe(true);
+    expect(isIcon(`data:image/png;base64,${'A'.repeat(400_000)}`)).toBe(false); // too large to keep with a match
+  });
+
+  it('draws the same card with a see-through background, to lie over a video', () => {
+    for (const card of [intro, goal, red, fullTime]) {
+      const solid = renderCard({ match, card, size: 'landscape' });
+      const clear = renderCard({ match, card, size: 'landscape', clear: true });
+      expect(solid).not.toContain('fill-opacity');
+      expect((clear.match(/fill-opacity="0\.\d+"/g) ?? []).length).toBe(1);
+      // Nothing else differs: the words and where they sit are the same.
+      expect(texts(clear)).toEqual(texts(solid));
+      expect(clear.replace(/ fill-opacity="[^"]*"/, '')).toBe(solid);
+    }
   });
 
   it('escapes names, so text cannot break or add to the picture', () => {
@@ -120,6 +173,11 @@ describe('saved matches', () => {
     expect(() => parseMatch({ ...match, cards: [goal, { ...red, id: 'g1' }] })).toThrow(/share the id/);
     expect(() => parseMatch({ ...match, cards: [{ ...goal, goalType: 'bicycle' }] })).toThrow(/not valid/);
     expect(() => parseMatch({ ...match, id: '../x' })).toThrow(/not valid/);
+    // A match saved before icons existed has none, and an intro card needs nothing but its id.
+    expect(parseMatch({ ...match, cards: [{ id: 'i1', type: 'intro' }] })).toMatchObject({ icons: { home: '', away: '' }, cards: [intro] });
+    expect(parseMatch({ ...match, icons: { home: ICON, away: '' } }).icons.home).toBe(ICON);
+    expect(() => parseMatch({ ...match, icons: { home: 'https://example.com/crest.png', away: '' } })).toThrow(/icon is a PNG/);
+    expect(() => parseMatch({ ...match, icons: { home: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=', away: '' } })).toThrow(/icon is a PNG/);
   });
 
   it('keeps a card picture only if it is a PNG of the right size, and drops it with its card', async () => {
@@ -131,10 +189,17 @@ describe('saved matches', () => {
     };
     await saveCardPng(dir, 'pngs', 'g1', 'landscape', await png('1920x1080'));
     await saveCardPng(dir, 'pngs', 'g1', 'portrait', await png('1080x1920'));
+    // The see-through picture is kept beside the ordinary one, under its own name, and held to the same size.
+    await saveCardPng(dir, 'pngs', 'g1', 'landscape', await png('1920x1080'), true);
+    await expect(saveCardPng(dir, 'pngs', 'g1', 'portrait', await png('1920x1080'), true)).rejects.toThrow(/PNG of 1080x1920/);
+    expect((await readdir(path.join(dir, 'matches', 'pngs', 'cards'))).sort()).toEqual(['g1-landscape-clear.png', 'g1-landscape.png', 'g1-portrait.png']);
+    // Saving the match again keeps all of a card's pictures.
+    await saveMatch(dir, { ...match, id: 'pngs', cards: [goal] });
+    expect(await readdir(path.join(dir, 'matches', 'pngs', 'cards'))).toHaveLength(3);
     await expect(saveCardPng(dir, 'pngs', 'g1', 'landscape', await png('1080x1920'))).rejects.toThrow(/PNG of 1920x1080/);
     await expect(saveCardPng(dir, 'pngs', 'g1', 'landscape', Buffer.from('not a picture at all, just some text'))).rejects.toThrow(/PNG of 1920x1080/);
     await expect(saveCardPng(dir, 'pngs', 'nope', 'landscape', await png('1920x1080'))).rejects.toThrow(/No such card/);
-    expect((await readdir(path.join(dir, 'matches', 'pngs', 'cards'))).sort()).toEqual(['g1-landscape.png', 'g1-portrait.png']);
+    expect((await readdir(path.join(dir, 'matches', 'pngs', 'cards'))).sort()).toEqual(['g1-landscape-clear.png', 'g1-landscape.png', 'g1-portrait.png']);
 
     await saveMatch(dir, { ...match, id: 'pngs', cards: [] });
     expect(await readdir(path.join(dir, 'matches', 'pngs', 'cards'))).toEqual([]);
@@ -158,5 +223,75 @@ describe('scorersFromGoals', () => {
       awayScore: 2,
     });
     expect(scorersFromGoals({ cards: [] })).toEqual({ homeScorers: [], awayScorers: [], homeScore: 0, awayScore: 0 });
+  });
+});
+
+describe('leagues and clubs', () => {
+  let dir;
+  beforeAll(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'clipper-clubs-'));
+  });
+  afterAll(() => rm(dir, { recursive: true, force: true }));
+
+  it('starts with three leagues of twenty clubs each: a name and a colour, no logo', () => {
+    const { leagues, clubs } = startingLibrary();
+    expect(leagues.map((league) => league.name)).toEqual(['La Liga', 'Premier League', 'Serie A']);
+    for (const league of leagues) expect(clubs.filter((club) => club.league === league.id)).toHaveLength(20);
+    expect(new Set(clubs.map((club) => club.id)).size).toBe(60);
+    expect(clubs.every((club) => /^#[0-9a-f]{6}$/.test(club.colour) && club.icon === '' && club.name.length > 2)).toBe(true);
+    expect(clubs.find((club) => club.name === 'Atlético Madrid')).toMatchObject({ id: 'atletico-madrid', league: 'la-liga' });
+  });
+
+  it('writes the starting list out the first time, and from then on it is the owner\'s', async () => {
+    expect((await readdir(dir)).includes('clubs.json')).toBe(false);
+    const first = await readLibrary(dir);
+    expect(first.clubs).toHaveLength(60);
+    expect((await readdir(dir)).includes('clubs.json')).toBe(true);
+    // Deleting a club sticks: the starting list does not come back.
+    await removeClub(dir, 'getafe');
+    expect((await readLibrary(dir)).clubs.some((club) => club.id === 'getafe')).toBe(false);
+  });
+
+  it('adds, renames and deletes a league, taking its clubs with it', async () => {
+    const added = await saveLeague(dir, { name: 'Countries' });
+    expect(added.leagues.at(-1)).toEqual({ id: 'countries', name: 'Countries' });
+    expect((await saveLeague(dir, { name: 'Countries' })).leagues.at(-1).id).toBe('countries-2'); // the same name again gets its own id
+    expect((await saveLeague(dir, { id: 'countries', name: 'National teams' })).leagues.find((league) => league.id === 'countries').name).toBe('National teams');
+    await expect(saveLeague(dir, { name: '  ' })).rejects.toThrow(/not valid/);
+    await expect(saveLeague(dir, { id: 'nowhere', name: 'X' })).rejects.toThrow(/No such league/);
+
+    await saveClub(dir, { name: 'Armenia', league: 'countries', colour: '#d90012' });
+    const after = await removeLeague(dir, 'countries');
+    expect(after.leagues.some((league) => league.id === 'countries')).toBe(false);
+    expect(after.clubs.some((club) => club.name === 'Armenia')).toBe(false);
+    expect(after.clubs.filter((club) => club.league === 'serie-a')).toHaveLength(20); // the others are untouched
+    await expect(removeLeague(dir, 'countries')).rejects.toThrow(/No such league/);
+  });
+
+  it('adds a club to a league and changes only what it is told to', async () => {
+    const added = await saveClub(dir, { name: 'Real Zaragoza', league: 'la-liga', colour: '#004a99' });
+    expect(added.clubs.find((club) => club.id === 'real-zaragoza')).toEqual({ id: 'real-zaragoza', name: 'Real Zaragoza', league: 'la-liga', colour: '#004a99', icon: '' });
+    // Clubs are kept in order of name.
+    const names = added.clubs.map((club) => club.name);
+    expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
+
+    const logo = (await saveClub(dir, { id: 'real-zaragoza', icon: ICON })).clubs.find((club) => club.id === 'real-zaragoza');
+    expect(logo).toMatchObject({ name: 'Real Zaragoza', colour: '#004a99', icon: ICON });
+    const recoloured = (await saveClub(dir, { id: 'real-zaragoza', colour: '#112233' })).clubs.find((club) => club.id === 'real-zaragoza');
+    expect(recoloured).toMatchObject({ colour: '#112233', icon: ICON });
+    expect((await saveClub(dir, { name: 'Real Zaragoza', league: 'la-liga' })).clubs.at(-1)).toBeDefined(); // a second one of the same name is allowed
+    expect((await readLibrary(dir)).clubs.filter((club) => club.name === 'Real Zaragoza').map((club) => club.id).sort()).toEqual(['real-zaragoza', 'real-zaragoza-2']);
+  });
+
+  it('refuses a club that is not well formed', async () => {
+    await expect(saveClub(dir, { name: 'Nowhere FC', league: 'no-such-league' })).rejects.toThrow(/league that does not exist/);
+    await expect(saveClub(dir, { name: '', league: 'la-liga' })).rejects.toThrow(/not valid/);
+    await expect(saveClub(dir, { name: 'X', league: 'la-liga', colour: 'red' })).rejects.toThrow(/colour looks like/);
+    await expect(saveClub(dir, { id: 'barcelona', icon: 'https://example.com/crest.png' })).rejects.toThrow(/logo is a PNG/);
+    await expect(saveClub(dir, { id: 'barcelona', icon: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=' })).rejects.toThrow(/logo is a PNG/);
+    await expect(saveClub(dir, { id: 'no-such-club', name: 'X' })).rejects.toThrow(/No such club/);
+    await expect(removeClub(dir, 'no-such-club')).rejects.toThrow(/No such club/);
+    // Nothing above changed the list.
+    expect((await readLibrary(dir)).clubs.find((club) => club.id === 'barcelona')).toMatchObject({ name: 'Barcelona', icon: '' });
   });
 });

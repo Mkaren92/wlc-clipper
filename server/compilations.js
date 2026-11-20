@@ -1,12 +1,14 @@
 // Compilations: a timeline of videos and cards, rendered into one video
 // (src/compilation/).
 import { createWriteStream } from 'node:fs';
-import { readFile, rename, rm, stat, statfs } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { buildCompilation } from '../src/compilation/build.js';
+import { automaticSounds, BUILT_IN, builtInSoundFile, isSoundFileName, listSoundFiles, soundSeconds } from '../src/compilation/sounds.js';
 import { compilationDir, deleteCompilation, listCompilations, newCompilationId, readTimeline, saveTimeline } from '../src/compilation/timeline.js';
 import { probe } from '../src/probe.js';
+import { creditPictures } from '../src/pictures.js';
 import { creditLinks, readSources } from '../src/sources.js';
 import { HttpError } from './http.js';
 
@@ -15,12 +17,13 @@ import { HttpError } from './http.js';
  * @param {object} options
  * @param {string} options.dataDir
  * @param {string} options.inDir
+ * @param {string} options.soundsDir   audio files the owner may put under a card
  * @param {ReturnType<import('./jobs.js').createJobs>} options.jobs
  * @param {(library: string, name: string) => Promise<string>} options.resolveVideo
  *   turns a video's folder and name into a path, or throws a 404
  * @param {(name: string) => boolean} options.isVideoName
  */
-export function addCompilationRoutes(app, { dataDir, inDir, jobs, resolveVideo, isVideoName }) {
+export function addCompilationRoutes(app, { dataDir, inDir, soundsDir, jobs, resolveVideo, isVideoName }) {
   const asHttp = (error) => {
     throw new HttpError(/^No such/.test(error.message) ? 404 : 400, error.message);
   };
@@ -71,11 +74,13 @@ export function addCompilationRoutes(app, { dataDir, inDir, jobs, resolveVideo, 
   app.post('/api/compilations/:id/generate', async (req, res) => {
     const timeline = await readTimeline(dataDir, req.params.id).catch(asHttp);
     const job = jobs.add('compile', timeline.name, async (onStep) => {
+      const sources = await readSources(dataDir);
       const states = timeline.items.map(() => 'waiting');
       onStep('items', { items: states });
       const built = await buildCompilation({
-        timeline, dataDir, resolveVideo,
-        links: creditLinks(await readSources(dataDir)),
+        timeline, dataDir, resolveVideo, soundsDir,
+        links: creditLinks(sources),
+        pictures: await creditPictures(dataDir, sources),
         onProgress: (progress) => {
           if (progress.joining) return onStep('joining', { items: [...states] });
           states[progress.index] = progress.status;
@@ -93,6 +98,37 @@ export function addCompilationRoutes(app, { dataDir, inDir, jobs, resolveVideo, 
     res.sendFile(path.join(compilationDir(dataDir, timeline.id), 'final.mp4'), { cacheControl: false }, (error) => {
       if (error && !res.headersSent) res.status(404).json({ error: 'This compilation has not been generated yet.' });
     });
+  });
+
+  // The sounds a card can have: the built-in ones and the owner's files, what
+  // "Automatic" stands for on each kind of card, and how long each sound
+  // plays, since a card with no length of its own lasts as long as its sound.
+  app.get('/api/sounds', async (req, res) => {
+    // Made here so the owner finds the folder to put files in.
+    await mkdir(soundsDir, { recursive: true });
+    const files = await listSoundFiles(soundsDir);
+    const lengths = {};
+    for (const id of Object.keys(BUILT_IN)) lengths[`builtin:${id}`] = await soundSeconds(await builtInSoundFile(dataDir, id));
+    for (const name of files) lengths[`file:${name}`] = await soundSeconds(path.join(soundsDir, name));
+    res.json({
+      builtIn: Object.entries(BUILT_IN).map(([id, sound]) => ({ id, name: sound.name })),
+      files,
+      automatic: await automaticSounds(soundsDir),
+      lengths,
+    });
+  });
+
+  // For hearing a sound before generating. A built-in one is made on first use.
+  app.get('/media/sounds/builtin/:id', async (req, res) => {
+    if (!Object.hasOwn(BUILT_IN, req.params.id)) throw new HttpError(404, 'No such sound.');
+    res.sendFile(await builtInSoundFile(dataDir, req.params.id));
+  });
+
+  app.get('/media/sounds/file/:name', async (req, res) => {
+    const name = req.params.name;
+    const info = isSoundFileName(name) ? await stat(path.join(soundsDir, name)).catch(() => null) : null;
+    if (!info?.isFile()) throw new HttpError(404, 'No such sound.');
+    res.sendFile(name, { root: soundsDir });
   });
 
   // Length and size of a video in one of the folders, for the timeline's running total.

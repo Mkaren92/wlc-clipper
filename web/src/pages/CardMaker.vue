@@ -6,9 +6,16 @@ import { computed, onMounted, ref } from 'vue';
 import { CARD_SIZES, GOAL_TYPES, goalType, minuteLabel, RED_TYPES } from '../../../src/cards/config.js';
 import { renderCard } from '../../../src/cards/templates.js';
 import { api } from '../api.js';
-import { cardPng, download, loadCardFont } from '../cardPng.js';
+import { cardPng, download, iconFromFile, loadCardFont } from '../cardPng.js';
+import ClubLibrary from '../components/ClubLibrary.vue';
 import Icon from '../components/Icon.vue';
 import TrashButton from '../components/TrashButton.vue';
+
+// Which side of the page is open: the matches and their cards, or the list of leagues and clubs.
+const mode = ref('matches');
+const library = ref({ leagues: [], clubs: [] });
+const pickLeague = ref('');
+const clubsToPick = computed(() => library.value.clubs.filter((club) => club.league === pickLeague.value));
 
 const matches = ref([]);
 const match = ref(null); // the match being edited: a copy, saved with the Save button
@@ -26,7 +33,7 @@ const unsaved = computed(() => match.value !== null && JSON.stringify(match.valu
 const card = computed(() => match.value?.cards.find((c) => c.id === cardId.value) ?? null);
 const svg = computed(() => (card.value ? renderCard({ match: match.value, card: card.value, size: size.value }) : ''));
 const frame = computed(() => CARD_SIZES[size.value]);
-const CARD_NAMES = { goal: 'Goal', red: 'Red card', fulltime: 'Full time' };
+const CARD_NAMES = { intro: 'Intro', goal: 'Goal', red: 'Red card', fulltime: 'Full time' };
 
 async function load() {
   try {
@@ -37,7 +44,8 @@ async function load() {
   }
 }
 onMounted(async () => {
-  await Promise.all([load(), loadCardFont().catch(() => {})]);
+  await Promise.all([load(), loadCardFont().catch(() => {}), api.clubs().then((answer) => (library.value = answer), () => {})]);
+  pickLeague.value = library.value.leagues[0]?.id ?? '';
   if (matches.value.length > 0) open(matches.value[0]);
 });
 
@@ -52,7 +60,7 @@ function open(saved) {
 }
 
 function newMatch() {
-  match.value = { id: null, home: '', away: '', competition: '', date: '', colours: { home: '#a50044', away: '#1d4ed8' }, cards: [] };
+  match.value = { id: null, home: '', away: '', competition: '', date: '', colours: { home: '#a50044', away: '#1d4ed8' }, icons: { home: '', away: '' }, cards: [] };
   cardId.value = '';
   note.value = '';
   savedText.value = '';
@@ -104,6 +112,7 @@ function scorers() {
 function addCard(type) {
   const id = newId();
   const fresh = {
+    intro: { id, type, showScore: false, homeScore: 0, awayScore: 0 },
     goal: { id, type, team: 'home', scorer: '', assist: '', minute: null, added: null, goalType: 'open-play', ...latestScore() },
     red: { id, type, team: 'home', player: '', minute: null, added: null, redType: 'straight', showScore: false, ...latestScore() },
     fulltime: { id, type, ...scorers() },
@@ -140,6 +149,33 @@ async function removeCard(target) {
   }
 }
 
+// --- Club icons -------------------------------------------------------------------
+
+async function chooseIcon(side, file) {
+  if (!file) return;
+  error.value = '';
+  try {
+    match.value.icons[side] = await iconFromFile(file);
+  } catch (e) {
+    error.value = e.message;
+  }
+}
+
+// Choosing a club from the list fills in a side of the match: its name, its
+// colour and its logo. The match keeps its own copy, so it can still be
+// changed here, and changing the club later does not change this match.
+function useClub(side, clubId) {
+  const club = library.value.clubs.find((known) => known.id === clubId);
+  if (!club) return;
+  match.value[side] = club.name;
+  match.value.colours[side] = club.colour;
+  match.value.icons[side] = club.icon;
+  const league = library.value.leagues.find((known) => known.id === club.league);
+  // The league becomes the competition unless something else was typed there.
+  const leagueNames = library.value.leagues.map((known) => known.name);
+  if (league && (!match.value.competition || leagueNames.includes(match.value.competition))) match.value.competition = league.name;
+}
+
 // Replaces the two lists and the score. It runs only when the button is
 // pressed, so lines edited by hand are never overwritten behind your back.
 function fillFromGoals() {
@@ -147,6 +183,7 @@ function fillFromGoals() {
 }
 
 function label(c) {
+  if (c.type === 'intro') return 'Intro';
   if (c.type === 'goal') return `${minuteLabel(c.minute, c.added)} ${c.scorer || 'Goal'}`.trim();
   if (c.type === 'red') return `${minuteLabel(c.minute, c.added)} ${c.player || 'Red card'}`.trim();
   return `Full time ${c.homeScore}–${c.awayScore}`;
@@ -182,8 +219,12 @@ async function save() {
     const saved = match.value.id ? await api.saveMatch(match.value) : await api.createMatch(match.value);
     for (const c of saved.cards) {
       for (const [name, { width, height }] of Object.entries(CARD_SIZES)) {
-        const png = await cardPng(renderCard({ match: saved, card: c, size: name }), width, height);
-        await api.saveCardPng(saved.id, c.id, name, png);
+        // Two pictures in each size: the card as it is, and one with a see-through
+        // background for when a video plays behind it in a compilation.
+        for (const clear of [false, true]) {
+          const png = await cardPng(renderCard({ match: saved, card: c, size: name, clear }), width, height);
+          await api.saveCardPng(saved.id, c.id, name, png, clear);
+        }
       }
     }
     const keep = cardId.value;
@@ -213,11 +254,15 @@ async function exportPng(name) {
 <template>
   <div class="maker">
     <section class="panel list">
+      <div class="choices side" role="group" aria-label="What to work on">
+        <button :aria-pressed="mode === 'matches'" @click="mode = 'matches'">Matches</button>
+        <button :aria-pressed="mode === 'clubs'" @click="mode = 'clubs'">Leagues and clubs</button>
+      </div>
       <h2>Matches</h2>
-      <button class="primary" @click="newMatch"><Icon name="plus" /> New match</button>
+      <button class="primary" @click="newMatch(); mode = 'matches'"><Icon name="plus" /> New match</button>
       <p v-if="matches.length === 0" class="empty">No saved matches yet. Start one with “New match”.</p>
       <div v-for="saved in matches" :key="saved.id" class="entry" :class="{ current: match?.id === saved.id }">
-        <button class="open" @click="open(saved)">
+        <button class="open" @click="open(saved); mode = 'matches'">
           <strong>{{ saved.home }} v {{ saved.away }}</strong>
           <span class="muted">{{ [saved.competition, saved.date].filter(Boolean).join(' · ') || 'No details' }} · {{ saved.cards.length }} cards</span>
         </button>
@@ -233,11 +278,32 @@ async function exportPng(name) {
       </div>
     </section>
 
-    <div v-if="match" class="stack editor">
+    <ClubLibrary v-if="mode === 'clubs'" class="clubs" :library="library" @changed="library = $event" />
+
+    <div v-else-if="match" class="stack editor">
       <p v-if="error" class="error" role="alert">{{ error }}</p>
 
       <section class="panel">
         <h2>Match details</h2>
+        <div v-if="library.clubs.length > 0" class="row from-list">
+          <div>
+            <label for="pick-league">League</label>
+            <select id="pick-league" v-model="pickLeague">
+              <option v-for="known in library.leagues" :key="known.id" :value="known.id">{{ known.name }}</option>
+            </select>
+          </div>
+          <div v-for="side in ['home', 'away']" :key="side">
+            <label :for="`pick-${side}`">{{ side === 'home' ? 'Home' : 'Away' }} club from the list</label>
+            <select :id="`pick-${side}`" @change="useClub(side, $event.target.value); $event.target.value = ''">
+              <option value="">Choose…</option>
+              <option v-for="club in clubsToPick" :key="club.id" :value="club.id">{{ club.name }}</option>
+            </select>
+          </div>
+        </div>
+        <p v-if="library.clubs.length > 0" class="hint from-list-hint">
+          Choosing a club fills in its name, colour and logo below. You can still change them for this match. Edit the
+          list under “Leagues and clubs”.
+        </p>
         <div class="row">
           <div><label for="home">Home team</label><input id="home" v-model="match.home" type="text" /></div>
           <div class="fixed"><label for="home-colour">Colour</label><input id="home-colour" v-model="match.colours.home" type="color" /></div>
@@ -248,16 +314,34 @@ async function exportPng(name) {
           <div><label for="competition">Competition (optional)</label><input id="competition" v-model="match.competition" type="text" /></div>
           <div><label for="date">Date (optional)</label><input id="date" v-model="match.date" type="text" /></div>
         </div>
+        <div class="row second icons">
+          <div v-for="side in ['home', 'away']" :key="side" class="icon-pick">
+            <span class="thumb" :class="{ empty: !match.icons[side] }">
+              <img v-if="match.icons[side]" :src="match.icons[side]" :alt="`Icon of the ${side} team`" />
+              <span v-else aria-hidden="true">{{ (match[side] || '?').trim().charAt(0).toUpperCase() }}</span>
+            </span>
+            <div>
+              <label :for="`icon-${side}`">{{ match[side] || (side === 'home' ? 'Home team' : 'Away team') }}: club icon (optional)</label>
+              <input :id="`icon-${side}`" type="file" accept="image/*" @change="chooseIcon(side, $event.target.files[0]); $event.target.value = ''" />
+              <button v-if="match.icons[side]" class="small" @click="match.icons[side] = ''">Remove the icon</button>
+            </div>
+          </div>
+        </div>
+        <p class="hint">
+          An icon is a picture from your own computer; the tool fetches none. It is shown on the intro card. Without
+          one, the card shows the team's first letter on its colour.
+        </p>
       </section>
 
       <section class="panel">
         <h2>Cards</h2>
         <div class="row">
+          <button class="fixed" @click="addCard('intro')"><Icon name="plus" /> Intro</button>
           <button class="fixed" @click="addCard('goal')"><Icon name="plus" /> Goal</button>
           <button class="fixed" @click="addCard('red')"><Icon name="plus" /> Red card</button>
           <button class="fixed" @click="addCard('fulltime')"><Icon name="plus" /> Full time</button>
         </div>
-        <p v-if="match.cards.length === 0" class="empty">No cards yet. Add a goal, a red card or the full-time score.</p>
+        <p v-if="match.cards.length === 0" class="empty">No cards yet. Add an intro, a goal, a red card or the full-time score.</p>
         <div v-for="c in match.cards" :key="c.id" class="entry" :class="{ current: c.id === cardId }">
           <button class="open" @click="cardId = c.id">
             <strong>{{ label(c) }}</strong>
@@ -279,7 +363,21 @@ async function exportPng(name) {
       <section v-if="card" class="panel">
         <h2>{{ CARD_NAMES[card.type] }}</h2>
 
-        <template v-if="card.type === 'goal'">
+        <template v-if="card.type === 'intro'">
+          <p class="hint first">
+            The opening card: both clubs with their icons and names, from the match details above. It shows “V” between
+            them, or the score if you switch it on.
+          </p>
+          <div class="row">
+            <label class="check fixed"><input v-model="card.showScore" type="checkbox" /> Show the score</label>
+            <template v-if="card.showScore">
+              <div class="narrow"><label for="home-score">{{ match.home || 'Home' }}</label><input id="home-score" v-model.number="card.homeScore" type="number" min="0" /></div>
+              <div class="narrow"><label for="away-score">{{ match.away || 'Away' }}</label><input id="away-score" v-model.number="card.awayScore" type="number" min="0" /></div>
+            </template>
+          </div>
+        </template>
+
+        <template v-else-if="card.type === 'goal'">
           <div class="row">
             <div>
               <label for="team">Scoring team</label>
@@ -359,7 +457,7 @@ async function exportPng(name) {
     </div>
     <p v-else class="empty wide">Choose a match on the left, or start a new one.</p>
 
-    <section v-if="match && card" class="panel preview">
+    <section v-if="mode === 'matches' && match && card" class="panel preview">
       <div class="row middle">
         <h2 class="fixed">Preview</h2>
         <span />
@@ -382,10 +480,24 @@ async function exportPng(name) {
 <style scoped>
 .maker { display: grid; grid-template-columns: 270px minmax(0, 1fr) minmax(280px, 420px); gap: var(--gap); align-items: start; }
 .list .primary { width: 100%; }
+.side { display: flex; margin-bottom: 14px; }
+.side button { flex: 1; }
+/* The list of leagues and clubs takes the room of the editor and the preview. */
+.clubs { grid-column: 2 / -1; min-width: 0; }
+.from-list-hint { margin: 6px 0 14px; padding-bottom: 12px; border-bottom: 1px dashed var(--line); }
 .empty.wide { align-self: start; margin: 0; padding: 28px; }
 .second { margin-top: 12px; }
 .narrow { flex: 0 1 150px; }
 .check { padding-bottom: 8px; }
+.first { margin: 0 0 12px; }
+.icon-pick { display: flex; align-items: center; gap: 12px; flex: 1 1 300px; }
+.icon-pick button { margin-top: 6px; }
+/* The icon as the owner chose it, on a dark square like the card it will sit on. */
+.thumb {
+  display: grid; place-items: center; width: 64px; height: 64px; flex: none; border-radius: var(--radius);
+  background: var(--text); color: var(--bg); font-weight: 700; font-size: 26px; overflow: hidden;
+}
+.thumb img { width: 100%; height: 100%; object-fit: contain; }
 .editor .hint { margin: 10px 0; }
 .preview { position: sticky; top: 16px; }
 .preview h2 { margin: 0; }
