@@ -6,13 +6,13 @@
 // Choosing a club for a match copies those three into the match, so the list
 // can change later without changing matches already made.
 //
-// The list starts with three leagues and their clubs. Those names and colours
-// were written down from memory of the 2025-26 season, as a starting point to
-// correct, not as a record: clubs go up and down each year. No logos come with
-// it. A logo is only ever a picture the owner chose (see ICON in config.js).
+// The list starts with four leagues and their clubs (see SEED below), as a
+// starting point to correct, not as a record: clubs go up and down each year,
+// and the colours are approximate. No logos come with it. A logo is only ever a picture the owner chose (see ICON in config.js).
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { keepCopy } from '../backup.js';
 import { isIcon } from './config.js';
 
 const ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
@@ -46,27 +46,47 @@ const librarySchema = z.strictObject({
 
 // A starting list: each league's clubs with one main colour. Black-and-white
 // clubs are given white, since a card's background is dark.
+//
+// Which clubs are in La Liga and the Premier League was checked on 2026-11-20,
+// at the owner's request, against the 2026-27 season. "Europe" is a league of
+// the tool's own: leading clubs of Italy, France, Germany and Portugal, chosen
+// by hand. "Champions League" is the 36 clubs of the 2026-27 league phase,
+// from the table the owner pointed to that day. A club that is in two leagues
+// is two entries; the second is written without a colour and takes the first's.
+// The colours are from memory and approximate.
 const SEED = {
   'La Liga': [
     ['Alavés', '#0057b8'], ['Athletic Club', '#ee2523'], ['Atlético Madrid', '#cb3524'], ['Barcelona', '#a50044'],
-    ['Celta Vigo', '#8ac3ee'], ['Elche', '#05642c'], ['Espanyol', '#007fc8'], ['Getafe', '#005999'],
-    ['Girona', '#cd2534'], ['Levante', '#b4053f'], ['Mallorca', '#e20613'], ['Osasuna', '#d91a21'],
-    ['Rayo Vallecano', '#e53027'], ['Real Betis', '#00954c'], ['Real Madrid', '#ffffff'], ['Real Oviedo', '#004c9b'],
+    ['Celta Vigo', '#8ac3ee'], ['Deportivo La Coruña', '#0a5eb0'], ['Elche', '#05642c'], ['Espanyol', '#007fc8'],
+    ['Getafe', '#005999'], ['Levante', '#b4053f'], ['Málaga', '#5aa9e6'], ['Osasuna', '#d91a21'],
+    ['Racing Santander', '#0b8a3c'], ['Rayo Vallecano', '#e53027'], ['Real Betis', '#00954c'], ['Real Madrid', '#ffffff'],
     ['Real Sociedad', '#0067b1'], ['Sevilla', '#d8061b'], ['Valencia', '#f18e00'], ['Villarreal', '#fbe10f'],
   ],
   'Premier League': [
     ['Arsenal', '#ef0107'], ['Aston Villa', '#670e36'], ['Bournemouth', '#da291c'], ['Brentford', '#e30613'],
-    ['Brighton', '#0057b8'], ['Burnley', '#6c1d45'], ['Chelsea', '#034694'], ['Crystal Palace', '#1b458f'],
-    ['Everton', '#003399'], ['Fulham', '#ffffff'], ['Leeds United', '#ffcd00'], ['Liverpool', '#c8102e'],
-    ['Manchester City', '#6cabdd'], ['Manchester United', '#da291c'], ['Newcastle United', '#ffffff'], ['Nottingham Forest', '#dd0000'],
-    ['Sunderland', '#eb172b'], ['Tottenham Hotspur', '#ffffff'], ['West Ham United', '#7a263a'], ['Wolverhampton Wanderers', '#fdb913'],
+    ['Brighton', '#0057b8'], ['Chelsea', '#034694'], ['Coventry City', '#6fb7e9'], ['Crystal Palace', '#1b458f'],
+    ['Everton', '#003399'], ['Fulham', '#ffffff'], ['Hull City', '#f5a12d'], ['Ipswich Town', '#1f4fa3'],
+    ['Leeds United', '#ffcd00'], ['Liverpool', '#c8102e'], ['Manchester City', '#6cabdd'], ['Manchester United', '#da291c'],
+    ['Newcastle United', '#ffffff'], ['Nottingham Forest', '#dd0000'], ['Sunderland', '#eb172b'], ['Tottenham Hotspur', '#ffffff'],
   ],
-  'Serie A': [
-    ['Atalanta', '#1e71b8'], ['Bologna', '#a21c26'], ['Cagliari', '#ad002a'], ['Como', '#003a8c'],
-    ['Cremonese', '#d4011d'], ['Fiorentina', '#482e92'], ['Genoa', '#ad1919'], ['Hellas Verona', '#ffd100'],
-    ['Inter', '#0068a8'], ['Juventus', '#ffffff'], ['Lazio', '#87d8f7'], ['Lecce', '#ffed00'],
-    ['Milan', '#fb090b'], ['Napoli', '#12a0d7'], ['Parma', '#ffd200'], ['Pisa', '#1b4ea0'],
-    ['Roma', '#8e1f2f'], ['Sassuolo', '#00a752'], ['Torino', '#8a1e03'], ['Udinese', '#ffffff'],
+  Europe: [
+    // Italy
+    ['Atalanta', '#1e71b8'], ['Como', '#003a8c'], ['Inter', '#0068a8'], ['Juventus', '#ffffff'], ['Lazio', '#87d8f7'], ['Milan', '#fb090b'],
+    ['Napoli', '#12a0d7'], ['Roma', '#8e1f2f'],
+    // France
+    ['Lille', '#e01e13'], ['Lyon', '#da001a'], ['Marseille', '#2faee0'], ['Monaco', '#e51b22'], ['Paris Saint-Germain', '#004170'],
+    // Germany
+    ['Bayer Leverkusen', '#e32221'], ['Bayern Munich', '#dc052d'], ['Borussia Dortmund', '#fde100'], ['Eintracht Frankfurt', '#e1000f'], ['RB Leipzig', '#dd0741'],
+    // Portugal
+    ['Benfica', '#e30613'], ['Braga', '#d1001c'], ['Porto', '#00428c'], ['Sporting CP', '#008057'],
+  ],
+  'Champions League': [
+    ['AEK Athens', '#ffd100'], ['Arsenal'], ['Aston Villa'], ['Atlético Madrid'], ['Barcelona'], ['Bayern Munich'],
+    ['Bodø/Glimt', '#ffdd00'], ['Borussia Dortmund'], ['Club Brugge', '#0067b1'], ['Como'], ['Fenerbahçe', '#ffed00'], ['Feyenoord', '#e3001b'],
+    ['Galatasaray', '#fdb912'], ['Inter'], ['LASK', '#ffffff'], ['Lens', '#ffd700'], ['Lille'], ['Liverpool'],
+    ['Manchester City'], ['Manchester United'], ['Napoli'], ['Paris Saint-Germain'], ['Porto'], ['PSV Eindhoven', '#ed1c24'],
+    ['RB Leipzig'], ['Real Betis'], ['Real Madrid'], ['Roma'], ['Sabah', '#5b6475'], ['Shakhtar Donetsk', '#f58220'],
+    ['Slavia Prague', '#d7141a'], ['Slovan Bratislava', '#1d8ecf'], ['Sporting CP'], ['Stuttgart', '#e32219'], ['Viking', '#1c3f94'], ['Villarreal'],
   ],
 };
 
@@ -92,7 +112,9 @@ export function startingLibrary() {
     for (const [clubName, clubColour] of members) {
       const clubId = freeId(clubName, taken);
       taken.add(clubId);
-      clubs.push({ id: clubId, name: clubName, league: league.id, colour: clubColour, icon: '' });
+      // A club listed without a colour is one already in an earlier league, and has the same colour here.
+      const colour = clubColour ?? clubs.find((club) => club.name === clubName).colour;
+      clubs.push({ id: clubId, name: clubName, league: league.id, colour, icon: '' });
     }
   }
   return { leagues, clubs };
@@ -127,7 +149,10 @@ async function saveLibrary(dataDir, data) {
   // Leagues keep the order they were made in. Clubs are kept by name.
   library.clubs.sort((a, b) => a.name.localeCompare(b.name));
   await mkdir(dataDir, { recursive: true });
-  await writeFile(libraryFile(dataDir), `${JSON.stringify(library, null, 2)}\n`);
+  const text = `${JSON.stringify(library, null, 2)}\n`;
+  // The list as it stood is copied first (data/backups/clubs). It holds every logo, so only a few copies are kept.
+  await keepCopy(libraryFile(dataDir), text, { dataDir, name: 'clubs', keep: 5 });
+  await writeFile(libraryFile(dataDir), text);
   return library;
 }
 

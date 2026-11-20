@@ -92,7 +92,7 @@ export function describe(job) {
     compile: `Generating ${job.label}`,
     combine: `Combining ${job.label}`,
     fetch: `Fetching ${job.label}`,
-    pictures: 'Getting the channels\' pictures',
+    pictures: 'Updating the channels\' pictures and subscribers',
     channel: `Looking up ${job.label}`,
     render: `Rendering ${job.label} again`,
     suggest: `Finding moments in ${job.label}`,
@@ -102,13 +102,14 @@ export function describe(job) {
     const seconds = Math.max(0, Math.round((jobs.now - (job.startedAt ?? job.createdAt)) / 1000));
     return `${what}: ${STEP_NAMES[job.step] ?? (job.kind === 'part' || job.kind === 'combine' ? 'encoding' : 'starting')}… ${seconds} s`;
   }
+  if (job.status === 'stopped') return `${what}: stopped.`;
   if (job.status === 'failed') return `${what} failed. ${job.error}`;
   return {
     cut: `${job.result.clip} is ready.`,
     part: `${job.result.name} is saved.`,
     compile: `${job.label} is ready.`,
     combine: `${job.label} is combined. It is in Compilations, under “Add videos”.`,
-    pictures: `${job.result?.fetched?.length ?? 0} ${job.result?.fetched?.length === 1 ? 'picture' : 'pictures'} fetched.${job.result?.failed?.length ? ` Not fetched: ${job.result.failed.map((one) => `${one.name} (${one.error})`).join('; ')}` : ''}`,
+    pictures: `${job.result?.fetched?.length ?? 0} ${job.result?.fetched?.length === 1 ? 'channel' : 'channels'} updated.${job.result?.failed?.length ? ` Not fetched: ${job.result.failed.map((one) => `${one.name} (${one.error})`).join('; ')}` : ''}`,
     channel: `${job.result?.source?.name} is in your channels.${job.result?.pictureError ? ` Its picture was not fetched: ${job.result.pictureError}` : ''}`,
     fetch: `${job.result?.name} is in your videos.${job.result?.early > 0.05 ? ` It starts ${job.result.early.toFixed(1)} s before the time you asked.` : ''}`,
     render: `${job.label} was rendered again.`,

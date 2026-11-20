@@ -11,6 +11,7 @@ import CompilationBuilder from './pages/CompilationBuilder.vue';
 import Sources from './pages/Sources.vue';
 import { clock, fileSize } from './format.js';
 import { describe, isActive, jobs, refresh as refreshJobs, visibleJobs } from './jobs.js';
+import { liveCount, stopWatchingLive, watchLive } from './live.js';
 import { applyPalette, PALETTES, savedPalette } from './theme.js';
 
 const videos = ref([]);
@@ -73,6 +74,7 @@ window.addEventListener('keydown', onKey);
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey);
   window.removeEventListener('hashchange', onHash);
+  stopWatchingLive();
 });
 
 const firstVideo = () => (videos.value.length > 0 ? { kind: 'video', name: videos.value[0].name } : { kind: 'none' });
@@ -125,6 +127,19 @@ async function openClip(name) {
 // A job that finishes may have made or changed a clip, so the lists are read again.
 watch(() => jobs.list.filter((job) => !isActive(job)).length, refresh);
 
+// Stopping a job that is waiting or running. The list is read again at once, so the result shows.
+const stopping = ref([]);
+async function stopJob(job) {
+  stopping.value.push(job.id);
+  try {
+    await api.stopJob(job.id);
+  } catch {
+    // It finished by itself in the meantime; the list will say so.
+  }
+  await refreshJobs();
+  stopping.value = stopping.value.filter((id) => id !== job.id);
+}
+
 // Where a finished job's notice leads.
 function openJob(job) {
   jobs.dismissed.push(job.id);
@@ -140,6 +155,7 @@ function openJob(job) {
 
 onMounted(async () => {
   refreshJobs();
+  watchLive();
   await refresh();
   view.value = firstVideo();
 });
@@ -159,6 +175,8 @@ onMounted(async () => {
           :aria-current="page === p.id ? 'page' : undefined" @click="go(p.id)"
         >
           <Icon :name="p.icon" /> {{ p.name }}
+          <!-- How many of the channels are live right now, on whichever page you are. -->
+          <span v-if="p.id === 'sources' && liveCount() > 0" class="chip bad on-air">{{ liveCount() }} live</span>
         </button>
       </nav>
 
@@ -168,9 +186,15 @@ onMounted(async () => {
         <ul>
           <li v-for="job in visibleJobs()" :key="job.id" :class="job.status">
             <span v-if="isActive(job)" class="spinner" aria-hidden="true" />
-            <Icon v-else :name="job.status === 'done' ? 'check' : 'alert'" />
+            <Icon v-else :name="job.status === 'done' ? 'check' : job.status === 'stopped' ? 'stop' : 'alert'" />
             <span class="text">{{ describe(job) }}</span>
-            <span v-if="!isActive(job)" class="buttons">
+            <!-- Work that is waiting or running can be stopped. Nothing finished is lost by it. -->
+            <span v-if="isActive(job)" class="buttons">
+              <button class="small" :disabled="stopping.includes(job.id)" :aria-label="`Stop: ${describe(job)}`" @click="stopJob(job)">
+                <Icon name="stop" /> {{ stopping.includes(job.id) ? 'Stopping…' : 'Stop' }}
+              </button>
+            </span>
+            <span v-else class="buttons">
               <button v-if="job.status === 'done'" class="small primary" @click="openJob(job)">
                 {{ job.kind === 'suggest' ? 'Show' : 'Open' }}
               </button>
@@ -325,6 +349,8 @@ nav button {
 }
 nav button:hover:not(:disabled) { background: var(--soft-strong); border-color: transparent; }
 nav button.current, nav button.current:hover { background: var(--accent); color: var(--accent-text); }
+/* "2 live", at the right end of the Sources button. */
+nav .on-air { margin-left: auto; }
 
 h3 { display: flex; align-items: center; gap: 6px; padding: 0 4px; }
 .count { font-weight: 650; letter-spacing: 0; background: var(--highlight); color: var(--highlight-text); border-radius: 999px; padding: 0 7px; }

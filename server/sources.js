@@ -1,8 +1,9 @@
 // The sources list and the fetch step (src/sources.js, src/fetch.js).
 import { z } from 'zod';
 import { fetchVideo, filePrefix, ytDlp } from '../src/fetch.js';
-import { fetchPictures, listPictures, pictureFile, removeOtherPictures, syncSource } from '../src/pictures.js';
-import { readSources, saveSources } from '../src/sources.js';
+import { checkLive } from '../src/live.js';
+import { fetchPictures, listPictures, listSubscribers, pictureFile, removeOtherPictures, syncSource } from '../src/pictures.js';
+import { readSources, removeSource, saveSources, setSourceClubs } from '../src/sources.js';
 import { formatClock, parseTime } from '../src/time.js';
 import { HttpError } from './http.js';
 
@@ -32,6 +33,8 @@ export function addSourceRoutes(app, { dataDir, inDir, jobs, downloader = ytDlp(
     sources,
     // Which channels have a picture, by source id, with a number that changes when the picture does.
     pictures: await listPictures(dataDir, sources),
+    // How many subscribers each channel had when it was last looked up, by source id.
+    subscribers: await listSubscribers(dataDir, sources),
     prefixes: Object.fromEntries(sources.map((source) => [source.id, filePrefix(source.name)])),
     downloaderInstalled: await downloader.isInstalled(),
   });
@@ -49,6 +52,49 @@ export function addSourceRoutes(app, { dataDir, inDir, jobs, downloader = ytDlp(
     res.json(await answer(sources));
   });
 
+  // One channel's clubs, saved the moment they are chosen. Only that channel is changed on disk.
+  app.put('/api/sources/:id/clubs', async (req, res) => {
+    const sources = await setSourceClubs(dataDir, req.params.id, req.body?.clubs).catch((error) => {
+      throw new HttpError(/^No such/.test(error.message) ? 404 : 400, error.message);
+    });
+    res.json(await answer(sources));
+  });
+
+  // Takes one channel out of the saved list, with its picture and subscriber count.
+  app.delete('/api/sources/:id', async (req, res) => {
+    const sources = await removeSource(dataDir, req.params.id).catch((error) => {
+      throw new HttpError(/^No such/.test(error.message) ? 404 : 400, error.message);
+    });
+    await removeOtherPictures(dataDir, sources);
+    res.json(await answer(sources));
+  });
+
+  // Which channels are live. The last answer is remembered here, in memory, with
+  // when it was given; it is not a job, so it never waits behind a cut.
+  let lastLive = { checked: null, channels: {} };
+  let checking = null;
+  /** The last answer, for the channels that are in the list now. */
+  const liveNow = async () => {
+    const ids = new Set((await readSources(dataDir)).map((source) => source.id));
+    return { checked: lastLive.checked, channels: Object.fromEntries(Object.entries(lastLive.channels).filter(([id]) => ids.has(id))) };
+  };
+
+  app.get('/api/sources/live', async (req, res) => res.json(await liveNow()));
+
+  // Asks YouTube about every channel in the saved list. Nothing in the request says which.
+  app.post('/api/sources/live', async (req, res) => {
+    if (!(await downloader.isInstalled())) throw new HttpError(400, 'The downloader is not installed. Run "npm run setup" to install it.');
+    // Two pages asking at once share one round of questions.
+    checking ??= (async () => {
+      const channels = await checkLive({ sources: await readSources(dataDir), downloader });
+      lastLive = { checked: new Date().toISOString(), channels };
+    })().finally(() => {
+      checking = null;
+    });
+    await checking;
+    res.json(await liveNow());
+  });
+
   // Fetches the profile picture of every channel in the saved list, as a job.
   // Nothing in the request says which channels: the list is the saved one.
   app.post('/api/sources/pictures', async (req, res) => {
@@ -60,7 +106,11 @@ export function addSourceRoutes(app, { dataDir, inDir, jobs, downloader = ytDlp(
   // Fills one channel in from its address: its name when none was typed, and its
   // picture, and puts it in the saved list. Only the row's id, address and name are taken.
   app.post('/api/sources/sync', async (req, res) => {
-    const source = { id: String(req.body?.id ?? ''), url: String(req.body?.url ?? ''), name: String(req.body?.name ?? '') };
+    const source = {
+      id: String(req.body?.id ?? ''), url: String(req.body?.url ?? ''), name: String(req.body?.name ?? ''),
+      // Checked with the rest of the list when it is saved.
+      clubs: Array.isArray(req.body?.clubs) ? req.body.clubs : undefined,
+    };
     if (source.url.length > 200 || source.name.length > 80 || source.id.length > 80) throw new HttpError(400, 'That is not a channel this tool can look up.');
     const job = jobs.add('channel', source.name.trim() || source.url.trim() || 'a channel', () => syncSource({ source, dataDir, downloader, download: pictureDownload }));
     res.status(202).json(job);

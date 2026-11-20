@@ -9,7 +9,7 @@
 // reports for that address is checked to be the one in the list. Whatever
 // comes back is decoded and drawn again, so nothing but a plain round PNG the
 // tool made itself is ever kept.
-import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { run } from './run.js';
 import { agreedSourceOf, channelKey, readSources, saveSources } from './sources.js';
@@ -82,6 +82,8 @@ export async function fetchPicture({ source, dataDir, downloader, download = dow
   const channel = known ?? await downloader.channel(channelAddress(source));
   // The same test as fetching a video: the channel YouTube reports must be the one in the list.
   if (!agreedSourceOf([source], channel)) throw new Error(`The address of "${source.name}" leads to another channel, "${channel.name}". Check it.`);
+  // The same answer says how many subscribers the channel has; that is kept even if the picture cannot be had.
+  await saveSubscribers(dataDir, source.id, channel.subscribers);
   const bytes = await download(checkPictureUrl(channel.pictureUrl));
 
   const dir = pictureDir(dataDir);
@@ -124,12 +126,14 @@ const sameChannel = (a, b) => JSON.stringify(channelKey(a)) === JSON.stringify(c
  * like every channel added on the page.
  *
  * @param {object} options
- * @param {{ id: string, url: string, name?: string }} options.source   the row as typed
+ * @param {{ id: string, url: string, name?: string, clubs?: string[] }} options.source   the row as typed
  * @returns {Promise<{ source: Source, named: boolean, picture: boolean, pictureError: string }>}
  *   `named` says the name came from YouTube
  */
 export async function syncSource({ source, dataDir, downloader, download }) {
   const typed = { id: String(source?.id ?? ''), url: String(source?.url ?? '').trim(), name: String(source?.name ?? '').trim() };
+  // The clubs chosen on the row come along, so syncing a row does not lose them. Without any, the saved ones stay.
+  const clubs = Array.isArray(source?.clubs) ? source.clubs : null;
   if (!channelKey(typed.url)) throw new Error('Give the channel address first: https://www.youtube.com/@name or https://www.youtube.com/channel/UC...');
   const saved = await readSources(dataDir);
   const twin = saved.find((other) => other.id !== typed.id && sameChannel(other.url, typed.url));
@@ -143,7 +147,7 @@ export async function syncSource({ source, dataDir, downloader, download }) {
   if (!name) throw new Error('YouTube gave no name for this channel. Type one.');
 
   const at = saved.findIndex((other) => other.id === typed.id);
-  const entry = { id: typed.id, name, url: typed.url, status: 'agreed', note: at < 0 ? '' : saved[at].note };
+  const entry = { id: typed.id, name, url: typed.url, status: 'agreed', note: at < 0 ? '' : saved[at].note, clubs: clubs ?? (at < 0 ? [] : saved[at].clubs) };
   // saveSources checks the whole list, the id included, before anything is written.
   const sources = await saveSources(dataDir, at < 0 ? [...saved, entry] : saved.map((other, index) => (index === at ? entry : other)));
   const kept = sources.find((other) => other.id === typed.id);
@@ -186,12 +190,56 @@ export async function listPictures(dataDir, sources) {
   return found;
 }
 
-/** Remove pictures of channels that are no longer in the list. */
+/** Remove pictures, and subscriber counts, of channels that are no longer in the list. */
 export async function removeOtherPictures(dataDir, sources) {
   const kept = new Set(sources.map((source) => `${source.id}.png`));
   for (const name of await readdir(pictureDir(dataDir)).catch(() => [])) {
     if (!kept.has(name)) await rm(path.join(pictureDir(dataDir), name), { force: true });
   }
+  const counts = await readCounts(dataDir);
+  const ids = new Set(sources.map((source) => source.id));
+  if (Object.keys(counts).some((id) => !ids.has(id))) await writeCounts(dataDir, Object.fromEntries(Object.entries(counts).filter(([id]) => ids.has(id))));
+}
+
+// --- Subscriber counts -----------------------------------------------------------
+//
+//   data/source-subscribers.json    { "<source id>": { "count": 18000, "checked": "2026-11-20T15:04:05.000Z" } }
+//
+// A number YouTube gives with the picture, and when it was read. It is kept
+// apart from the sources list, which is the owner's own record.
+
+const countsFile = (dataDir) => path.join(path.resolve(dataDir), 'source-subscribers.json');
+const isCount = (value) => Number.isInteger(value) && value >= 0 && value <= 100_000_000_000;
+
+/** Every count on file, with anything that is not a count left out. */
+async function readCounts(dataDir) {
+  try {
+    const data = JSON.parse(await readFile(countsFile(dataDir), 'utf8'));
+    return Object.fromEntries(Object.entries(data).filter(([, one]) => isCount(one?.count) && typeof one?.checked === 'string'));
+  } catch {
+    return {};
+  }
+}
+
+async function writeCounts(dataDir, counts) {
+  await mkdir(path.resolve(dataDir), { recursive: true });
+  await writeFile(countsFile(dataDir), `${JSON.stringify(counts, null, 2)}\n`);
+}
+
+/** Keep a channel's subscriber count with the time it was read. Anything that is not a count is ignored. */
+async function saveSubscribers(dataDir, sourceId, count) {
+  if (!isCount(count)) return;
+  await writeCounts(dataDir, { ...(await readCounts(dataDir)), [sourceId]: { count, checked: new Date().toISOString() } });
+}
+
+/**
+ * The subscriber counts of the channels in the list, by source id.
+ *
+ * @returns {Promise<Record<string, { count: number, checked: string }>>}
+ */
+export async function listSubscribers(dataDir, sources) {
+  const counts = await readCounts(dataDir);
+  return Object.fromEntries(sources.filter((source) => counts[source.id]).map((source) => [source.id, counts[source.id]]));
 }
 
 /**

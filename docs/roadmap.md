@@ -19,12 +19,16 @@ Version 1 of the spec is complete: all three "evenings".
 - A video behind a card: a video file in `sounds/` gives the card its sound and a moving background
 - A second video beside a reaction in a compilation: split screen while it runs, then the reaction full screen
 - A Combine page: two videos side by side with a live preview to line them up by eye, a side, a start and a shown part for each, a main video that takes the whole screen at the end, and the result offered to compilations
-- A list of leagues and clubs (name, colour, logo) to fill a match's teams from, starting with La Liga, the Premier League and Serie A
+- A list of leagues and clubs (name, colour, logo) to fill a match's teams from, starting with La Liga and the Premier League as of 2026–27, a "Europe" league of leading Italian, French, German and Portuguese clubs, and the 36 clubs of the 2026–27 Champions League
+- The club a streamer supports, chosen from the owner's clubs, saved as it is chosen and shown as a logo on the row
+- Backups: a copy of the channels list and of the clubs list is kept before every change (`data/backups/`)
+- Who is live: channels in the list that are broadcasting are marked LIVE, listed first and counted in the side column
+- A Stop button for anything waiting or running, in "Activity"
 - A sources list and `fetch`: part of a YouTube video, up to 20 minutes, from a channel in the list (the owner adds a channel only once it has agreed)
-- Channel pictures: the profile picture of each channel in the list, fetched on request and drawn beside its name where it is credited in a compilation; a sync button on a row fills a new channel's name and picture from its address
+- Channel pictures: the profile picture of each channel in the list, fetched on request and drawn beside its name where it is credited in a compilation; a sync button on a row fills a new channel's name and picture from its address, and each row shows the channel's subscriber count from the last lookup
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-358 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, and none call the real AI service.
+379 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, and none call the real AI service.
 
 ## Waiting on the owner
 
@@ -39,11 +43,14 @@ Version 1 of the spec is complete: all three "evenings".
 - The Windows guide (`docs/install-windows.md`) on a real Windows computer. Its Ubuntu steps were run from a fresh copy cloned from GitHub; installing WSL, and the browser and Explorer on the Windows side, were written from Microsoft's documentation and not run.
 - The Combine page in the owner's hands. It was driven by script: a whole run on generated test videos with a frame counter, and a preview of two of the owner's own videos (a fetched part and a phone recording), which played in step within about 0.03 s. Lining up a real reaction by eye and ear is the owner's to judge.
 - How a combined video sounds. Levels were measured, not listened to.
-- The sync button and "Get the channels' pictures" beyond the owner's seven channels. The button was pressed on the owner's real list for the pictures; sync was run on a test copy with one of those channels. The downloader also warned that it will stop supporting Python 3.10, which this machine has.
+- The LIVE mark on one of the owner's own channels: none was live when it was built.
+- The clubs set on 45 of the owner's channels on 2026-11-20. They were worked out from each channel's own description, tags and recent titles after the owner's own marks were lost; five were told to the owner as less certain, ten channels were left without a club, and the owner has not yet confirmed them.
+- The Stop button on a real fetch started from the page. It was pressed in a browser on two cuts, and tried by script on the real downloader recording a live stream.
+- The sync button on the owner's real list. It was run on a test copy with one channel. "Update pictures and subscribers" was pressed on the real list when it had fourteen channels. The downloader also warned that it will stop supporting Python 3.10, which this machine has.
 - Which player showed the fetched part out of step. The file is now the same for every player, but the owner has not yet confirmed it plays in step.
 - How the second set of built-in card sounds sounds. The owner rejected the first set on 2026-11-19. The second was measured and the voice checked with the speech recogniser, but not listened to. A real "Goool" needs a recording from the owner, as `sounds/goal.mp3`.
 - Whether the owner meant the supplied intro video to play behind the intro card. It was built that way on a reading of one sentence.
-- The starting list of clubs against the current season. It was written from memory of 2025–26.
+- The colours in the starting list of clubs. Which clubs are in La Liga and the Premier League was checked for 2026–27; the colours are still from memory.
 - The redesigned dashboard in long use. The owner looked at it and accepted it on 2026-11-19; before that it was looked at in screenshots from a hidden Chrome and its main actions were run by script. A real mouse drag of the crop on the new layout, a screen reader and browsers other than Chrome were not tried.
 - The wider crop (`--crop-width`) on a clip the owner has judged. One frame from a real video was looked at, and one cut was made from the page.
 
@@ -63,6 +70,10 @@ Nothing is decided. Ideas the owner has been offered:
 - On the Combine page: a delay before the second video comes in, and removing the older "Show another video beside it" option from Compilations if the page replaces it
 - A credits card at the end of a compilation, listing each streamer with their picture
 - A faster encoder setting for compilations (`superfast`: about two thirds of the time, the same quality, twice the file size)
+- A time limit on a fetch, as a second safety beside the Stop button and the refusal of live streams
+- A notice when a channel in the list goes live
+- Using the club a streamer supports elsewhere, such as choosing streamers by club when building a compilation for a match
+- Recording a live stream from now on for a set number of minutes, offered when the owner asked about fetching from a live stream
 - A screen for creating and editing briefs, so the JSON is not edited by hand
 - An option to keep the source's frame rate (60 fps) in clips and compilations, offered after the quality check of 2026-11-19 (see `docs/decisions.md`)
 - Cutting several ranges in one go

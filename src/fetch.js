@@ -21,11 +21,14 @@ import { formatClock } from './time.js';
  *
  * @typedef {object} Downloader
  * @property {() => Promise<boolean>} isInstalled
- * @property {(url: string) => Promise<{ id: string, title: string, channel: string, channelId: string, handle: string, duration: number }>} info
+ * @property {(url: string) => Promise<{ id: string, title: string, channel: string, channelId: string, handle: string, duration: number, live?: string }>} info
+ *   `live` is YouTube's word for a stream's state: "is_live" while it is going on
  * @property {(job: { url: string, start: number, end: number, dir: string, name: string }) => Promise<void>} download
  *   writes `<dir>/<name>.mp4`
- * @property {(url: string) => Promise<{ name: string, channelId: string, handle: string, pictureUrl: string }>} channel
- *   what YouTube says about a channel, for its profile picture (see pictures.js)
+ * @property {(url: string) => Promise<{ name: string, channelId: string, handle: string, pictureUrl: string, subscribers?: number | null }>} channel
+ *   what YouTube says about a channel, for its profile picture and subscriber count (see pictures.js)
+ * @property {(url: string) => Promise<{ live: boolean, videoId?: string, title?: string, channelId?: string, handle?: string, viewers?: number, started?: number }>} live
+ *   whether a channel is broadcasting right now, and which stream (see live.js)
  */
 
 // Long enough for any goal reaction, short enough that a slip cannot fill the disk.
@@ -91,6 +94,16 @@ export async function fetchVideo({ url, start, end, sources, outDir, downloader 
   if (!source) {
     throw new Error(`This video is from "${video.channel}", which is not in your sources list. Only a channel that has agreed, and that you have added there, can be fetched from.`);
   }
+  // A stream that is still going has no fixed beginning to count a range from.
+  // The downloader can only record it as it happens, at the speed it plays,
+  // and it ignores both the start and the end: it would run until the disk is full.
+  if (video.live === 'is_live') {
+    throw new Error('This video is live right now, so a part of it cannot be fetched. Wait until the stream has ended and YouTube shows it as an ordinary video, then fetch the part.');
+  }
+  if (video.live === 'is_upcoming') throw new Error('This stream has not started yet, so there is nothing to fetch.');
+  if (video.live === 'post_live') {
+    throw new Error('This stream has only just ended and YouTube is still preparing it. Try again later, once it plays as an ordinary video.');
+  }
   if (video.duration && end > video.duration + 1) {
     throw new Error(`The video is only ${formatClock(video.duration)} long, but the end is set to ${formatClock(end)}.`);
   }
@@ -112,7 +125,13 @@ export async function fetchVideo({ url, start, end, sources, outDir, downloader 
   for (let n = 2; taken.includes(`${name}.mp4`); n++) name = `${base}_${n}`;
 
   onStep('fetching');
-  await downloader.download({ url: link, start, end, dir, name });
+  await downloader.download({ url: link, start, end, dir, name }).catch(async (error) => {
+    // A download that failed or was stopped leaves pieces behind, named by the tool. They are removed.
+    for (const left of await readdir(dir).catch(() => [])) {
+      if (left.startsWith(`${name}.`)) await rm(path.join(dir, left), { force: true });
+    }
+    throw error;
+  });
   const file = path.join(dir, `${name}.mp4`);
   await access(file).catch(() => {
     throw new Error('The download finished but no video file was written. Try again.');
@@ -241,6 +260,8 @@ export function ytDlp() {
       return {
         id: data.id, title: data.title ?? '', channel: data.channel ?? data.uploader ?? 'Unknown channel',
         channelId: data.channel_id ?? '', handle: data.uploader_id ?? '', duration: Number(data.duration) || 0,
+        // "is_live", "is_upcoming", "post_live" (just ended, not yet prepared), "was_live" or "not_live".
+        live: typeof data.live_status === 'string' ? data.live_status : '',
       };
     },
     async channel(url) {
@@ -251,7 +272,28 @@ export function ytDlp() {
       const data = JSON.parse(stdout);
       // The profile picture is named; the same list also holds the banner in several sizes.
       const picture = (data.thumbnails ?? []).find((thumbnail) => thumbnail.id === 'avatar_uncropped');
-      return { name: data.channel ?? data.title ?? '', channelId: data.channel_id ?? '', handle: data.uploader_id ?? '', pictureUrl: picture?.url ?? '' };
+      return {
+        name: data.channel ?? data.title ?? '', channelId: data.channel_id ?? '', handle: data.uploader_id ?? '', pictureUrl: picture?.url ?? '',
+        // YouTube gives this rounded (18,000, not 18,243), and not at all for a channel that hides it.
+        subscribers: Number.isFinite(data.channel_follower_count) ? data.channel_follower_count : null,
+      };
+    },
+    async live(url) {
+      // A channel's "/live" address leads to the stream it is broadcasting. Nothing is downloaded.
+      let stdout;
+      try {
+        ({ stdout } = await call(['--skip-download', '--dump-single-json', '--', `${url}/live`], { timeout: 45_000 }));
+      } catch (error) {
+        // "Not live" is an answer, not a failure; so is a stream that is only announced.
+        if (/not currently live|will begin in|live event will begin|Premieres in/i.test(error.message)) return { live: false };
+        throw new Error('The channel could not be checked.');
+      }
+      const data = JSON.parse(stdout);
+      return {
+        live: data.live_status === 'is_live', videoId: data.id ?? '', title: data.title ?? '',
+        channelId: data.channel_id ?? '', handle: data.uploader_id ?? '',
+        viewers: data.concurrent_view_count, started: data.release_timestamp,
+      };
     },
     async download({ url, start, end, dir, name }) {
       await call([

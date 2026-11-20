@@ -182,8 +182,8 @@ This takes two to three minutes and uses every processor core.
 **It should end with** two lines like these, with no failed count:
 
 ```
- Test Files  14 passed (14)
-      Tests  358 passed (358)
+ Test Files  15 passed (15)
+      Tests  379 passed (379)
 ```
 
 The numbers grow as the project grows. What matters is that everything passed. If a test fails, see [Troubleshooting](#troubleshooting) before going on.

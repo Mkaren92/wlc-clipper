@@ -142,7 +142,7 @@ async function deleteClub(club) {
       </div>
       <p class="hint">
         Changes are saved as you make them. A logo is a picture from your own computer; the tool fetches none. The
-        clubs each league started with were written from memory of the 2025–26 season, so check them.
+        starting list is as of the 2026–27 season; the colours are approximate. A club in two leagues is two entries.
       </p>
       <p role="status" class="muted note">{{ note }}</p>
     </section>

@@ -18,6 +18,8 @@ const PATHS = {
   cross: 'M6 6l12 12M18 6 6 18',
   alert: 'M12 3.5 2.5 20h19zM12 10v4.5M12 17.2v.3',
   plus: 'M12 5v14M5 12h14',
+  external: 'M14 4h6v6M20 4l-9.5 9.5M18 13.5V19H5V6h5.5',
+  stop: 'M6.5 6.5h11v11h-11z',
   split: 'M3 5h18v14H3zM12 5v14',
   sync: 'M20 11a8 8 0 0 0-14.6-4.4L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.4L20 16M20 20v-4h-4',
   up: 'M12 19V5M6 11l6-6 6 6',

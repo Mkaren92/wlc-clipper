@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -233,19 +233,30 @@ describe('leagues and clubs', () => {
   });
   afterAll(() => rm(dir, { recursive: true, force: true }));
 
-  it('starts with three leagues of twenty clubs each: a name and a colour, no logo', () => {
+  it('starts with four leagues and their clubs: a name and a colour, no logo', () => {
     const { leagues, clubs } = startingLibrary();
-    expect(leagues.map((league) => league.name)).toEqual(['La Liga', 'Premier League', 'Serie A']);
-    for (const league of leagues) expect(clubs.filter((club) => club.league === league.id)).toHaveLength(20);
-    expect(new Set(clubs.map((club) => club.id)).size).toBe(60);
+    expect(leagues.map((league) => league.name)).toEqual(['La Liga', 'Premier League', 'Europe', 'Champions League']);
+    expect(leagues.map((league) => clubs.filter((club) => club.league === league.id).length)).toEqual([20, 20, 22, 36]);
+    expect(new Set(clubs.map((club) => club.id)).size).toBe(98);
+    // A club in two leagues is two entries with their own ids and the same colour.
+    const madrid = clubs.filter((club) => club.name === 'Real Madrid');
+    expect(madrid.map((club) => [club.id, club.league, club.colour])).toEqual([['real-madrid', 'la-liga', '#ffffff'], ['real-madrid-2', 'champions-league', '#ffffff']]);
     expect(clubs.every((club) => /^#[0-9a-f]{6}$/.test(club.colour) && club.icon === '' && club.name.length > 2)).toBe(true);
     expect(clubs.find((club) => club.name === 'Atlético Madrid')).toMatchObject({ id: 'atletico-madrid', league: 'la-liga' });
+    // The 2026-27 season: the clubs that came up are in, the ones that went down are out.
+    const names = (league) => clubs.filter((club) => club.league === league).map((club) => club.name);
+    expect(names('la-liga')).toEqual(expect.arrayContaining(['Deportivo La Coruña', 'Málaga', 'Racing Santander']));
+    expect(names('la-liga')).not.toEqual(expect.arrayContaining(['Girona']));
+    expect(names('premier-league')).toEqual(expect.arrayContaining(['Coventry City', 'Hull City', 'Ipswich Town']));
+    expect(names('premier-league')).not.toEqual(expect.arrayContaining(['Burnley']));
+    // "Europe" holds leading clubs of four countries.
+    expect(names('europe')).toEqual(expect.arrayContaining(['Inter', 'Como', 'Lazio', 'Paris Saint-Germain', 'Bayern Munich', 'Benfica']));
   });
 
   it('writes the starting list out the first time, and from then on it is the owner\'s', async () => {
     expect((await readdir(dir)).includes('clubs.json')).toBe(false);
     const first = await readLibrary(dir);
-    expect(first.clubs).toHaveLength(60);
+    expect(first.clubs).toHaveLength(98);
     expect((await readdir(dir)).includes('clubs.json')).toBe(true);
     // Deleting a club sticks: the starting list does not come back.
     await removeClub(dir, 'getafe');
@@ -264,8 +275,19 @@ describe('leagues and clubs', () => {
     const after = await removeLeague(dir, 'countries');
     expect(after.leagues.some((league) => league.id === 'countries')).toBe(false);
     expect(after.clubs.some((club) => club.name === 'Armenia')).toBe(false);
-    expect(after.clubs.filter((club) => club.league === 'serie-a')).toHaveLength(20); // the others are untouched
+    expect(after.clubs.filter((club) => club.league === 'europe')).toHaveLength(22); // the others are untouched
     await expect(removeLeague(dir, 'countries')).rejects.toThrow(/No such league/);
+  });
+
+  it('keeps a copy of the list as it was before each change, the newest five', async () => {
+    const copies = () => readdir(path.join(dir, 'backups', 'clubs')).then((names) => names.sort(), () => []);
+    for (let n = 0; n < 7; n++) await saveClub(dir, { id: 'barcelona', colour: `#00000${n}` });
+    const kept = await copies();
+    expect(kept).toHaveLength(5);
+    // The newest copy is the list just before the last change.
+    const last = JSON.parse(await readFile(path.join(dir, 'backups', 'clubs', kept.at(-1)), 'utf8'));
+    expect(last.clubs.find((club) => club.id === 'barcelona').colour).toBe('#000005');
+    expect((await readLibrary(dir)).clubs.find((club) => club.id === 'barcelona').colour).toBe('#000006');
   });
 
   it('adds a club to a league and changes only what it is told to', async () => {

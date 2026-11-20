@@ -10,6 +10,7 @@ import { findPauses, snapToSpeech } from './captions/pauses.js';
 import { buildFilter, OUT_FPS, OUT_HEIGHT, OUT_WIDTH, SUBTITLE_FILE } from './layout.js';
 import { probe } from './probe.js';
 import { CLIP_FILE, extractAudio, render } from './render.js';
+import { isStopped } from './run.js';
 import { formatClock } from './time.js';
 import { checkTranscript, getTranscriber } from './transcribe/index.js';
 
@@ -172,7 +173,17 @@ export async function cut({
   await writeJson(path.join(workDir, META_FILE), meta);
   if (post) await writeFile(path.join(clipDir, POST_FILE), buildPostText(post));
 
-  if (wantCaptions) {
+  try {
+    return await captionAndRender();
+  } catch (error) {
+    // A cut that was stopped leaves no folder: it was made by this run and holds nothing finished.
+    // One that failed keeps its folder, so what was asked for can still be read.
+    if (isStopped()) await rm(clipDir, { recursive: true, force: true });
+    throw error;
+  }
+
+  async function captionAndRender() {
+    if (!wantCaptions) return renderClip(clipDir, workDir, meta, info, warnings, onStep);
     onStep('transcribing');
     try {
       const audioFile = await extractAudio({ source: sourcePath, start, seconds: end - start, workDir });
@@ -184,9 +195,8 @@ export async function cut({
     } catch (error) {
       throw new Error(`${error.message}\nThe run's files are in ${clipDir}.`);
     }
+    return renderClip(clipDir, workDir, meta, info, warnings, onStep);
   }
-
-  return renderClip(clipDir, workDir, meta, info, warnings, onStep);
 }
 
 /**

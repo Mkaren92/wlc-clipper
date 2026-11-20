@@ -1,14 +1,15 @@
 // Fetching part of a video, with a stand-in for the downloader. These tests
 // never reach YouTube.
-import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildDescription } from '../src/compilation/description.js';
 import { fetchVideo, leadInOf, removeHiddenLeadIn, videoUrl } from '../src/fetch.js';
 import { run } from '../src/run.js';
-import { channelAddress, checkPictureUrl, creditPictures, fetchPicture, fetchPictures, listPictures, PICTURE_PIXELS, pictureFile, removeOtherPictures, syncSource } from '../src/pictures.js';
-import { agreedSourceOf, channelKey, creditLinks, parseSources, readSources, saveSources } from '../src/sources.js';
+import { channelAddress, checkPictureUrl, creditPictures, fetchPicture, fetchPictures, listPictures, listSubscribers, PICTURE_PIXELS, pictureFile, removeOtherPictures, syncSource } from '../src/pictures.js';
+import { checkLive } from '../src/live.js';
+import { agreedSourceOf, channelKey, creditLinks, parseSources, readSources, removeSource, saveSources, setSourceClubs } from '../src/sources.js';
 
 const sources = parseSources([
   { id: 'northstand', name: 'Northstand', url: 'https://www.youtube.com/@northstandtv', status: 'agreed', note: 'Said yes by email' },
@@ -70,7 +71,15 @@ describe('sources', () => {
     expect(() => parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }])).toThrow(/channel address/);
     expect(() => parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x', status: 'maybe' }])).toThrow(/not valid/);
     // A channel is added only once it has agreed, so an entry with no status is one that can be fetched from.
-    expect(parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x' }])).toEqual([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x', status: 'agreed', note: '' }]);
+    expect(parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x' }])).toEqual([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x', status: 'agreed', note: '', clubs: [] }]);
+
+    // The clubs a streamer supports: up to three names, each once.
+    const withClubs = (clubs) => parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x', clubs }])[0].clubs;
+    expect(withClubs(['Barcelona', ' Arsenal ', 'Barcelona'])).toEqual(['Barcelona', 'Arsenal']);
+    expect(withClubs(['A', 'B', 'C'])).toEqual(['A', 'B', 'C']);
+    expect(() => withClubs(['A', 'B', 'C', 'D'])).toThrow(/at most 3 clubs/);
+    expect(() => withClubs([''])).toThrow(/not valid/);
+    expect(() => withClubs('Barcelona')).toThrow(/not valid/);
     expect(() => parseSources([sources[0], { ...sources[1], id: 'northstand' }])).toThrow(/share an id/);
   });
 
@@ -141,6 +150,32 @@ describe('fetchVideo', () => {
     }
     await expect(ask({ sources: [] })).rejects.toThrow(/not in your sources list/);
     expect(calls.length).toBe(before);
+  });
+
+  it('refuses a stream that is still live, has not started, or has only just ended, and downloads nothing', async () => {
+    // A live stream cannot be cut: the downloader would record it as it happens and never stop.
+    const before = calls.length;
+    await expect(ask({ downloader: downloader({ live: 'is_live', duration: 0 }) })).rejects.toThrow(/live right now.*Wait until the stream has ended/);
+    await expect(ask({ downloader: downloader({ live: 'is_upcoming', duration: 0 }) })).rejects.toThrow(/has not started yet/);
+    await expect(ask({ downloader: downloader({ live: 'post_live' }) })).rejects.toThrow(/only just ended/);
+    expect(calls.length).toBe(before);
+    // A stream that ended and is an ordinary video now is fetched like any other.
+    const done = await ask({ downloader: downloader({ live: 'was_live' }), start: 300, end: 330 });
+    expect(done.name).toBe('northstand_dQw4w9WgXcQ_5m00s-5m30s.mp4');
+  });
+
+  it('leaves nothing behind when the download fails or is stopped', async () => {
+    const failing = { ...downloader(), download: async (job) => {
+      // What a stopped download leaves: a half-written file and the downloader's own notes.
+      await writeFile(path.join(job.dir, `${job.name}.mp4.part`), 'half a video');
+      await writeFile(path.join(job.dir, `${job.name}.f312.mp4.ytdl`), 'notes');
+      throw new Error('The download failed. Try again.');
+    } };
+    await writeFile(path.join(dir, 'northstand_other.mp4.part'), 'someone else\'s');
+    await expect(ask({ downloader: failing, start: 600, end: 615 })).rejects.toThrow(/The download failed/);
+    expect((await readdir(dir)).filter((name) => name.includes('10m00s'))).toEqual([]);
+    expect(await readdir(dir)).toContain('northstand_other.mp4.part'); // only this fetch's own pieces are removed
+    await rm(path.join(dir, 'northstand_other.mp4.part'));
   });
 
   it('needs a range, of at most 20 minutes, inside the video', async () => {
@@ -347,6 +382,37 @@ describe('channel pictures', () => {
     expect(await readdir(path.join(dir, 'source-pictures'))).toEqual([]);
   });
 
+  it('keeps the subscriber count YouTube gave, with when it was read, and drops it with the channel', async () => {
+    const data = path.join(dir, 'counts');
+    await fetchPicture({ source: northstand, dataDir: data, downloader: youtube({ subscribers: 18000 }), download });
+    const counts = await listSubscribers(data, sources);
+    expect(Object.keys(counts)).toEqual(['northstand']);
+    expect(counts.northstand.count).toBe(18000);
+    expect(Math.abs(Date.now() - Date.parse(counts.northstand.checked))).toBeLessThan(60_000);
+
+    // A channel that hides its count, or nonsense in its place, leaves the last known count as it is.
+    for (const subscribers of [null, undefined, -5, 12.5, 'many']) {
+      await fetchPicture({ source: northstand, dataDir: data, downloader: youtube({ subscribers }), download });
+      expect((await listSubscribers(data, sources)).northstand.count).toBe(18000);
+    }
+    await fetchPicture({ source: northstand, dataDir: data, downloader: youtube({ subscribers: 18400 }), download });
+    expect((await listSubscribers(data, sources)).northstand.count).toBe(18400);
+    // The count is kept even when the picture cannot be had.
+    await expect(fetchPicture({ source: northstand, dataDir: data, downloader: youtube({ subscribers: 19000, pictureUrl: '' }), download })).rejects.toThrow(/gave no picture/);
+    expect((await listSubscribers(data, sources)).northstand.count).toBe(19000);
+    // Nothing is kept for a channel that turned out to be another one.
+    await expect(fetchPicture({ source: kopend, dataDir: data, downloader: youtube({ subscribers: 5 }), download })).rejects.toThrow(/leads to another channel/);
+    expect(Object.keys(await listSubscribers(data, sources))).toEqual(['northstand']);
+
+    // Only channels in the list are answered for, and a removed channel's count goes with its picture.
+    expect(await listSubscribers(data, sources.slice(1))).toEqual({});
+    await removeOtherPictures(data, sources.slice(1));
+    expect(await listSubscribers(data, sources)).toEqual({});
+    // A file that cannot be read is no counts at all, not an error.
+    await writeFile(path.join(data, 'source-subscribers.json'), 'not json');
+    expect(await listSubscribers(data, sources)).toEqual({});
+  });
+
   // "Sync" on a row: the owner pastes an address and the rest is filled in.
   it('fills a channel in from its address: the name when none was typed, the picture, and a place in the saved list', async () => {
     const data = path.join(dir, 'sync');
@@ -354,15 +420,20 @@ describe('channel pictures', () => {
     const sync = (source, answer) => syncSource({ source, dataDir: data, downloader: youtube(answer), download });
 
     const added = await sync({ id: 'snew', url: ' https://www.youtube.com/@NorthStandTV ', name: '' }, { name: 'North\n Stand  TV\u0007' });
-    expect(added).toEqual({ source: { id: 'snew', name: 'North Stand TV', url: 'https://www.youtube.com/@NorthStandTV', status: 'agreed', note: '' }, named: true, picture: true, pictureError: '' });
+    expect(added).toEqual({ source: { id: 'snew', name: 'North Stand TV', url: 'https://www.youtube.com/@NorthStandTV', status: 'agreed', note: '', clubs: [] }, named: true, picture: true, pictureError: '' });
     expect(await readSources(data)).toEqual([added.source]);
     expect(await readdir(path.join(data, 'source-pictures'))).toEqual(['snew.png']);
     expect(asked.length).toBe(calls + 1); // YouTube was asked once for both the name and the picture
 
-    // A name the owner typed is kept, and the note written earlier stays.
-    await saveSources(data, [{ ...added.source, note: 'Said yes by email' }]);
+    // A name the owner typed is kept, and the note written earlier stays, and so do the clubs marked on the channel.
+    await saveSources(data, [{ ...added.source, note: 'Said yes by email', clubs: ['Barcelona'] }]);
     const kept = await sync({ id: 'snew', url: 'https://www.youtube.com/@northstandtv', name: 'Northstand' }, { name: 'Another Name' });
-    expect(kept).toMatchObject({ source: { name: 'Northstand', note: 'Said yes by email' }, named: false, picture: true });
+    expect(kept).toMatchObject({ source: { name: 'Northstand', note: 'Said yes by email', clubs: ['Barcelona'] }, named: false, picture: true });
+    // Clubs chosen on the row and not yet saved come along with the sync; too many are refused, and nothing is saved.
+    const chosen = await sync({ id: 'snew', url: 'https://www.youtube.com/@northstandtv', name: 'Northstand', clubs: ['Arsenal', 'Inter'] }, {});
+    expect(chosen.source.clubs).toEqual(['Arsenal', 'Inter']);
+    await expect(sync({ id: 'snew', url: 'https://www.youtube.com/@northstandtv', name: 'Northstand', clubs: ['A', 'B', 'C', 'D'] }, {})).rejects.toThrow(/at most 3 clubs/);
+    expect((await readSources(data))[0].clubs).toEqual(['Arsenal', 'Inter']);
     expect(await readSources(data)).toHaveLength(1);
 
     // The channel is saved even when its picture cannot be had, and the reason is given.
@@ -380,5 +451,104 @@ describe('channel pictures', () => {
     await expect(sync({ id: '../x', url: 'https://www.youtube.com/@someoneelse' }, { handle: '@someoneelse', name: 'Someone' })).rejects.toThrow(/not valid/);
     expect((await readSources(data)).map((source) => source.id)).toEqual(['snew', 'kop']);
     expect((await readdir(path.join(data, 'source-pictures'))).sort()).toEqual(['snew.png']);
+  });
+});
+
+// Which channels are live. A stand-in answers for YouTube.
+describe('who is live', () => {
+  const asked = [];
+  const answers = {
+    'https://www.youtube.com/@northstandtv': { live: true, videoId: 'dQw4w9WgXcQ', title: ' Barca v United\n LIVE\u0007 watchalong ', channelId: 'UCxxx', handle: '@NorthStandTV', viewers: 1234, started: 1795174296 },
+    'https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa': { live: false },
+  };
+  const youtube = (changes = {}) => ({ live: async (url) => {
+    asked.push(url);
+    const answer = { ...answers, ...changes }[url];
+    if (answer instanceof Error) throw answer;
+    return answer;
+  } });
+
+  it('asks only about channels that have agreed, by an address rebuilt from the list', async () => {
+    const found = await checkLive({ sources, downloader: youtube() });
+    expect(asked.sort()).toEqual(['https://www.youtube.com/@northstandtv', 'https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa'].sort());
+    expect(Object.keys(found).sort()).toEqual(['kopend', 'northstand']); // not the two that have not agreed
+    expect(found.kopend).toEqual({ live: false });
+    // What YouTube said is trimmed to one plain line, and the start time is given as a time.
+    expect(found.northstand).toEqual({ live: true, videoId: 'dQw4w9WgXcQ', title: 'Barca v United LIVE watchalong', viewers: 1234, started: '2026-11-20T11:31:36.000Z' });
+  });
+
+  it('does not call a channel live on an answer that is another channel\'s, or has no usable video id', async () => {
+    const address = 'https://www.youtube.com/@northstandtv';
+    const other = await checkLive({ sources, downloader: youtube({ [address]: { ...answers[address], channelId: 'UCqqq', handle: '@somebody' } }) });
+    expect(other.northstand).toEqual({ live: false });
+    const odd = await checkLive({ sources, downloader: youtube({ [address]: { ...answers[address], videoId: '../../etc' } }) });
+    expect(odd.northstand).toEqual({ live: false });
+    // Numbers that are not numbers are left out, not passed on.
+    const loose = await checkLive({ sources, downloader: youtube({ [address]: { ...answers[address], viewers: 'many', started: undefined } }) });
+    expect(loose.northstand).toMatchObject({ live: true, viewers: null, started: null });
+  });
+
+  it('says "not known" for a channel that could not be checked, and still answers for the rest', async () => {
+    const found = await checkLive({ sources, downloader: youtube({ 'https://www.youtube.com/@northstandtv': new Error('The channel could not be checked.') }) });
+    expect(found).toEqual({ northstand: { live: null }, kopend: { live: false } });
+    expect(await checkLive({ sources: [], downloader: youtube() })).toEqual({});
+  });
+});
+
+// What the owner marks on a channel is saved for that channel alone, and every save keeps a copy of the list as it was.
+describe('changing one channel, and the copies kept', () => {
+  let dir;
+  const list = () => readSources(dir).then((all) => Object.fromEntries(all.map((one) => [one.id, one.clubs])));
+  const copies = () => readdir(path.join(dir, 'backups', 'sources')).then((names) => names.sort(), () => []);
+
+  beforeAll(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'clipper-one-channel-'));
+  });
+  afterAll(() => rm(dir, { recursive: true, force: true }));
+
+  it('sets one channel\'s clubs and leaves every other channel as it is on disk', async () => {
+    await saveSources(dir, sources);
+    await setSourceClubs(dir, 'northstand', ['Barcelona']);
+    await setSourceClubs(dir, 'kopend', ['Liverpool']);
+    expect(await list()).toEqual({ northstand: ['Barcelona'], kopend: ['Liverpool'], terrace: [], dave: [] });
+    // The case that loses work: a page still holding the list from before those two were set changes a third.
+    // It reaches only the channel it names, so the first two keep their clubs.
+    await setSourceClubs(dir, 'terrace', ['Arsenal']);
+    expect(await list()).toEqual({ northstand: ['Barcelona'], kopend: ['Liverpool'], terrace: ['Arsenal'], dave: [] });
+    await setSourceClubs(dir, 'northstand', []);
+    expect((await list()).northstand).toEqual([]);
+
+    await expect(setSourceClubs(dir, 'nobody', ['Arsenal'])).rejects.toThrow(/No such channel/);
+    await expect(setSourceClubs(dir, 'kopend', ['A', 'B', 'C', 'D'])).rejects.toThrow(/at most 3 clubs/);
+    await expect(setSourceClubs(dir, 'kopend', 'Liverpool')).rejects.toThrow(/not valid/);
+    expect((await list()).kopend).toEqual(['Liverpool']); // a refused change changes nothing
+  });
+
+  it('removes one channel and leaves the others, with what was marked on them', async () => {
+    await removeSource(dir, 'dave');
+    expect(await list()).toEqual({ northstand: [], kopend: ['Liverpool'], terrace: ['Arsenal'] });
+    await expect(removeSource(dir, 'dave')).rejects.toThrow(/No such channel/);
+  });
+
+  it('keeps a copy of the list as it was before each change, and can be gone back to', async () => {
+    const kept = await copies();
+    expect(kept.length).toBeGreaterThanOrEqual(5); // one for each change made above
+    // The newest copy is the list just before the last change: "dave" is still in it.
+    const last = JSON.parse(await readFile(path.join(dir, 'backups', 'sources', kept.at(-1)), 'utf8'));
+    expect(last.map((one) => one.id)).toContain('dave');
+    // A save that changes nothing keeps no copy.
+    await saveSources(dir, await readSources(dir));
+    expect(await copies()).toEqual(kept);
+    // Even a whole list written over with nothing can be got back.
+    await saveSources(dir, []);
+    const before = JSON.parse(await readFile(path.join(dir, 'backups', 'sources', (await copies()).at(-1)), 'utf8'));
+    expect(Object.fromEntries(before.map((one) => [one.id, one.clubs]))).toEqual({ northstand: [], kopend: ['Liverpool'], terrace: ['Arsenal'] });
+  });
+
+  it('keeps only the newest copies', async () => {
+    for (let n = 0; n < 45; n++) await saveSources(dir, [{ id: 'x', name: `Name ${n}`, url: 'https://www.youtube.com/@x' }]);
+    const kept = await copies();
+    expect(kept).toHaveLength(40);
+    expect(JSON.parse(await readFile(path.join(dir, 'backups', 'sources', kept.at(-1)), 'utf8'))[0].name).toBe('Name 43');
   });
 });

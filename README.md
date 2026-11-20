@@ -11,7 +11,7 @@ Optionally, an AI service can suggest which moments to clip and fix caption mist
 
 The dashboard also has pages for building a longer video out of several pieces: [match cards and compilations](#match-cards-and-compilations), and [Combine](#combine-two-videos), which puts two videos side by side.
 
-It works on files on your disk and it does not post anything. The one way video comes in from outside is [`fetch`](#sources-and-fetching), which takes part of a YouTube video from a channel in your sources list, where you add only channels that have agreed. The Sources page can also fetch those channels' profile pictures, to show beside their names.
+It works on files on your disk and it does not post anything. The one way video comes in from outside is [`fetch`](#sources-and-fetching), which takes part of a YouTube video from a channel in your sources list, where you add only channels that have agreed. The Sources page also looks up those channels' profile pictures and subscriber counts, and shows which of them are live.
 
 ## Requirements
 
@@ -63,7 +63,7 @@ Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 
 - **Cut:** pick a video in the left column. It plays on the left and stays in view while you set the range, the layout, the text and the brief on the right. Drag the bright window over the video to place the crop (or the yellow box for the facecam layout). With the center layout, the "Show more of the picture" slider makes the crop wider, for a person who moves out of the narrow column. The bar at the bottom of the screen always shows what will be made, anything that is in the way, and "Cut the clip".
 - **Keys for the player:** Space plays and pauses, the left and right arrows move one second (a tenth with Shift), I sets the start, O sets the end, and P plays the range. They do nothing while you are typing in a box, and they go by the key's place on the keyboard, so they work on a keyboard set to another alphabet.
-- **Activity:** while a clip is being cut, rendered again, fetched, combined, or searched for moments, the left column says what is happening and at which step, under "Activity". It is there on every page and after a reload. You can start another cut meanwhile; it waits its turn. When something is ready, it offers "Open".
+- **Activity:** while a clip is being cut, rendered again, fetched, combined, or searched for moments, the left column says what is happening and at which step, under "Activity". It is there on every page and after a reload. You can start another cut meanwhile; it waits its turn. When something is ready, it offers "Open". Anything waiting or running has a **Stop** button: the work ends within a few seconds, what it was making is thrown away, and the next job in line starts. Nothing that was already finished is touched.
 - **Deleting a video:** each video in the left column has a trash icon. It asks once, then deletes the file from `in/`. Clips already cut from it stay, but can no longer be rendered again, because rendering reads the source. A compilation that uses the video will not build until the item is taken out. It is not possible while a clip is being made.
 - **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
 - **Clip:** watch the result, download it, see each brief rule as passed or failed, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
@@ -121,7 +121,9 @@ To add a goal type, add a line to `GOAL_TYPES` in `src/cards/config.js`.
 
 "Leagues and clubs", at the top of the Cards page, is your own list of teams to choose from when you start a match.
 
-- **It starts with three leagues**, La Liga, the Premier League and Serie A, each with twenty clubs: a name and a main colour. They were written down from memory of the 2025–26 season, as a starting point, so check them: clubs go up and down every year.
+- **It starts with four leagues**, each club with a name and a main colour. La Liga and the Premier League hold the twenty clubs of the 2026–27 season. "Europe" holds 22 leading clubs of Italy, France, Germany and Portugal. "Champions League" holds the 36 clubs of the 2026–27 league phase. It is a starting point: clubs go up and down every year, and the colours are approximate.
+- **A club in two leagues is two entries**, for example Real Madrid in La Liga and in the Champions League. A logo or colour changed on one is not changed on the other.
+- **A list you already have is not changed by an update of the tool.** The starting list is written out once, the first time, and is yours from then on.
 - **A club is a name, a colour and a logo.** The logo is a picture you add from your own computer; none comes with the list and the tool fetches none. Club crests belong to the clubs, so using one is your call.
 - **Add a league** with "New league", for example "Countries" for national teams, and add clubs to whichever league is chosen. Rename or recolour a club by changing it in place, and delete with the trash icon. Deleting a league deletes its clubs.
 - **Changes are saved as you make them**, in `data/clubs.json`.
@@ -190,9 +192,15 @@ Each combination is kept in `data/combinations/<name>` with its settings and `co
 
 The Sources page keeps the list of channels you take clips from: a name and the channel's address for each. Add a channel only once it has agreed to let you use its videos; being in the list is what allows fetching from it.
 
-"Get the channels' pictures" fetches the profile picture of every channel in the saved list from YouTube and keeps each as a small round picture in `data/source-pictures/`. The page shows them next to the names, and a compilation draws a channel's picture beside its name wherever it is credited. Press it again after adding a channel, or when a channel changes its picture; a compilation generated afterwards uses the new one. `description.txt` is plain text, so it has no pictures. Removing a channel removes its picture.
+"Update pictures and subscribers" fetches the profile picture of every channel in the saved list from YouTube and keeps each as a small round picture in `data/source-pictures/`. It also reads each channel's subscriber count, shown at the end of its row (hover over it for the full number and the day it was read). YouTube gives that number rounded, and not at all for a channel that hides it. The page shows them next to the names, and a compilation draws a channel's picture beside its name wherever it is credited. Press it again after adding a channel, or when a channel changes its picture; a compilation generated afterwards uses the new one. `description.txt` is plain text, so it has no pictures. The trash icon on a row asks once and then removes the channel at once, with its picture and subscriber count; videos already fetched from it stay.
 
-To add a channel quickly, press "Add a channel", paste only its address, and press the round arrows on its row. The channel's name and picture are filled in from YouTube and the channel is saved to the list. A name you typed yourself is kept, so on a channel you already have the button only refreshes the picture. Change the name afterwards if you want another spelling, and press "Save the list".
+The list is shown with the most subscribers first, and each row has a small arrow icon that opens the channel on YouTube in a new tab.
+
+The page also shows **who is live**. A channel that is broadcasting on YouTube is marked LIVE and moved to the top of the list; the mark opens the stream, and hovering over it shows when it started, how many are watching and its title. The Sources button in the left column shows the number of live channels on every page. YouTube is asked when the dashboard is opened and then every five minutes while it is on screen, and "Check who is live" asks at once. A part of a stream can be fetched only after it has ended.
+
+Under **"Supports"** on a channel's row you can mark the club the streamer supports, chosen from your own [leagues and clubs](#leagues-and-clubs). Click the cell, type to find a club, and click it: it is saved at once and shows as a small logo on the row. Choosing another club changes it, and choosing the same one again takes it off. A club that is in two leagues is listed once.
+
+To add a channel quickly, press "Add a channel", paste only its address, and press the round arrows on its row. The channel's name, picture and subscriber count are filled in from YouTube and the channel is saved to the list. A name you typed yourself is kept, so on a channel you already have the button only refreshes the picture and the count. Change the name afterwards if you want another spelling, and press "Save the list".
 
 "Fetch part of a video" on the same page brings a part of a YouTube video into `in/`:
 
@@ -200,6 +208,7 @@ To add a channel quickly, press "Add a channel", paste only its address, and pre
 - **A part, not the whole video.** You give a start and an end, up to 20 minutes. Long watchalongs are several gigabytes; a part is small.
 - **Up to 1080p, with the picture exactly as YouTube sends it.** A video can only be cut without loss at certain frames, so the part starts up to a few seconds before the time you gave; the tool says by how much. Set the exact start when you cut.
 - **YouTube links to one video only.** Playlists and channel links are refused.
+- **Not from a stream that is still live.** A live stream can only be recorded as it happens; a part cannot be cut out of it. Wait until the stream has ended and plays as an ordinary video. A stream that has only just ended is refused too, until YouTube has finished preparing it.
 
 The file is named after the channel, the video and the range, such as `channel-name_<video id>_1h02m00s-1h05m00s.mp4`, and then works like any other video in `in/`. When you add it to a compilation, its credit is filled in with the channel's name, and `description.txt` lists that channel's link next to the credit.
 
@@ -212,6 +221,14 @@ node src/cli.js fetch "https://www.youtube.com/watch?v=..." --start 1:02:00 --en
 It needs the downloader program `yt-dlp`, which `npm run setup` installs into `.venv` next to the transcriber. YouTube changes often; when fetching stops working, run `npm run setup` again to update it.
 
 The list is saved in `data/sources.json`, which is not part of the repository.
+
+**What is saved when.** The club a streamer supports and the removal of a channel are saved the moment you make them. A name or an address you type is saved with "Save the list" or with the row's sync arrows, and the browser asks before a reload would lose one.
+
+**Backups.** Before the channels list or the clubs list is changed, the list as it was is copied into `data/backups/sources/` (the newest 40 copies) or `data/backups/clubs/` (the newest 5). Each copy is named by its date and time. To go back to one, stop the dashboard and copy it over the list, for example:
+
+```bash
+cp "data/backups/sources/2026-11-20T18-22-45-123Z.json" data/sources.json
+```
 
 ## AI help
 

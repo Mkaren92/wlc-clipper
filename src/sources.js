@@ -3,6 +3,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { keepCopy } from './backup.js';
 
 /**
  * Only a channel marked `agreed` can be fetched from. Since 2026-11-20 the
@@ -12,6 +13,9 @@ import { z } from 'zod';
  */
 export const SOURCE_STATUSES = ['asked', 'agreed', 'declined'];
 
+/** How many clubs a streamer can be marked as supporting. */
+export const MAX_CLUBS = 3;
+
 const sourceSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/),
   name: z.string().trim().min(1).max(80),
@@ -19,6 +23,11 @@ const sourceSchema = z.strictObject({
   status: z.enum(SOURCE_STATUSES).default('agreed'),
   // Where and when they answered, in the owner's words. Kept from earlier lists; the page no longer asks for it.
   note: z.string().trim().max(300).default(''),
+  // The clubs the streamer supports, by name, as the owner marked them: up to three, each once.
+  // A name, not an id, because a club that is in two leagues is two entries with one name.
+  clubs: z.array(z.string().trim().min(1).max(80)).default([])
+    .transform((names) => [...new Set(names)])
+    .refine((names) => names.length <= MAX_CLUBS, `a streamer can support at most ${MAX_CLUBS} clubs`),
 });
 const sourcesSchema = z.array(sourceSchema).max(200);
 
@@ -86,8 +95,42 @@ export async function readSources(dataDir) {
 export async function saveSources(dataDir, data) {
   const sources = parseSources(data);
   await mkdir(dataDir, { recursive: true });
-  await writeFile(sourcesFile(dataDir), `${JSON.stringify(sources, null, 2)}\n`);
+  const text = `${JSON.stringify(sources, null, 2)}\n`;
+  // The list as it stood is copied first (data/backups/sources), so no write can lose it for good.
+  await keepCopy(sourcesFile(dataDir), text, { dataDir, name: 'sources', keep: 40 });
+  await writeFile(sourcesFile(dataDir), text);
   return sources;
+}
+
+/**
+ * Change one channel in the saved list and leave every other as it is on
+ * disk. The page uses this for anything that is saved the moment it is
+ * chosen, so a page showing an older copy of the list cannot write that
+ * older copy back over the rest.
+ *
+ * @param {string} dataDir
+ * @param {string} sourceId
+ * @param {(source: Source) => Source} change
+ * @returns {Promise<Source[]>} the whole list as saved
+ */
+async function changeSource(dataDir, sourceId, change) {
+  const sources = await readSources(dataDir);
+  const at = sources.findIndex((source) => source.id === sourceId);
+  if (at < 0) throw new Error('No such channel in the saved list.');
+  sources[at] = change(sources[at]);
+  return saveSources(dataDir, sources);
+}
+
+/** Set the clubs one saved channel supports. */
+export function setSourceClubs(dataDir, sourceId, clubs) {
+  return changeSource(dataDir, sourceId, (source) => ({ ...source, clubs }));
+}
+
+/** Take one channel out of the saved list. */
+export async function removeSource(dataDir, sourceId) {
+  const sources = await readSources(dataDir);
+  if (!sources.some((source) => source.id === sourceId)) throw new Error('No such channel in the saved list.');
+  return saveSources(dataDir, sources.filter((source) => source.id !== sourceId));
 }
 
 /** Channel links for the credits of a compilation, by name in lower case. Agreed channels only. */

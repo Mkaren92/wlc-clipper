@@ -73,6 +73,12 @@ export const api = {
   },
   sources: () => request('/api/sources'),
   saveSources: (sources) => request('/api/sources', { method: 'PUT', body: sources }),
+  // Changes to one saved channel, which leave every other channel as it is on the server.
+  setSourceClubs: (id, clubs) => request(`/api/sources/${enc(id)}/clubs`, { method: 'PUT', body: { clubs } }),
+  deleteSource: (id) => request(`/api/sources/${enc(id)}`, { method: 'DELETE' }),
+  // Which channels are live: the last answer, and asking YouTube again.
+  live: () => request('/api/sources/live'),
+  checkLive: () => request('/api/sources/live', { method: 'POST' }),
   syncSource: (source) => request('/api/sources/sync', { method: 'POST', body: source }),
   fetchPictures: () => request('/api/sources/pictures', { method: 'POST' }),
   sourcePictureUrl: (id, version) => `/media/source-pictures/${enc(id)}?v=${version}`,
@@ -86,6 +92,7 @@ export const api = {
   fixWords: (name) => request(`/api/clips/${enc(name)}/fix-words`, { method: 'POST' }),
   render: (name) => request(`/api/clips/${enc(name)}/render`, { method: 'POST' }),
   jobs: () => request('/api/jobs'),
+  stopJob: (id) => request(`/api/jobs/${enc(id)}/stop`, { method: 'POST' }),
   saveTranscript: (name, transcript) => request(`/api/clips/${enc(name)}/transcript`, { method: 'PUT', body: transcript }),
   savePost: (name, text) => request(`/api/clips/${enc(name)}/post`, { method: 'PUT', body: { text } }),
 };

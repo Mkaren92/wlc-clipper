@@ -38,7 +38,8 @@ const fakeAi = {
 const fakeDownloader = {
   isInstalled: async () => true,
   info: async () => ({ id: 'dQw4w9WgXcQ', title: 'A watchalong', channel: 'Agreed Channel', channelId: 'UCxxx', handle: '@agreed', duration: 600 }),
-  channel: async () => ({ name: 'Agreed Channel', channelId: 'UCxxx', handle: '@agreed', pictureUrl: 'https://yt3.googleusercontent.com/made-up-picture' }),
+  channel: async () => ({ name: 'Agreed Channel', channelId: 'UCxxx', handle: '@agreed', pictureUrl: 'https://yt3.googleusercontent.com/made-up-picture', subscribers: 18000 }),
+  live: async () => ({ live: true, videoId: 'dQw4w9WgXcQ', title: 'On air', channelId: 'UCxxx', handle: '@agreed', viewers: 77, started: 1795174296 }),
   download: async (job) => {
     await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-t', '1', '-pix_fmt', 'yuv420p', path.join(job.dir, `${job.name}.mp4`)]);
   },
@@ -122,7 +123,7 @@ function statusWithHost(host) {
 async function finished(jobId) {
   for (;;) {
     const { data } = await api(`/api/jobs/${jobId}`);
-    if (data.status === 'done' || data.status === 'failed') return data;
+    if (data.status === 'done' || data.status === 'failed' || data.status === 'stopped') return data;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
@@ -288,8 +289,8 @@ describe('matches and cards', () => {
 describe('leagues and clubs', () => {
   it('keeps the owner\'s leagues and clubs, answering every change with the whole list', async () => {
     const start = (await api('/api/clubs')).data;
-    expect(start.leagues.map((league) => league.name)).toEqual(['La Liga', 'Premier League', 'Serie A']);
-    expect(start.clubs).toHaveLength(60);
+    expect(start.leagues.map((league) => league.name)).toEqual(['La Liga', 'Premier League', 'Europe', 'Champions League']);
+    expect(start.clubs).toHaveLength(98);
 
     const withLeague = await api('/api/leagues', { method: 'POST', body: { name: 'Countries' } });
     expect([withLeague.status, withLeague.data.leagues.at(-1)]).toEqual([201, { id: 'countries', name: 'Countries' }]);
@@ -309,8 +310,8 @@ describe('leagues and clubs', () => {
 
     // Deleting the league takes its club with it and leaves the rest.
     const after = await api('/api/leagues/countries', { method: 'DELETE' });
-    expect(after.data.leagues).toHaveLength(3);
-    expect(after.data.clubs).toHaveLength(60);
+    expect(after.data.leagues).toHaveLength(4);
+    expect(after.data.clubs).toHaveLength(98);
     expect((await api('/api/leagues/countries', { method: 'DELETE' })).status).toBe(404);
   });
 });
@@ -471,7 +472,7 @@ describe('sources and fetching', () => {
   const source = (status) => [{ id: 'a', name: 'Agreed Channel', url: 'https://www.youtube.com/@agreed', status, note: '' }];
 
   it('keeps the sources list, and fetches only from a channel marked as agreed', async () => {
-    expect((await api('/api/sources')).data).toEqual({ sources: [], pictures: {}, prefixes: {}, downloaderInstalled: true });
+    expect((await api('/api/sources')).data).toEqual({ sources: [], pictures: {}, subscribers: {}, prefixes: {}, downloaderInstalled: true });
     expect((await api('/api/sources', { method: 'PUT', body: [{ id: 'a', name: 'X', url: 'https://example.com/@x' }] })).status).toBe(400);
 
     // Asked, but not agreed yet: the fetch is refused and nothing is written.
@@ -482,6 +483,21 @@ describe('sources and fetching', () => {
 
     const saved = await api('/api/sources', { method: 'PUT', body: source('agreed') });
     expect(saved.data.sources[0].status).toBe('agreed');
+    // The clubs a streamer supports are saved with the channel: up to three.
+    const supports = (clubs) => api('/api/sources', { method: 'PUT', body: [{ ...source('agreed')[0], clubs }] });
+    expect((await supports(['Barcelona', 'Arsenal'])).data.sources[0].clubs).toEqual(['Barcelona', 'Arsenal']);
+    expect((await supports(['A', 'B', 'C', 'D'])).status).toBe(400);
+    expect((await api('/api/sources')).data.sources[0].clubs).toEqual(['Barcelona', 'Arsenal']);
+    // One channel's club, saved by itself: only that channel changes, whatever else the asking page holds.
+    const club = await api('/api/sources/a/clubs', { method: 'PUT', body: { clubs: ['Inter'] } });
+    expect(club.data.sources[0].clubs).toEqual(['Inter']);
+    expect((await api('/api/sources/a/clubs', { method: 'PUT', body: { clubs: ['A', 'B', 'C', 'D'] } })).status).toBe(400);
+    expect((await api('/api/sources/nobody/clubs', { method: 'PUT', body: { clubs: [] } })).status).toBe(404);
+    expect((await api('/api/sources/a/clubs', { method: 'PUT', body: { clubs: [] }, headers: { Origin: 'https://example.com' } })).status).toBe(403);
+    expect((await api('/api/sources')).data.sources[0].clubs).toEqual(['Inter']);
+    // Every change kept a copy of the list as it was.
+    expect((await readdir(path.join(dir, 'data', 'backups', 'sources'))).length).toBeGreaterThan(0);
+    await api('/api/sources', { method: 'PUT', body: source('agreed') });
     expect(saved.data.prefixes).toEqual({ a: 'agreed-channel' });
     const started = await api('/api/fetch', { method: 'POST', body: { url: link, start: '1:00', end: '1:30' } });
     expect(started.status).toBe(202);
@@ -494,19 +510,32 @@ describe('sources and fetching', () => {
     await jobs.idle();
     await rm(path.join(dir, 'in', 'agreed-channel_dQw4w9WgXcQ_1m00s-1m30s.mp4'));
 
+    // Who is live: nothing is known until YouTube is asked, the answer is remembered, and it is for the saved list only.
+    expect((await api('/api/sources/live')).data).toEqual({ checked: null, channels: {} });
+    expect((await api('/api/sources/live', { method: 'POST', headers: { Origin: 'https://example.com' } })).status).toBe(403);
+    const onAir = await api('/api/sources/live', { method: 'POST', body: { channels: ['someone-else'] } });
+    expect(onAir.data.channels).toEqual({ a: { live: true, videoId: 'dQw4w9WgXcQ', title: 'On air', viewers: 77, started: '2026-11-20T11:31:36.000Z' } });
+    expect(Math.abs(Date.now() - Date.parse(onAir.data.checked))).toBeLessThan(60_000);
+    expect((await api('/api/sources/live')).data).toEqual(onAir.data);
+
     // The channel's picture: fetched as a job for the saved list, served by the source's id, and gone with the channel.
     expect((await api('/api/sources')).data.pictures).toEqual({});
     expect((await fetch(`${base}/media/source-pictures/a`)).status).toBe(404);
     const pictures = await api('/api/sources/pictures', { method: 'POST' });
     expect(await finished(pictures.data.id)).toMatchObject({ status: 'done', kind: 'pictures', result: { fetched: ['Agreed Channel'], failed: [] } });
     expect(Object.keys((await api('/api/sources')).data.pictures)).toEqual(['a']);
+    expect((await api('/api/sources')).data.subscribers).toMatchObject({ a: { count: 18000 } });
     const served = await fetch(`${base}/media/source-pictures/a`);
     expect([served.status, served.headers.get('content-type')]).toEqual([200, 'image/png']);
     expect((await fetch(`${base}/media/source-pictures/..%2Fsources`)).status).toBe(404);
     expect((await api('/api/sources/pictures', { method: 'POST', headers: { Origin: 'https://example.com' } })).status).toBe(403);
     await jobs.idle();
 
-    await api('/api/sources', { method: 'PUT', body: [] });
+    // Removing one channel by its id takes its picture with it; another origin may not, and an unknown id is not found.
+    expect((await api('/api/sources/a', { method: 'DELETE', headers: { Origin: 'https://example.com' } })).status).toBe(403);
+    expect((await api('/api/sources/nobody', { method: 'DELETE' })).status).toBe(404);
+    const gone = await api('/api/sources/a', { method: 'DELETE' });
+    expect([gone.status, gone.data.sources, gone.data.pictures]).toEqual([200, [], {}]);
     expect((await readdir(path.join(dir, 'data', 'source-pictures'))).filter((name) => name.endsWith('.png'))).toEqual([]);
 
     // Sync on a row with only an address: the name and the picture come from YouTube, and the channel is saved.
@@ -649,4 +678,32 @@ describe('cutting', () => {
     expect((await api('/api/jobs/999')).status).toBe(404);
     expect((await api('/api/nothing')).status).toBe(404);
   });
+});
+
+describe('stopping a job', () => {
+  it('stops a cut that is running and one that is waiting, and leaves nothing of either', async () => {
+    const before = (await api('/api/clips')).data.map((clip) => clip.name);
+    const request = { video: 'game.mp4', start: 0, end: 4, layout: 'blur', hook: 'Stop me' };
+    const running = await api('/api/cut', { method: 'POST', body: request });
+    const waiting = await api('/api/cut', { method: 'POST', body: { ...request, hook: 'Never started' } });
+    const after = await api('/api/cut', { method: 'POST', body: { ...request, start: 0, end: 1, hook: 'Goes ahead' } });
+
+    // Only this machine's own pages may stop a job, and only a job there is.
+    expect((await api(`/api/jobs/${running.data.id}/stop`, { method: 'POST', headers: { Origin: 'https://example.com' } })).status).toBe(403);
+    expect((await api('/api/jobs/9999/stop', { method: 'POST' })).status).toBe(404);
+
+    const stopped = await api(`/api/jobs/${running.data.id}/stop`, { method: 'POST' });
+    expect(stopped.status).toBe(200);
+    const queued = await api(`/api/jobs/${waiting.data.id}/stop`, { method: 'POST' });
+    expect(queued.data).toMatchObject({ status: 'stopped', startedAt: null });
+
+    expect(await finished(running.data.id)).toMatchObject({ status: 'stopped', error: 'Stopped before it finished.', result: null });
+    // The job behind them is not held up, and runs to the end.
+    expect(await finished(after.data.id)).toMatchObject({ status: 'done', result: { clip: 'goes-ahead' } });
+    // Neither stopped cut left a clip folder; a job that has finished cannot be stopped.
+    expect((await api('/api/clips')).data.map((clip) => clip.name).sort()).toEqual([...before, 'goes-ahead'].sort());
+    expect((await readdir(path.join(dir, 'out'))).filter((name) => /stop-me|never-started/.test(name))).toEqual([]);
+    expect((await api(`/api/jobs/${running.data.id}/stop`, { method: 'POST' })).status).toBe(404);
+    expect((await api('/api/clips/goes-ahead', { method: 'DELETE' })).status).toBe(200);
+  }, 120_000);
 });

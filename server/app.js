@@ -329,6 +329,13 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
   // or moved to another screen can show what is still running.
   app.get('/api/jobs', (req, res) => res.json(jobs.list()));
 
+  // Stops a job that is waiting or running. One that is running ends as soon as its program has.
+  app.post('/api/jobs/:id/stop', (req, res) => {
+    const job = jobs.stop(req.params.id);
+    if (!job) throw new HttpError(404, 'No such job, or it has already finished.');
+    res.json(job);
+  });
+
   app.get('/api/jobs/:id', (req, res) => {
     const job = jobs.get(req.params.id);
     if (!job) throw new HttpError(404, 'No such job. Jobs are forgotten when the dashboard restarts.');
