@@ -226,6 +226,12 @@ async function writeCounts(dataDir, counts) {
   await writeFile(countsFile(dataDir), `${JSON.stringify(counts, null, 2)}\n`);
 }
 
+/** Put a whole set of subscriber counts in place of the saved one, as a load of the owner's data does. Anything that is not a count is left out. */
+export async function replaceSubscribers(dataDir, counts) {
+  const kept = Object.fromEntries(Object.entries(counts ?? {}).filter(([id, one]) => /^[a-z0-9][a-z0-9-]{0,79}$/.test(id) && isCount(one?.count) && typeof one?.checked === 'string'));
+  await writeCounts(dataDir, kept);
+}
+
 /** Keep a channel's subscriber count with the time it was read. Anything that is not a count is ignored. */
 async function saveSubscribers(dataDir, sourceId, count) {
   if (!isCount(count)) return;

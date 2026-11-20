@@ -71,6 +71,17 @@ export const api = {
     if (!response.ok) throw new Error(data.error ?? `The server answered ${response.status}.`);
     return data;
   },
+  // My data: what a download would hold, the file itself, and loading one (two steps).
+  transfer: () => request('/api/transfer'),
+  dataFileUrl: () => '/api/transfer/download',
+  async takeInData(file) {
+    const response = await fetch('/api/transfer/upload', { method: 'PUT', body: file });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error ?? `The server answered ${response.status}.`);
+    return data;
+  },
+  loadData: () => request('/api/transfer/apply', { method: 'POST' }),
+  discardData: () => request('/api/transfer/waiting', { method: 'DELETE' }),
   sources: () => request('/api/sources'),
   saveSources: (sources) => request('/api/sources', { method: 'PUT', body: sources }),
   // Changes to one saved channel, which leave every other channel as it is on the server.

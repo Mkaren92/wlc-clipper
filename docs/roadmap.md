@@ -22,13 +22,14 @@ Version 1 of the spec is complete: all three "evenings".
 - A list of leagues and clubs (name, colour, logo) to fill a match's teams from, starting with La Liga and the Premier League as of 2026–27, a "Europe" league of leading Italian, French, German and Portuguese clubs, and the 36 clubs of the 2026–27 Champions League
 - The club a streamer supports, chosen from the owner's clubs, saved as it is chosen and shown as a logo on the row
 - Backups: a copy of the channels list and of the clubs list is kept before every change (`data/backups/`)
+- My data: one file to download with what the owner chose to carry (channels with clubs, pictures and counts, leagues and clubs with logos, sounds, briefs), and a two-step load on another machine that never deletes
 - Who is live: channels in the list that are broadcasting are marked LIVE, listed first and counted in the side column
 - A Stop button for anything waiting or running, in "Activity"
 - A sources list and `fetch`: part of a YouTube video, up to 20 minutes, from a channel in the list (the owner adds a channel only once it has agreed)
 - Channel pictures: the profile picture of each channel in the list, fetched on request and drawn beside its name where it is credited in a compilation; a sync button on a row fills a new channel's name and picture from its address, and each row shows the channel's subscriber count from the last lookup
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-379 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, and none call the real AI service.
+392 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, and none call the real AI service.
 
 ## Waiting on the owner
 
@@ -44,6 +45,7 @@ Version 1 of the spec is complete: all three "evenings".
 - The Combine page in the owner's hands. It was driven by script: a whole run on generated test videos with a frame counter, and a preview of two of the owner's own videos (a fetched part and a phone recording), which played in step within about 0.03 s. Lining up a real reaction by eye and ear is the owner's to judge.
 - How a combined video sounds. Levels were measured, not listened to.
 - The LIVE mark on one of the owner's own channels: none was live when it was built.
+- "Load my data" on a second real computer. The round trip was run between two scratch dashboards on this machine, with a copy of the owner's real lists; loading on Windows inside WSL was not tried. The browser round trip was run before the contents were narrowed to what the owner chose; after that the engine and server tests were run again, and the download was checked on the real dashboard.
 - The clubs set on 45 of the owner's channels on 2026-11-20. They were worked out from each channel's own description, tags and recent titles after the owner's own marks were lost; five were told to the owner as less certain, ten channels were left without a club, and the owner has not yet confirmed them.
 - The Stop button on a real fetch started from the page. It was pressed in a browser on two cuts, and tried by script on the real downloader recording a live stream.
 - The sync button on the owner's real list. It was run on a test copy with one channel. "Update pictures and subscribers" was pressed on the real list when it had fourteen channels. The downloader also warned that it will stop supporting Python 3.10, which this machine has.

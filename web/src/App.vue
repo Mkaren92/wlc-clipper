@@ -8,6 +8,7 @@ import TrashButton from './components/TrashButton.vue';
 import CardMaker from './pages/CardMaker.vue';
 import Combiner from './pages/Combiner.vue';
 import CompilationBuilder from './pages/CompilationBuilder.vue';
+import MyData from './pages/MyData.vue';
 import Sources from './pages/Sources.vue';
 import { clock, fileSize } from './format.js';
 import { describe, isActive, jobs, refresh as refreshJobs, visibleJobs } from './jobs.js';
@@ -28,6 +29,7 @@ const PAGES = [
   { id: 'combine', name: 'Combine', icon: 'split', title: 'Combine two videos', about: 'Put a reaction and the thing reacted to side by side, line them up by eye, and make one video of the two to use in a compilation.' },
   { id: 'compilations', name: 'Compilations', icon: 'layers', title: 'Compilations', about: 'Put videos and cards in order and make one video out of them, with credits and a description file.' },
   { id: 'sources', name: 'Sources', icon: 'link', title: 'Sources', about: 'The channels that have agreed to let you use their videos, and the place to fetch part of a video from one of them.' },
+  { id: 'data', name: 'My data', icon: 'box', title: 'My data', about: 'Everything you have made or added here, as one file to take to another computer, and the place to load such a file.' },
 ];
 const isPage = (id) => PAGES.some((known) => known.id === id);
 const page = ref(isPage(location.hash.slice(1)) ? location.hash.slice(1) : 'clips');
@@ -296,6 +298,7 @@ onMounted(async () => {
       <Combiner v-else-if="page === 'combine'" />
       <CompilationBuilder v-else-if="page === 'compilations'" />
       <Sources v-else-if="page === 'sources'" />
+      <MyData v-else-if="page === 'data'" />
       <template v-else>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <NewClip v-if="view.kind === 'video'" :key="view.name" :video="view.name" :briefs="briefs" @done="openClip" />

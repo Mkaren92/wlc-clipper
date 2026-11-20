@@ -144,6 +144,11 @@ export async function readLibrary(dataDir) {
   return parseLibrary(JSON.parse(text));
 }
 
+/** Put a whole list of leagues and clubs in place of the saved one, as a load of the owner's data does. */
+export function replaceLibrary(dataDir, data) {
+  return saveLibrary(dataDir, data);
+}
+
 async function saveLibrary(dataDir, data) {
   const library = parseLibrary(data);
   // Leagues keep the order they were made in. Clubs are kept by name.

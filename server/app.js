@@ -19,6 +19,7 @@ import { addCompilationRoutes } from './compilations.js';
 import { HttpError } from './http.js';
 import { createJobs } from './jobs.js';
 import { addSourceRoutes } from './sources.js';
+import { addTransferRoutes } from './transfer.js';
 
 const VIDEO_TYPES = new Set(['.mp4', '.mov', '.mkv', '.webm', '.m4v', '.avi']);
 // A clip's folder name: its hook turned into a slug, or clip-NNN. Letters,
@@ -376,6 +377,10 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
   // --- Sources and fetching (server/sources.js) ------------------------------
 
   addSourceRoutes(app, { dataDir, inDir, jobs, downloader, pictureDownload });
+
+  // --- My data: download and load (server/transfer.js) -------------------------
+
+  addTransferRoutes(app, { folders: { data: dataDir, sounds: soundsDir, briefs: briefsDir }, jobs });
 
   // --- The pages themselves -------------------------------------------------
 

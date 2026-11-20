@@ -9,7 +9,7 @@ You can use it two ways, and mix them freely:
 
 Optionally, an AI service can suggest which moments to clip and fix caption mistakes (see [AI help](#ai-help)).
 
-The dashboard also has pages for building a longer video out of several pieces: [match cards and compilations](#match-cards-and-compilations), and [Combine](#combine-two-videos), which puts two videos side by side.
+The dashboard also has pages for building a longer video out of several pieces: [match cards and compilations](#match-cards-and-compilations), and [Combine](#combine-two-videos), which puts two videos side by side. A [My data](#my-data-moving-to-another-computer) page carries your channels, clubs, logos, sounds and briefs to another computer.
 
 It works on files on your disk and it does not post anything. The one way video comes in from outside is [`fetch`](#sources-and-fetching), which takes part of a YouTube video from a channel in your sources list, where you add only channels that have agreed. The Sources page also looks up those channels' profile pictures and subscriber counts, and shows which of them are live.
 
@@ -67,6 +67,7 @@ Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 - **Deleting a video:** each video in the left column has a trash icon. It asks once, then deletes the file from `in/`. Clips already cut from it stay, but can no longer be rendered again, because rendering reads the source. A compilation that uses the video will not build until the item is taken out. It is not possible while a clip is being made.
 - **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
 - **Clip:** watch the result, download it, see each brief rule as passed or failed, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
+- **My data:** one file to download with everything you have made, and the place to load such a file on another computer (see [My data](#my-data-moving-to-another-computer)).
 - **Unsaved changes:** the card, combine, compilation and sources pages show "Changes not saved" until you save, and their Save button stays in view.
 
 Only this computer can reach the dashboard; it is not visible on your network.
@@ -229,6 +230,35 @@ The list is saved in `data/sources.json`, which is not part of the repository.
 ```bash
 cp "data/backups/sources/2026-11-20T18-22-45-123Z.json" data/sources.json
 ```
+
+## My data: moving to another computer
+
+GitHub holds the code. What you have made or added stays on the computer it was made on. The **My data** page turns the part you chose to carry into one file, and loads such a file on another computer.
+
+**What travels in the file:**
+
+- your channels, with the club each streamer supports, their pictures and subscriber counts
+- your leagues and clubs, with all their logos
+- your sound files, among them a video used behind the intro card
+- your briefs
+
+**What stays on the computer it was made on:** source videos, parts, clips, combinations, compilations, and matches with their cards. Your AI key is never put in the file; copy the file `.env` by hand if you use one.
+
+**To take your work to another computer:**
+
+1. Here, open "My data" and press "Download my data". The file is a few tens of megabytes.
+2. On the other computer, install the project from GitHub (on Windows, follow [docs/install-windows.md](docs/install-windows.md)) and start the dashboard.
+3. There, open "My data", choose the file under "Load my data", look at what it shows, and press "Load it".
+
+**What a load does.** You are first shown what the file holds beside what that computer has, and a list of what would be replaced. Nothing changes until you press "Load it". Then:
+
+- A file from the data file takes the place of the file with the same name there. Your channels list, your clubs list and the subscriber counts are replaced whole.
+- **Nothing is deleted.** Whatever is replaced is moved into a folder named `data/backups/before-load-<date and time>/`, which the tool never cleans out. To undo a load, copy things back from there.
+- Anything on that computer that the file does not hold is left as it is, including everything that stays local.
+
+**Coming back** works the same way: download on the other computer, load here. Load the newer file onto the older computer, not the other way round: the page warns when the file has fewer channels, clubs or logos than the computer you are loading onto.
+
+The file is an ordinary `.tar` file, so any archive program can open it.
 
 ## AI help
 

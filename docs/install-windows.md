@@ -182,8 +182,8 @@ This takes two to three minutes and uses every processor core.
 **It should end with** two lines like these, with no failed count:
 
 ```
- Test Files  15 passed (15)
-      Tests  379 passed (379)
+ Test Files  16 passed (16)
+      Tests  392 passed (392)
 ```
 
 The numbers grow as the project grows. What matters is that everything passed. If a test fails, see [Troubleshooting](#troubleshooting) before going on.
@@ -345,7 +345,11 @@ Suggested moments and caption fixes need an AI service. Everything else works wi
 
 ## Bringing your work from another computer
 
-The project itself comes from GitHub. Your own files do not. To carry on where you left off, copy these from the old computer into the same places in `~/wlc-clipper` on the new one:
+The project itself comes from GitHub. Your own files do not.
+
+**The easy way** is the dashboard's "My data" page. On the old computer press "Download my data". The file lands in the old computer's Downloads folder; copy it to this one. Then, in the dashboard here, open "My data", choose that file under "Load my data", check what it shows, and press "Load it". It carries your channels and their clubs, your leagues and clubs with logos, your sounds and your briefs; videos, clips, combinations, compilations and matches stay on the old computer. See "My data" in the [README](../README.md).
+
+**By hand**, the same thing is copying these from the old computer into the same places in `~/wlc-clipper` on the new one:
 
 | Copy | Why |
 |---|---|
