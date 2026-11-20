@@ -36,6 +36,7 @@ Version 1 of the spec is complete: all three "evenings".
 
 ## Not verified
 
+- The Windows guide (`docs/install-windows.md`) on a real Windows computer. Its Ubuntu steps were run from a fresh copy cloned from GitHub; installing WSL, and the browser and Explorer on the Windows side, were written from Microsoft's documentation and not run.
 - The Combine page in the owner's hands. It was driven by script: a whole run on generated test videos with a frame counter, and a preview of two of the owner's own videos (a fetched part and a phone recording), which played in step within about 0.03 s. Lining up a real reaction by eye and ear is the owner's to judge.
 - How a combined video sounds. Levels were measured, not listened to.
 - The sync button and "Get the channels' pictures" beyond the owner's seven channels. The button was pressed on the owner's real list for the pictures; sync was run on a test copy with one of those channels. The downloader also warned that it will stop supporting Python 3.10, which this machine has.

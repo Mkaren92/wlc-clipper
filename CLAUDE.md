@@ -9,6 +9,7 @@ Read these before changing behaviour:
 - `README.md`: how the tool is used, every command and flag, the brief format.
 - `docs/decisions.md`: where the code departs from the spec and why, with the measurements behind each choice. Check it before "fixing" something that looks odd.
 - `docs/roadmap.md`: what is built, what the owner still owes, what comes next.
+- `docs/install-windows.md`: installing on Windows through WSL. Keep its versions, sizes and expected outputs true when setup, the commands or the test count change.
 - `docs/build-spec-v1.pdf`: the original spec. The code and `docs/decisions.md` win where they differ from it.
 
 ## Commands
@@ -22,7 +23,7 @@ npm run dashboard           # build the pages, then serve them at http://127.0.0
 npm run dev:web             # only while editing the pages: live reload on port 4518
 ```
 
-Needs Node 22.12 or later, and `ffmpeg` and `ffprobe` on the PATH built with libass. Captions and `fetch` also need Python 3 with the venv module. It has only been run on Linux.
+Needs Node 22.12 or later, and `ffmpeg` and `ffprobe` on the PATH built with libass. Captions and `fetch` also need Python 3 with the venv module. It has only been run on Linux. On Windows it is meant to run inside WSL 2 with Ubuntu 22.04; `docs/install-windows.md` is the step-by-step guide, and it says which of its steps were run and which were written from Microsoft's documentation.
 
 ## On a new machine
 

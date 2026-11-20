@@ -19,6 +19,8 @@ It works on files on your disk and it does not post anything. The one way video 
 - `ffmpeg` and `ffprobe` on the PATH, built with libass (check: `ffmpeg -filters | grep subtitles`)
 - Python 3 with the venv module, only for captions and for fetching from YouTube (on Ubuntu: `sudo apt install python3-venv`)
 
+It has only been run on Linux. **On Windows**, it runs inside WSL: follow [docs/install-windows.md](docs/install-windows.md), a step-by-step guide from an empty computer to a first clip.
+
 ## Setup
 
 ```bash
