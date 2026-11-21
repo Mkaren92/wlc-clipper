@@ -9,6 +9,7 @@ const STEP_NAMES = {
   items: 'making the segments',
   looking: 'looking the video up',
   fetching: 'downloading the part',
+  'fetching-slow': 'downloading the part the slow way',
   pictures: 'asking YouTube',
   tidying: 'preparing the video',
   joining: 'joining them',

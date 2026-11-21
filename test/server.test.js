@@ -506,6 +506,15 @@ describe('sources and fetching', () => {
 
     expect((await api('/api/fetch', { method: 'POST', body: { url: 'https://example.com/x.mp4', start: 0, end: 5 } })).status).toBe(202);
     expect((await api('/api/fetch', { method: 'POST', body: { url: link, start: 'x', end: 5 } })).status).toBe(400);
+    // A whole video needs no range; without "whole", both ends are needed.
+    expect((await api('/api/fetch', { method: 'POST', body: { url: link, start: 0 } })).status).toBe(400);
+    expect((await api('/api/fetch', { method: 'POST', body: { url: link, whole: 'yes' } })).status).toBe(400);
+    await jobs.idle();
+    const wholeVideo = await api('/api/fetch', { method: 'POST', body: { url: link, whole: true } });
+    expect(wholeVideo.status).toBe(202);
+    expect(wholeVideo.data.label).toBe('the whole of a video');
+    expect(await finished(wholeVideo.data.id)).toMatchObject({ status: 'done', result: { name: 'agreed-channel_dQw4w9WgXcQ_0m00s-10m00s.mp4' } });
+    await rm(path.join(dir, 'in', 'agreed-channel_dQw4w9WgXcQ_0m00s-10m00s.mp4'));
     expect((await api('/api/fetch', { method: 'POST', body: { url: link, start: 0, end: 5 }, headers: { Origin: 'https://example.com' } })).status).toBe(403);
     await jobs.idle();
     await rm(path.join(dir, 'in', 'agreed-channel_dQw4w9WgXcQ_1m00s-1m30s.mp4'));

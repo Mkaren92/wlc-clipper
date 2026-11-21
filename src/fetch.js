@@ -10,8 +10,10 @@ import { fileURLToPath } from 'node:url';
 import { clipSlug } from './cut.js';
 import { rangeStamp } from './part.js';
 import { probe } from './probe.js';
-import { run } from './run.js';
+import { startRangeRelay } from './rangeRelay.js';
+import { isStopped, run } from './run.js';
 import { agreedSourceOf } from './sources.js';
+import { checkFetchRange, checkWholeLength, MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoUrl } from './fetchLink.js';
 import { formatClock } from './time.js';
 
 /** @typedef {import('./sources.js').Source} Source */
@@ -23,66 +25,38 @@ import { formatClock } from './time.js';
  * @property {() => Promise<boolean>} isInstalled
  * @property {(url: string) => Promise<{ id: string, title: string, channel: string, channelId: string, handle: string, duration: number, live?: string }>} info
  *   `live` is YouTube's word for a stream's state: "is_live" while it is going on
- * @property {(job: { url: string, start: number, end: number, dir: string, name: string }) => Promise<void>} download
- *   writes `<dir>/<name>.mp4`
+ * @property {(job: { url: string, start: number, end: number, whole?: boolean, dir: string, name: string, onStep?: (step: string) => void }) => Promise<{ slow?: string } | void>} download
+ *   writes `<dir>/<name>.mp4`; `slow` says why the fast way was not used, when it was not
  * @property {(url: string) => Promise<{ name: string, channelId: string, handle: string, pictureUrl: string, subscribers?: number | null }>} channel
  *   what YouTube says about a channel, for its profile picture and subscriber count (see pictures.js)
  * @property {(url: string) => Promise<{ live: boolean, videoId?: string, title?: string, channelId?: string, handle?: string, viewers?: number, started?: number }>} live
  *   whether a channel is broadcasting right now, and which stream (see live.js)
  */
 
-// Long enough for any goal reaction, short enough that a slip cannot fill the disk.
-export const MAX_FETCH_SECONDS = 20 * 60;
 // Room allowed per second of video at up to 1080p, for the free-space check.
 const BYTES_PER_SECOND = 1_500_000;
 
-/**
- * Check a link and return the plain address of the one video it points to.
- * A playlist or channel link is refused.
- *
- * @param {string} text
- * @returns {string}
- */
-export function videoUrl(text) {
-  const problem = () => new Error('Give a link to one YouTube video, such as https://www.youtube.com/watch?v=...');
-  let url;
-  try {
-    url = new URL(String(text).trim());
-  } catch {
-    throw problem();
-  }
-  if (url.protocol !== 'https:') throw problem();
-  let id = null;
-  if (url.hostname === 'youtu.be') id = url.pathname.slice(1);
-  else if (['www.youtube.com', 'youtube.com', 'm.youtube.com'].includes(url.hostname)) {
-    id = url.pathname === '/watch' ? url.searchParams.get('v') : /^\/(?:live|shorts)\/([^/]+)\/?$/.exec(url.pathname)?.[1] ?? null;
-  }
-  if (!id || !/^[\w-]{11}$/.test(id)) throw problem();
-  return `https://www.youtube.com/watch?v=${id}`;
-}
+// The link and range checks live in a file of their own, which the Download page also uses.
+export { MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoUrl };
 
 /**
- * Fetch a time range of a video into `outDir`.
+ * Fetch a time range of a video into `outDir`, or the whole video.
  *
  * @param {object} options
  * @param {string} options.url
- * @param {number} options.start    seconds into the video
- * @param {number} options.end
+ * @param {number} [options.start]    seconds into the video; not used with `whole`
+ * @param {number} [options.end]
+ * @param {boolean} [options.whole]   the whole video, up to MAX_WHOLE_SECONDS
  * @param {Source[]} options.sources
  * @param {string} options.outDir   the videos folder
  * @param {Downloader} [options.downloader]
  * @param {(step: string) => void} [options.onStep]
- * @returns {Promise<{ name: string, file: string, seconds: number, early: number, source: Source, title: string }>}
- *   `early` is how many seconds before the asked start the file begins
+ * @returns {Promise<{ name: string, file: string, seconds: number, early: number, source: Source, title: string, slow: string | null }>}
+ *   `early` is how many seconds before the asked start the file begins; `slow` says why it came the slow way, if it did
  */
-export async function fetchVideo({ url, start, end, sources, outDir, downloader = ytDlp(), onStep = () => {} }) {
+export async function fetchVideo({ url, start, end, whole = false, sources, outDir, downloader = ytDlp(), onStep = () => {} }) {
   const link = videoUrl(url);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
-    throw new Error('Give the start and the end of the part you want; the end must be after the start.');
-  }
-  if (end - start > MAX_FETCH_SECONDS) {
-    throw new Error(`A fetch can be at most ${MAX_FETCH_SECONDS / 60} minutes long; this range is ${formatClock(end - start)}.`);
-  }
+  if (!whole) checkFetchRange(start, end);
   if (!(await downloader.isInstalled())) {
     throw new Error('The downloader is not installed. Run "npm run setup" to install it.');
   }
@@ -104,7 +78,12 @@ export async function fetchVideo({ url, start, end, sources, outDir, downloader 
   if (video.live === 'post_live') {
     throw new Error('This stream has only just ended and YouTube is still preparing it. Try again later, once it plays as an ordinary video.');
   }
-  if (video.duration && end > video.duration + 1) {
+  if (whole) {
+    // The range is the video's own length, as YouTube gives it. ffmpeg is not told to stop,
+    // so a part of a second that the length leaves off is not lost.
+    start = 0;
+    end = checkWholeLength(video.duration);
+  } else if (video.duration && end > video.duration + 1) {
     throw new Error(`The video is only ${formatClock(video.duration)} long, but the end is set to ${formatClock(end)}.`);
   }
 
@@ -125,7 +104,7 @@ export async function fetchVideo({ url, start, end, sources, outDir, downloader 
   for (let n = 2; taken.includes(`${name}.mp4`); n++) name = `${base}_${n}`;
 
   onStep('fetching');
-  await downloader.download({ url: link, start, end, dir, name }).catch(async (error) => {
+  const how = await downloader.download({ url: link, start, end, whole, dir, name, onStep }).catch(async (error) => {
     // A download that failed or was stopped leaves pieces behind, named by the tool. They are removed.
     for (const left of await readdir(dir).catch(() => [])) {
       if (left.startsWith(`${name}.`)) await rm(path.join(dir, left), { force: true });
@@ -143,7 +122,7 @@ export async function fetchVideo({ url, start, end, sources, outDir, downloader 
     throw new Error('The downloaded video could not be prepared, so it was not kept. Try again.');
   });
   const made = await probe(file);
-  return { name: `${name}.mp4`, file, seconds: made.duration, early, source, title: video.title };
+  return { name: `${name}.mp4`, file, seconds: made.duration, early, source, title: video.title, slow: how?.slow ?? null };
 }
 
 /**
@@ -236,6 +215,57 @@ export async function removeHiddenLeadIn(file) {
   return Math.max(0, hidden);
 }
 
+// At most 1080p, as an MP4 the rest of the tool reads.
+const FORMAT = 'bv*[height<=1080]+ba/b[height<=1080]/b';
+
+/**
+ * Fetch a range the fast way: the downloader only says where the streams are,
+ * and ffmpeg cuts the range out of them, reading through the relay. The
+ * command is the one the downloader itself gives ffmpeg (`-ss` and `-t`
+ * before each `-i`, picture and sound copied), so the file is the same:
+ * on 2026-11-21 every frame of a 2-minute part matched the downloader's own
+ * file, in 3.2 s instead of 71 s.
+ *
+ * @param {{ call: (args: string[], options?: object) => Promise<{ stdout: string }>, url: string, start: number, end: number, whole?: boolean, file: string }} job
+ */
+export async function relayDownload({ call, url, start, end, whole = false, file }) {
+  const { stdout } = await call(['--skip-download', '--dump-single-json', '-f', FORMAT, '--', url], { timeout: 60_000 });
+  const data = JSON.parse(stdout);
+  const formats = data.requested_formats ?? [data];
+  const streams = formats.map((format) => format.url);
+  if (streams.length < 1 || streams.length > 2) throw new Error('Unexpected streams.');
+  // The same headers the downloader would give ffmpeg with these addresses.
+  const relay = await startRangeRelay(streams, { headers: formats[0].http_headers ?? data.http_headers ?? {} });
+  const partial = `${file}.part`;
+  try {
+    // A whole video is read from start to end; a part is cut with -ss and -t before each -i.
+    const inputs = relay.urls.flatMap((address) => (whole ? ['-i', address] : ['-ss', String(start), '-t', String(end - start), '-i', address]));
+    const maps = streams.length === 2 ? ['-map', '0:v:0', '-map', '1:a:0'] : ['-map', '0:v:0', '-map', '0:a:0?'];
+    await run('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', ...inputs, ...maps, '-c', 'copy', '-f', 'mp4', partial], { timeout: (whole ? 90 : 30) * 60 * 1000 });
+    await rename(partial, file);
+  } catch (error) {
+    await rm(partial, { force: true });
+    throw error;
+  } finally {
+    await relay.close();
+  }
+}
+
+/**
+ * Why the fast way failed, in one short line that is safe to show: the
+ * stream addresses carry the owner's IP address, so every address is taken out.
+ *
+ * @param {unknown} error
+ * @returns {string}
+ */
+export function fastFailure(error) {
+  const text = String(/** @type {Error} */ (error)?.message ?? error)
+    .replace(/https?:\/\/\S+/g, '<address>')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (text || 'no reason given').slice(0, 300);
+}
+
 /**
  * The real downloader: yt-dlp, installed into the project's .venv by
  * `npm run setup`.
@@ -295,18 +325,37 @@ export function ytDlp() {
         viewers: data.concurrent_view_count, started: data.release_timestamp,
       };
     },
-    async download({ url, start, end, dir, name }) {
+    async download({ url, start, end, whole = false, dir, name, onStep = () => {} }) {
+      const failed = () => new Error('The download failed. Try again; if it keeps failing, the downloader may need updating with "npm run setup".');
+      // The fast way first: ffmpeg reads the streams through the relay, which asks YouTube for
+      // fixed slices (see rangeRelay.js). It is tried twice, with fresh addresses the second
+      // time. If both fail for any reason other than a stop, the downloader's own way is used,
+      // which is slow but needs nothing from us, and the reason is kept so the owner sees it.
+      let reason = '';
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          await relayDownload({ call, url, start, end, whole, file: path.join(dir, `${name}.mp4`) });
+          return {};
+        } catch (error) {
+          if (isStopped()) throw error;
+          reason = fastFailure(error);
+        }
+      }
+      console.warn(`The fast download did not work (${reason}); using the slower way.`);
+      onStep('fetching-slow');
+      // A whole video goes through the downloader's own downloader, which asks for slices itself;
+      // only a part has to be handed to ffmpeg, which is the slow way.
       await call([
-        '--download-sections', `*${start}-${end}`,
-        // At most 1080p, as an MP4 the rest of the tool reads.
-        '-f', 'bv*[height<=1080]+ba/b[height<=1080]/b',
+        ...(whole ? [] : ['--download-sections', `*${start}-${end}`]),
+        '-f', FORMAT,
         '--merge-output-format', 'mp4',
         '-P', dir,
         '-o', `${name}.%(ext)s`,
         '--', url,
-      ], { timeout: 30 * 60 * 1000 }).catch(() => {
-        throw new Error('The download failed. Try again; if it keeps failing, the downloader may need updating with "npm run setup".');
+      ], { timeout: (whole ? 90 : 30) * 60 * 1000 }).catch(() => {
+        throw failed();
       });
+      return { slow: reason };
     },
   };
 }

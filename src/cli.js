@@ -128,20 +128,28 @@ program
 
 program
   .command('fetch')
-  .description('Bring part of a YouTube video into the videos folder. Only from a channel marked as agreed in the sources list')
+  .description('Bring part of a YouTube video, or a whole one up to 3 hours, into the videos folder. Only from a channel marked as agreed in the sources list')
   .argument('<link>', 'link to one YouTube video')
-  .requiredOption('--start <time>', 'start of the part: seconds, mm:ss or hh:mm:ss', timeOption)
-  .requiredOption('--end <time>', 'end of the part, same formats', timeOption)
+  .option('--start <time>', 'start of the part: seconds, mm:ss or hh:mm:ss', timeOption)
+  .option('--end <time>', 'end of the part, same formats', timeOption)
+  .option('--whole', 'the whole video instead of a part, up to 3 hours')
   .option('--out <dir>', 'folder the video is saved in', './in')
   .option('--data <dir>', 'folder that holds sources.json', './data')
   .action(async (link, options) => {
+    if (options.whole && (options.start !== undefined || options.end !== undefined)) {
+      throw new Error('Give either --whole or --start and --end, not both.');
+    }
+    if (!options.whole && (options.start === undefined || options.end === undefined)) {
+      throw new Error('Give --start and --end for a part, or --whole for the whole video.');
+    }
     const fetched = await fetchVideo({
-      url: link, start: options.start, end: options.end, outDir: options.out,
+      url: link, start: options.start, end: options.end, whole: Boolean(options.whole), outDir: options.out,
       sources: await readSources(path.resolve(options.data)),
-      onStep: (step) => console.log({ looking: 'Looking the video up...', fetching: 'Fetching...', tidying: 'Preparing the video...' }[step]),
+      onStep: (step) => console.log({ looking: 'Looking the video up...', fetching: 'Fetching...', 'fetching-slow': 'The fast way did not work; fetching the slower way...', tidying: 'Preparing the video...' }[step]),
     });
     console.log(`Wrote ${fetched.file}`);
     console.log(`${fetched.seconds.toFixed(2)} s from ${fetched.source.name}: ${fetched.title}`);
+    if (fetched.slow) console.log(`It came the slow way, because the fast way did not work: ${fetched.slow}`);
     if (fetched.early > 0.05) console.log(`It starts ${fetched.early.toFixed(1)} s before the time you asked, where the video could be cut without losing quality.`);
   });
 

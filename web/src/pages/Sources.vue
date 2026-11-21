@@ -1,13 +1,13 @@
 <script setup>
-// The channels whose videos may be brought in, and the form that fetches
-// part of a video from one of them. A channel is added here only once it
-// has agreed, so being in the list is what allows fetching from it.
+// The channels whose videos may be brought in. A channel is added here only
+// once it has agreed, so being in the list is what allows fetching from it
+// (on the Download page).
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { api } from '../api.js';
 import ClubPicker from '../components/ClubPicker.vue';
 import Icon from '../components/Icon.vue';
 import TrashButton from '../components/TrashButton.vue';
-import { describe, isActive, jobs, track } from '../jobs.js';
+import { isActive, jobs, track } from '../jobs.js';
 import { checkLive, live, liveCount } from '../live.js';
 
 const sources = ref([]);
@@ -111,10 +111,6 @@ const installed = ref(true);
 const loaded = ref(false);
 const error = ref('');
 const note = ref('');
-const link = ref('');
-const start = ref('');
-const end = ref('');
-const fetchError = ref('');
 
 // What the list looked like when it was last saved or read, to tell when it has changes.
 const savedText = ref('[]');
@@ -122,7 +118,6 @@ const unsaved = computed(() => JSON.stringify(sources.value) !== savedText.value
 
 // Only what is saved counts: a channel typed in allows nothing until the list is saved.
 const allowed = computed(() => JSON.parse(savedText.value).filter((source) => source.status === 'agreed'));
-const fetching = computed(() => jobs.list.find((job) => job.kind === 'fetch' && isActive(job)));
 
 function show(answer) {
   pictures.value = answer.pictures ?? {};
@@ -212,15 +207,6 @@ async function sync(source) {
   syncingId.value = '';
 }
 
-async function fetchPart() {
-  fetchError.value = '';
-  try {
-    await track(await api.fetchVideo({ url: link.value, start: start.value, end: end.value }));
-    link.value = '';
-  } catch (e) {
-    fetchError.value = e.message;
-  }
-}
 </script>
 
 <template>
@@ -308,26 +294,6 @@ async function fetchPart() {
       </div>
     </section>
 
-    <section class="panel">
-      <h2><Icon name="download" /> Fetch part of a video</h2>
-      <p class="hint first">
-        Brings a part of a YouTube video into your videos, from a channel in the list above. Give the part you want,
-        up to 20 minutes; the whole video is not downloaded. The picture is kept exactly as YouTube sends it, so the
-        part starts up to a few seconds before the time you give. Set the exact start when you cut.
-      </p>
-      <p v-if="!installed" class="notice">The downloader is not installed yet. Run <code>npm run setup</code> in the project folder, then restart the dashboard.</p>
-      <p v-else-if="loaded && allowed.length === 0" class="notice">Add at least one channel and save the list first.</p>
-      <div class="row">
-        <div class="wide"><label for="link">Link to the video</label><input id="link" v-model="link" type="text" placeholder="https://www.youtube.com/watch?v=..." /></div>
-        <div class="narrow"><label for="fetch-start">From</label><input id="fetch-start" v-model="start" type="text" placeholder="1:02:00" class="numbers" /></div>
-        <div class="narrow"><label for="fetch-end">To</label><input id="fetch-end" v-model="end" type="text" placeholder="1:04:30" class="numbers" /></div>
-        <button class="fixed primary" :disabled="!link || !start || !end || Boolean(fetching) || !installed || allowed.length === 0" @click="fetchPart">
-          <Icon name="download" /> Fetch
-        </button>
-      </div>
-      <p v-if="fetching" class="running" role="status"><span class="spinner" aria-hidden="true" /> {{ describe(fetching) }}</p>
-      <p v-if="fetchError" class="error" role="alert">{{ fetchError }}</p>
-    </section>
   </div>
 </template>
 
@@ -355,7 +321,7 @@ a.go:hover { color: var(--accent); background: var(--soft); }
 /* The clubs a streamer supports: up to three small logos. */
 .supports { width: 84px; }
 .supports .label { display: block; margin-bottom: 4px; font-size: 13px; font-weight: 550; color: var(--muted); }
-/* Who is live: the line above the list, and the mark on a row. A part can be fetched only after a stream has ended. */
+/* Who is live: the line above the list, and the mark on a row. A part can be downloaded only after a stream has ended. */
 .live-line { margin: 0 0 10px; gap: 8px; }
 .live-line .running { display: inline-flex; align-items: center; gap: 8px; }
 .air { width: 44px; text-align: center; line-height: 36px; }
@@ -367,8 +333,6 @@ a.go:hover { color: var(--accent); background: var(--soft); }
 .subs .count { display: block; line-height: 36px; font-weight: 650; }
 .name { flex: 1 1 180px; }
 .wide { flex: 3 1 260px; }
-.narrow { flex: 0 1 170px; }
 .actions { margin-top: 14px; }
 .error { margin-top: 10px; }
-.running { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; }
 </style>

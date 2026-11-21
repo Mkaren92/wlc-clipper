@@ -183,14 +183,14 @@ This takes two to three minutes and uses every processor core.
 
 ```
  Test Files  16 passed (16)
-      Tests  392 passed (392)
+      Tests  407 passed (407)
 ```
 
 The numbers grow as the project grows. What matters is that everything passed. If a test fails, see [Troubleshooting](#troubleshooting) before going on.
 
 ## Step 7: Install captions and fetching
 
-This step is needed for captions (speech turned into text) and for fetching parts of YouTube videos. Without it everything else still works: clips are made without captions, and fetching is switched off.
+This step is needed for captions (speech turned into text) and for fetching YouTube videos (a part, or a whole one up to 3 hours). Without it everything else still works: clips are made without captions, and fetching is switched off.
 
 ```bash
 npm run setup
@@ -390,7 +390,7 @@ npm run setup
 | The page says "The dashboard pages are not built yet" | Stop it, run `npm run build`, start it again. |
 | The page shows an error "The dashboard only answers its own page on this machine" | You opened it by another address. Use `http://localhost:4517`. |
 | A clip is made without captions and a warning mentions the transcriber | Step 7 was skipped or failed. Run `npm run setup`. |
-| Fetching from YouTube fails | Run `npm run setup` to update the downloader. Check the channel is in your Sources list; only those can be fetched from. |
+| Fetching from YouTube fails | Run `npm run setup` to update the downloader. Check the channel is in your Sources list; only those can be fetched from. If a download on the Download page says it came "the slow way", it shows why. |
 | A video does not play in the dashboard but cuts fine | The browser cannot play that file type. The start and end can still be typed, and the clip is made. |
 | Everything is very slow | Check the project is in `~/wlc-clipper` and not under `/mnt/c/`. Making video uses every processor core for about as long as the video plays. |
 | The disk fills up | The big folders are `in/`, `out/`, `parts/` and `data/compilations/`. Delete videos you no longer need from the dashboard. |

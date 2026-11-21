@@ -11,7 +11,7 @@ Optionally, an AI service can suggest which moments to clip and fix caption mist
 
 The dashboard also has pages for building a longer video out of several pieces: [match cards and compilations](#match-cards-and-compilations), and [Combine](#combine-two-videos), which puts two videos side by side. A [My data](#my-data-moving-to-another-computer) page carries your channels, clubs, logos, sounds and briefs to another computer.
 
-It works on files on your disk and it does not post anything. The one way video comes in from outside is [`fetch`](#sources-and-fetching), which takes part of a YouTube video from a channel in your sources list, where you add only channels that have agreed. The Sources page also looks up those channels' profile pictures and subscriber counts, and shows which of them are live.
+It works on files on your disk and it does not post anything. The one way video comes in from outside is [`fetch`](#sources-and-fetching), which takes part of a YouTube video, or a whole one up to 3 hours, from a channel in your sources list, where you add only channels that have agreed. The Sources page also looks up those channels' profile pictures and subscriber counts, and shows which of them are live.
 
 ## Requirements
 
@@ -67,6 +67,7 @@ Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 - **Deleting a video:** each video in the left column has a trash icon. It asks once, then deletes the file from `in/`. Clips already cut from it stay, but can no longer be rendered again, because rendering reads the source. A compilation that uses the video will not build until the item is taken out. It is not possible while a clip is being made.
 - **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
 - **Clip:** watch the result, download it, see each brief rule as passed or failed, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
+- **Download:** paste a YouTube link from one of your channels and bring a part of the video, or the whole of it, into `in/` (see [Sources and fetching](#sources-and-fetching)).
 - **My data:** one file to download with everything you have made, and the place to load such a file on another computer (see [My data](#my-data-moving-to-another-computer)).
 - **Unsaved changes:** the card, combine, compilation and sources pages show "Changes not saved" until you save, and their Save button stays in view.
 
@@ -203,20 +204,22 @@ Under **"Supports"** on a channel's row you can mark the club the streamer suppo
 
 To add a channel quickly, press "Add a channel", paste only its address, and press the round arrows on its row. The channel's name, picture and subscriber count are filled in from YouTube and the channel is saved to the list. A name you typed yourself is kept, so on a channel you already have the button only refreshes the picture and the count. Change the name afterwards if you want another spelling, and press "Save the list".
 
-"Fetch part of a video" on the same page brings a part of a YouTube video into `in/`:
+The **Download** page (its own button in the left column) brings a part of a YouTube video, or the whole of one, into `in/`. Paste the link, give "From" and "To" or tick "Whole video", and press Download. The page checks the link and the length while you type, says so if the link is a stream one of your channels is broadcasting right now, and shows the progress with a Stop button. When it is done it names the file and offers "Open it to cut". Under "You can download from" it lists the channels in your list. The rules:
 
 - **Only from a channel in your list.** The channel is read from the video itself, so a link to anyone else's video is refused.
-- **A part, not the whole video.** You give a start and an end, up to 20 minutes. Long watchalongs are several gigabytes; a part is small.
+- **A part of up to 20 minutes, or the whole video of up to 3 hours.** For a part you give a start and an end. For a whole video the length is read from YouTube, and a video over 3 hours, or one whose length YouTube does not give, is refused before anything is downloaded. A whole video is large (a 19½-minute one was 280 MB; a three-hour watchalong may be 2 to 3 GB), so delete it once it is clipped. "Suggest moments" works on videos up to 60 minutes.
+- **Quick.** 20 minutes came down in about 16 seconds on a 100 Mbit/s line, and a whole video of about an hour and a half in about 20 seconds. The tool asks YouTube for the video in small slices, a few at a time, which YouTube sends at full speed; asked for in one go, YouTube sends it at little more than playback speed. If that ever stops working, the tool falls back to the slow way by itself, and says so: the progress line reads "the slow way", and the page shows why when it is done.
 - **Up to 1080p, with the picture exactly as YouTube sends it.** A video can only be cut without loss at certain frames, so the part starts up to a few seconds before the time you gave; the tool says by how much. Set the exact start when you cut.
 - **YouTube links to one video only.** Playlists and channel links are refused.
 - **Not from a stream that is still live.** A live stream can only be recorded as it happens; a part cannot be cut out of it. Wait until the stream has ended and plays as an ordinary video. A stream that has only just ended is refused too, until YouTube has finished preparing it.
 
-The file is named after the channel, the video and the range, such as `channel-name_<video id>_1h02m00s-1h05m00s.mp4`, and then works like any other video in `in/`. When you add it to a compilation, its credit is filled in with the channel's name, and `description.txt` lists that channel's link next to the credit.
+The file is named after the channel, the video and the range, such as `channel-name_<video id>_1h02m00s-1h05m00s.mp4`; a whole video is named from 0 to its length, such as `channel-name_<video id>_0m00s-1h31m10s.mp4`. It then works like any other video in `in/`. When you add it to a compilation, its credit is filled in with the channel's name, and `description.txt` lists that channel's link next to the credit.
 
 From the command line:
 
 ```bash
 node src/cli.js fetch "https://www.youtube.com/watch?v=..." --start 1:02:00 --end 1:05:00
+node src/cli.js fetch "https://www.youtube.com/watch?v=..." --whole
 ```
 
 It needs the downloader program `yt-dlp`, which `npm run setup` installs into `.venv` next to the transcriber. YouTube changes often; when fetching stops working, run `npm run setup` again to update it.
@@ -327,7 +330,7 @@ It prints each moment with a `cut` command for its range. Videos longer than 60 
 | `check <clip-folder>` | Checks an existing clip and its `post.txt` against a brief |
 | `suggest <file>` | Asks an AI service for moments worth clipping (see [AI help](#ai-help)) |
 | `extract <file>` | Saves a part of a video as it is, at the original size (see [Plain parts](#plain-parts)) |
-| `fetch <link>` | Brings part of a YouTube video into `in/`, from a channel in your sources list (see [Sources and fetching](#sources-and-fetching)) |
+| `fetch <link>` | Brings part of a YouTube video (`--start`, `--end`), or a whole one up to 3 hours (`--whole`), into `in/`, from a channel in your sources list (see [Sources and fetching](#sources-and-fetching)) |
 
 Every command has built-in help: `node src/cli.js cut --help`.
 
@@ -502,7 +505,7 @@ To work on the pages with live reload, run the dashboard in one terminal and `np
 
 ## What it does not do
 
-- Download whole videos, or anything from a channel that is not in your sources list
+- Download a video over 3 hours, or anything from a channel that is not in your sources list
 - Upload or post anywhere
 - Cut a clip on its own: the AI only suggests moments, and you choose
 - Follow a moving speaker

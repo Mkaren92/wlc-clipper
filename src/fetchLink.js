@@ -1,0 +1,68 @@
+// The checks on what is asked of `fetch`: which video, and how much of it.
+// Kept free of Node imports so the Download page can run the same checks
+// as the engine before anything is sent (src/fetch.js uses them too).
+import { formatClock } from './time.js';
+
+// Long enough for any goal reaction, short enough that a slip cannot fill the disk.
+export const MAX_FETCH_SECONDS = 20 * 60;
+// A whole video, when the owner asks for one: a watchalong is two to three hours.
+// The cap catches a link to a stream that ran all day.
+export const MAX_WHOLE_SECONDS = 3 * 3600;
+
+/**
+ * Check a link and return the plain address of the one video it points to.
+ * A playlist or channel link is refused.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function videoUrl(text) {
+  const problem = () => new Error('Give a link to one YouTube video, such as https://www.youtube.com/watch?v=...');
+  let url;
+  try {
+    url = new URL(String(text).trim());
+  } catch {
+    throw problem();
+  }
+  if (url.protocol !== 'https:') throw problem();
+  let id = null;
+  if (url.hostname === 'youtu.be') id = url.pathname.slice(1);
+  else if (['www.youtube.com', 'youtube.com', 'm.youtube.com'].includes(url.hostname)) {
+    id = url.pathname === '/watch' ? url.searchParams.get('v') : /^\/(?:live|shorts)\/([^/]+)\/?$/.exec(url.pathname)?.[1] ?? null;
+  }
+  if (!id || !/^[\w-]{11}$/.test(id)) throw problem();
+  return `https://www.youtube.com/watch?v=${id}`;
+}
+
+/**
+ * Check that a video can be fetched whole, from the length YouTube gives.
+ *
+ * @param {number} duration   seconds
+ * @returns {number} the length in seconds
+ */
+export function checkWholeLength(duration) {
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error('YouTube did not say how long this video is, so it cannot be fetched whole. Give a start and an end instead.');
+  }
+  if (duration > MAX_WHOLE_SECONDS) {
+    throw new Error(`A whole video can be at most ${MAX_WHOLE_SECONDS / 3600} hours long; this one is ${formatClock(duration)}. Give a start and an end instead.`);
+  }
+  return duration;
+}
+
+/**
+ * Check the range of a fetch, in seconds. Throws the message the owner sees.
+ *
+ * @param {number} start
+ * @param {number} end
+ * @returns {number} the length in seconds
+ */
+export function checkFetchRange(start, end) {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
+    throw new Error('Give the start and the end of the part you want; the end must be after the start.');
+  }
+  if (end - start > MAX_FETCH_SECONDS) {
+    throw new Error(`A fetch can be at most ${MAX_FETCH_SECONDS / 60} minutes long; this range is ${formatClock(end - start)}.`);
+  }
+  return end - start;
+}

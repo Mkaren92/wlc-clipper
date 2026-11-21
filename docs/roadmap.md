@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated 2026-11-20. Update this file when something here changes.
+Last updated 2026-11-21. Update this file when something here changes.
 
 ## Built
 
@@ -25,11 +25,13 @@ Version 1 of the spec is complete: all three "evenings".
 - My data: one file to download with what the owner chose to carry (channels with clubs, pictures and counts, leagues and clubs with logos, sounds, briefs), and a two-step load on another machine that never deletes
 - Who is live: channels in the list that are broadcasting are marked LIVE, listed first and counted in the side column
 - A Stop button for anything waiting or running, in "Activity"
-- A sources list and `fetch`: part of a YouTube video, up to 20 minutes, from a channel in the list (the owner adds a channel only once it has agreed)
+- A sources list and `fetch`: part of a YouTube video, up to 20 minutes, or a whole one up to 3 hours, from a channel in the list (the owner adds a channel only once it has agreed)
+- Fast fetching: 20 minutes in about 16 s instead of 11 minutes, and a whole video of about 1.5 hours in about 20 s, through a relay that asks YouTube for slices (`src/rangeRelay.js`)
+- A Download page for `fetch`: paste a link and a range or tick "Whole video", with the checks shown while typing, progress, Stop, "Open it to cut", and the reason shown when a fetch had to go the slow way (the form used to be on the Sources page)
 - Channel pictures: the profile picture of each channel in the list, fetched on request and drawn beside its name where it is credited in a compilation; a sync button on a row fills a new channel's name and picture from its address, and each row shows the channel's subscriber count from the last lookup
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-392 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, and none call the real AI service.
+407 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube.
 
 ## Waiting on the owner
 
@@ -47,7 +49,8 @@ Version 1 of the spec is complete: all three "evenings".
 - The LIVE mark on one of the owner's own channels: none was live when it was built.
 - "Load my data" on a second real computer. The round trip was run between two scratch dashboards on this machine, with a copy of the owner's real lists; loading on Windows inside WSL was not tried. The browser round trip was run before the contents were narrowed to what the owner chose; after that the engine and server tests were run again, and the download was checked on the real dashboard.
 - The clubs set on 45 of the owner's channels on 2026-11-20. They were worked out from each channel's own description, tags and recent titles after the owner's own marks were lost; five were told to the owner as less certain, ten channels were left without a club, and the owner has not yet confirmed them.
-- The Stop button on a real fetch started from the page. It was pressed in a browser on two cuts, and tried by script on the real downloader recording a live stream.
+- Stop pressed on a fast fetch from the page. A stop was tried through the engine (`fetchVideo`); the owner has fetched from the page (a whole video of about 1.5 hours in about 20 s, 2026-11-21) but has not pressed Stop on one. The owner's first dashboard fetch with it fell back to the slow way for a reason that was not recorded; retries and a visible reason were added after it, and have not yet been seen on a real dashboard fetch.
+- The Download page in a browser, beyond the owner's own use. The owner has downloaded from it (11 minutes in about 13 s, a whole video of about 1.5 hours in about 20 s), but Claude has not driven it in a browser or read its console, and its "slow way" notice has not been seen.
 - The sync button on the owner's real list. It was run on a test copy with one channel. "Update pictures and subscribers" was pressed on the real list when it had fourteen channels. The downloader also warned that it will stop supporting Python 3.10, which this machine has.
 - Which player showed the fetched part out of step. The file is now the same for every player, but the owner has not yet confirmed it plays in step.
 - How the second set of built-in card sounds sounds. The owner rejected the first set on 2026-11-19. The second was measured and the voice checked with the speech recogniser, but not listened to. A real "Goool" needs a recording from the owner, as `sounds/goal.mp3`.
@@ -73,6 +76,7 @@ Nothing is decided. Ideas the owner has been offered:
 - A credits card at the end of a compilation, listing each streamer with their picture
 - A faster encoder setting for compilations (`superfast`: about two thirds of the time, the same quality, twice the file size)
 - A time limit on a fetch, as a second safety beside the Stop button and the refusal of live streams
+- Ending the dashboard's running jobs when it is stopped with Ctrl+C. On 2026-11-21 a restart during a slow fetch left its ffmpeg running, holding a deleted 276 MB file, until it was ended by hand
 - A notice when a channel in the list goes live
 - Using the club a streamer supports elsewhere, such as choosing streamers by club when building a compilation for a match
 - Recording a live stream from now on for a set number of minutes, offered when the owner asked about fetching from a live stream

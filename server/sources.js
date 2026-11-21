@@ -16,7 +16,9 @@ const time = z.union([z.number().nonnegative(), z.string().min(1)]).transform((v
     return z.NEVER;
   }
 });
-const fetchRequest = z.strictObject({ url: z.string().min(1).max(300), start: time, end: time });
+// A part (start and end), or the whole video.
+const fetchRequest = z.strictObject({ url: z.string().min(1).max(300), start: time.optional(), end: time.optional(), whole: z.boolean().optional() })
+  .refine((ask) => ask.whole === true || (ask.start !== undefined && ask.end !== undefined), { message: 'Give the start and the end of the part, or ask for the whole video.' });
 
 /**
  * @param {import('express').Express} app
@@ -130,11 +132,11 @@ export function addSourceRoutes(app, { dataDir, inDir, jobs, downloader = ytDlp(
   app.post('/api/fetch', async (req, res) => {
     const parsed = fetchRequest.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
-    const { url, start, end } = parsed.data;
+    const { url, start, end, whole = false } = parsed.data;
     const sources = await readSources(dataDir);
-    const job = jobs.add('fetch', `${formatClock(start)}–${formatClock(end)} of a video`, async (onStep) => {
-      const fetched = await fetchVideo({ url, start, end, sources, outDir: inDir, downloader, onStep });
-      return { name: fetched.name, seconds: fetched.seconds, early: fetched.early, source: fetched.source.name, title: fetched.title };
+    const job = jobs.add('fetch', whole ? 'the whole of a video' : `${formatClock(start)}–${formatClock(end)} of a video`, async (onStep) => {
+      const fetched = await fetchVideo({ url, start, end, whole, sources, outDir: inDir, downloader, onStep });
+      return { name: fetched.name, seconds: fetched.seconds, early: fetched.early, source: fetched.source.name, title: fetched.title, slow: fetched.slow };
     });
     res.status(202).json(job);
   });

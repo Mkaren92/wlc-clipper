@@ -5,7 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildDescription } from '../src/compilation/description.js';
-import { fetchVideo, leadInOf, removeHiddenLeadIn, videoUrl } from '../src/fetch.js';
+import { fastFailure, fetchVideo, leadInOf, removeHiddenLeadIn, videoUrl } from '../src/fetch.js';
+import * as fetchLink from '../src/fetchLink.js';
+import { checkStreamUrl, startRangeRelay } from '../src/rangeRelay.js';
 import { run } from '../src/run.js';
 import { channelAddress, checkPictureUrl, creditPictures, fetchPicture, fetchPictures, listPictures, listSubscribers, PICTURE_PIXELS, pictureFile, removeOtherPictures, syncSource } from '../src/pictures.js';
 import { checkLive } from '../src/live.js';
@@ -42,6 +44,211 @@ describe('videoUrl', () => {
   ])('refuses %j', (link) => {
     expect(() => videoUrl(link)).toThrow(/link to one YouTube video/);
   });
+});
+
+// The Download page runs these same checks in the browser, so they must stay free of Node imports.
+describe('fetchLink', () => {
+  it('is what fetch uses', () => {
+    expect(fetchLink.videoUrl).toBe(videoUrl);
+  });
+
+  it('checks a range the way fetch does', () => {
+    expect(fetchLink.checkFetchRange(60, 90)).toBe(30);
+    expect(fetchLink.checkFetchRange(0, fetchLink.MAX_FETCH_SECONDS)).toBe(1200);
+    expect(() => fetchLink.checkFetchRange(0, 1201)).toThrow(/at most 20 minutes/);
+    expect(() => fetchLink.checkFetchRange(90, 60)).toThrow(/end must be after the start/);
+    expect(() => fetchLink.checkFetchRange(-1, 5)).toThrow(/end must be after the start/);
+    expect(() => fetchLink.checkFetchRange(Number.NaN, 5)).toThrow(/end must be after the start/);
+  });
+
+  it('imports nothing from Node', async () => {
+    const text = await readFile(new URL('../src/fetchLink.js', import.meta.url), 'utf8');
+    const imports = text.split(/\r?\n/).filter((one) => one.startsWith('import '));
+    expect(imports).toEqual(["import { formatClock } from './time.js';"]);
+  });
+});
+
+// YouTube sends a fixed slice at full speed and an open-ended request slowly, so a fetch reads
+// through a relay that asks for slices. A stand-in for YouTube serves bytes from memory here.
+describe('range relay', () => {
+  const STREAM = 'https://rr1---sn-abc.googlevideo.com/videoplayback?id=1';
+  /** A stand-in for YouTube: answers a Range request from `bytes`, and records what was asked. */
+  function youtube(bytes, { redirectTo } = {}) {
+    const asked = [];
+    const fetchImpl = async (url, options) => {
+      asked.push({ url, range: options.headers.Range, redirect: options.redirect });
+      if (redirectTo && url === STREAM) return new Response(null, { status: 302, headers: { location: redirectTo } });
+      const [, from, to] = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range).map(Number);
+      // As YouTube does: nothing at or past the end is "not satisfiable".
+      if (from >= bytes.length) return new Response(null, { status: 416, headers: { 'content-range': `bytes */${bytes.length}` } });
+      const body = bytes.subarray(from, Math.min(to, bytes.length - 1) + 1);
+      return new Response(body, { status: 206, headers: { 'content-range': `bytes ${from}-${from + body.length - 1}/${bytes.length}` } });
+    };
+    return { fetchImpl, asked };
+  }
+  const bytesOf = (n) => Buffer.from(Array.from({ length: n }, (_, i) => (i * 7) % 256));
+
+  it('accepts only YouTube stream addresses', () => {
+    expect(checkStreamUrl(STREAM)).toBe(STREAM);
+    for (const bad of ['http://rr1---sn-abc.googlevideo.com/videoplayback', 'https://googlevideo.com.evil.example/x', 'https://example.com/x', 'file:///etc/passwd', 'not a link']) {
+      expect(() => checkStreamUrl(bad)).toThrow(/not a YouTube stream/);
+    }
+  });
+
+  it('passes on the bytes asked for, asking YouTube only for fixed slices', async () => {
+    const bytes = bytesOf(1000);
+    const { fetchImpl, asked } = youtube(bytes);
+    const relay = await startRangeRelay([STREAM], { fetchImpl, slice: 64, ahead: 3 });
+    try {
+      expect(relay.urls[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/0$/);
+      const open = await fetch(relay.urls[0], { headers: { Range: 'bytes=100-' } });
+      expect(open.status).toBe(206);
+      expect(open.headers.get('content-range')).toBe('bytes 100-999/1000');
+      expect(Buffer.from(await open.arrayBuffer())).toEqual(bytes.subarray(100));
+      const bounded = await fetch(relay.urls[0], { headers: { Range: 'bytes=10-19' } });
+      expect(Buffer.from(await bounded.arrayBuffer())).toEqual(bytes.subarray(10, 20));
+    } finally {
+      await relay.close();
+    }
+    // Every request to YouTube had an end, and none was longer than a slice.
+    expect(asked.length).toBeGreaterThan(10);
+    for (const { range, redirect } of asked) {
+      const [, from, to] = /^bytes=(\d+)-(\d+)$/.exec(range).map(Number);
+      expect(to - from + 1).toBeLessThanOrEqual(64);
+      expect(redirect).toBe('manual');
+    }
+  });
+
+  it('asks again for a slice YouTube refused once, and passes on only the downloader\'s own headers', async () => {
+    const bytes = bytesOf(300);
+    const stand = youtube(bytes);
+    let refused = 0;
+    const fetchImpl = (url, options) => {
+      // The second request is refused once, as YouTube sometimes does.
+      if (stand.asked.length === 1 && refused === 0) {
+        refused += 1;
+        stand.asked.push({ url, range: options.headers.Range, redirect: options.redirect, headers: options.headers });
+        return Promise.resolve(new Response(null, { status: 403 }));
+      }
+      return stand.fetchImpl(url, options).then((response) => {
+        stand.asked.at(-1).headers = options.headers;
+        return response;
+      });
+    };
+    const headers = { 'User-Agent': 'Mozilla/5.0 test', Accept: 'text/html', Cookie: 'secret=1', Authorization: 'Bearer x' };
+    const relay = await startRangeRelay([STREAM], { fetchImpl, slice: 100, ahead: 2, headers, retryDelay: 1 });
+    try {
+      expect(Buffer.from(await (await fetch(relay.urls[0])).arrayBuffer())).toEqual(bytes);
+    } finally {
+      await relay.close();
+    }
+    expect(refused).toBe(1);
+    for (const { headers: sent } of stand.asked) {
+      expect(sent['User-Agent']).toBe('Mozilla/5.0 test');
+      expect(sent.Accept).toBe('text/html');
+      expect(sent.Cookie).toBeUndefined();
+      expect(sent.Authorization).toBeUndefined();
+    }
+  });
+
+  it('gives up on a slice refused every time, so the fetch can fall back', async () => {
+    const relay = await startRangeRelay([STREAM], { fetchImpl: async () => new Response(null, { status: 403 }), retryDelay: 1 });
+    try {
+      await expect(fetch(relay.urls[0]).then((res) => res.arrayBuffer())).rejects.toThrow();
+    } finally {
+      await relay.close();
+    }
+  });
+
+  it('never shows a stream address in the reason the fast way failed', () => {
+    const error = new Error('ffmpeg exited with code 1.\nhttps://rr2---sn-x.googlevideo.com/videoplayback?ip=203.0.113.7&x=1: Input/output error\nhttp://127.0.0.1:41000/0: Server returned 403');
+    const reason = fastFailure(error);
+    expect(reason).not.toMatch(/googlevideo|203\.0\.113|127\.0\.0\.1/);
+    expect(reason).toContain('Input/output error');
+    expect(reason.length).toBeLessThanOrEqual(300);
+  });
+
+  it('serves only the streams it was started with', async () => {
+    const relay = await startRangeRelay([STREAM], youtube(bytesOf(10)));
+    try {
+      const base = relay.urls[0].slice(0, -1);
+      expect((await fetch(`${base}1`)).status).toBe(404);
+      expect((await fetch(`${base}0/../x`)).status).toBe(404);
+      expect((await fetch(relay.urls[0], { method: 'POST' })).status).toBe(404);
+    } finally {
+      await relay.close();
+    }
+  });
+
+  it('follows a redirect only to another YouTube stream', async () => {
+    const bad = await startRangeRelay([STREAM], youtube(bytesOf(10), { redirectTo: 'https://example.com/steal' }));
+    try {
+      await expect(fetch(bad.urls[0]).then((res) => res.arrayBuffer())).rejects.toThrow();
+    } finally {
+      await bad.close();
+    }
+    const good = await startRangeRelay([STREAM], youtube(bytesOf(10), { redirectTo: 'https://rr2---sn-abc.googlevideo.com/videoplayback?id=1' }));
+    try {
+      expect(Buffer.from(await (await fetch(good.urls[0])).arrayBuffer())).toEqual(bytesOf(10));
+    } finally {
+      await good.close();
+    }
+  });
+
+  it('gives ffmpeg the same part as reading the file itself', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'clipper-relay-'));
+    try {
+      const source = path.join(dir, 'source.mp4');
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=320x180:r=30', '-t', '12',
+        '-c:v', 'libx264', '-g', '30', '-pix_fmt', 'yuv420p', source]);
+      const relay = await startRangeRelay([STREAM], { fetchImpl: youtube(await readFile(source)).fetchImpl, slice: 4096, ahead: 4 });
+      const md5 = async (input) => (await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-ss', '4', '-t', '3', '-i', input, '-map', '0:v:0', '-c', 'copy', '-f', 'framemd5', '-'])).stdout;
+      try {
+        const direct = await md5(source);
+        expect(direct.split('\n').filter((line) => line && !line.startsWith('#')).length).toBeGreaterThan(60);
+        expect(await md5(relay.urls[0])).toBe(direct);
+      } finally {
+        await relay.close();
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  // On 2026-11-21 a fetch of a whole 19-minute video fell back to the slow way: ffmpeg reads
+  // a file to its end, and the relay must answer a request past the end as YouTube does.
+  it('lets ffmpeg read picture and sound to the very end, as when the range is the whole video', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'clipper-relay-end-'));
+    try {
+      const picture = path.join(dir, 'picture.mp4');
+      const sound = path.join(dir, 'sound.webm');
+      const quiet = ['-hide_banner', '-loglevel', 'error', '-y'];
+      await run('ffmpeg', [...quiet, '-f', 'lavfi', '-i', 'testsrc=s=320x180:r=30', '-t', '6', '-c:v', 'libx264', '-g', '30', '-pix_fmt', 'yuv420p', picture]);
+      await run('ffmpeg', [...quiet, '-f', 'lavfi', '-i', 'sine=f=440:r=48000', '-t', '6', '-c:a', 'libopus', sound]);
+      const youtubes = [youtube(await readFile(picture)), youtube(await readFile(sound))];
+      // One stand-in per stream, chosen by the address asked for.
+      const fetchImpl = (url, options) => youtubes[url.endsWith('id=2') ? 1 : 0].fetchImpl(url === `${STREAM}&id=2` ? STREAM : url, options);
+      const relay = await startRangeRelay([STREAM, `${STREAM}&id=2`], { fetchImpl, slice: 4096, ahead: 4 });
+      // As the fetch runs it: from 0, for longer than the file, picture and sound copied.
+      const cut = (pictureInput, soundInput, out) => run('ffmpeg', [...quiet, '-ss', '0', '-t', '8', '-i', pictureInput, '-ss', '0', '-t', '8', '-i', soundInput,
+        '-map', '0:v:0', '-map', '1:a:0', '-c', 'copy', '-f', 'mp4', out]);
+      try {
+        await cut(relay.urls[0], relay.urls[1], path.join(dir, 'relayed.mp4'));
+      } finally {
+        await relay.close();
+      }
+      await cut(picture, sound, path.join(dir, 'direct.mp4'));
+      const frames = async (file, stream) => (await run('ffmpeg', [...quiet, '-i', file, '-map', `0:${stream}`, '-c', 'copy', '-f', 'framemd5', '-'])).stdout
+        .split('\n').filter((line) => line && !line.startsWith('#')).map((line) => line.split(',').at(-1));
+      for (const stream of ['v', 'a']) {
+        const direct = await frames(path.join(dir, 'direct.mp4'), stream);
+        expect(direct.length).toBeGreaterThan(150);
+        expect(await frames(path.join(dir, 'relayed.mp4'), stream)).toEqual(direct);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe('sources', () => {
@@ -130,6 +337,21 @@ describe('fetchVideo', () => {
     const fetched = await ask({ downloader: downloader({ id: '../../somewhere-else' }), start: 60, end: 90 });
     expect(fetched.name).toBe('northstand_dQw4w9WgXcQ_1m00s-1m30s.mp4');
     expect(path.dirname(fetched.file)).toBe(dir);
+    expect(fetched.slow).toBeNull();
+    await rm(fetched.file);
+  }, 60_000);
+
+  it('says why a part came the slow way, and shows its progress as such', async () => {
+    const plain = downloader();
+    const steps = [];
+    const slow = { ...plain, download: async (job) => {
+      await plain.download(job);
+      job.onStep('fetching-slow');
+      return { slow: 'YouTube answered 403.' };
+    } };
+    const fetched = await ask({ downloader: slow, start: 90, end: 120, onStep: (step) => steps.push(step) });
+    expect(fetched.slow).toBe('YouTube answered 403.');
+    expect(steps).toEqual(['looking', 'fetching', 'fetching-slow', 'tidying']);
     await rm(fetched.file);
   }, 60_000);
 
@@ -176,6 +398,28 @@ describe('fetchVideo', () => {
     expect((await readdir(dir)).filter((name) => name.includes('10m00s'))).toEqual([]);
     expect(await readdir(dir)).toContain('northstand_other.mp4.part'); // only this fetch's own pieces are removed
     await rm(path.join(dir, 'northstand_other.mp4.part'));
+  });
+
+  // The owner asked on 2026-11-21 for whole videos as well, up to three hours.
+  it('fetches a whole video of up to 3 hours, named by its length, with no range asked', async () => {
+    calls.length = 0;
+    const fetched = await ask({ whole: true, start: undefined, end: undefined, downloader: downloader({ duration: 2 * 3600 + 31 * 60 + 10 }) });
+    expect(fetched.name).toBe('northstand_dQw4w9WgXcQ_0m00s-2h31m10s.mp4');
+    expect(calls.at(-1)).toMatchObject({ whole: true, start: 0, end: 9070 });
+    await rm(fetched.file);
+    // A part is still a part.
+    const part = await ask({ start: 60, end: 90 });
+    expect(calls.at(-1)).toMatchObject({ whole: false, start: 60, end: 90 });
+    await rm(part.file);
+  }, 60_000);
+
+  it('refuses a whole video over 3 hours, or of unknown length, before downloading', async () => {
+    calls.length = 0;
+    await expect(ask({ whole: true, downloader: downloader({ duration: 3 * 3600 + 1 }) })).rejects.toThrow(/at most 3 hours long; this one is 3:00:01/);
+    await expect(ask({ whole: true, downloader: downloader({ duration: 0 }) })).rejects.toThrow(/did not say how long/);
+    // Live streams are refused whole as well.
+    await expect(ask({ whole: true, downloader: downloader({ live: 'is_live', duration: 0 }) })).rejects.toThrow(/live right now/);
+    expect(calls).toEqual([]);
   });
 
   it('needs a range, of at most 20 minutes, inside the video', async () => {
