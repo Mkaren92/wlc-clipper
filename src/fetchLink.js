@@ -3,11 +3,13 @@
 // as the engine before anything is sent (src/fetch.js uses them too).
 import { formatClock } from './time.js';
 
-// Long enough for any goal reaction, short enough that a slip cannot fill the disk.
-export const MAX_FETCH_SECONDS = 20 * 60;
 // A whole video, when the owner asks for one: a watchalong is two to three hours.
 // The cap catches a link to a stream that ran all day.
 export const MAX_WHOLE_SECONDS = 3 * 3600;
+// A part was at most 20 minutes until 2026-11-21, when the owner asked for longer ranges;
+// it now has the whole video's cap, so a part of a long stream is never refused where the
+// same video whole would not be.
+export const MAX_FETCH_SECONDS = MAX_WHOLE_SECONDS;
 
 /**
  * Check a link and return the plain address of the one video it points to.
@@ -62,7 +64,7 @@ export function checkFetchRange(start, end) {
     throw new Error('Give the start and the end of the part you want; the end must be after the start.');
   }
   if (end - start > MAX_FETCH_SECONDS) {
-    throw new Error(`A fetch can be at most ${MAX_FETCH_SECONDS / 60} minutes long; this range is ${formatClock(end - start)}.`);
+    throw new Error(`A fetch can be at most ${MAX_FETCH_SECONDS / 3600} hours long; this range is ${formatClock(end - start)}.`);
   }
   return end - start;
 }

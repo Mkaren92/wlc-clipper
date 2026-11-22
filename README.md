@@ -61,13 +61,13 @@ npm run dashboard
 
 Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 
-- **Cut:** pick a video in the left column. It plays on the left and stays in view while you set the range, the layout, the text and the brief on the right. Drag the bright window over the video to place the crop (or the yellow box for the facecam layout). With the center layout, the "Show more of the picture" slider makes the crop wider, for a person who moves out of the narrow column. The bar at the bottom of the screen always shows what will be made, anything that is in the way, and "Cut the clip".
+- **Cut:** pick a video in the left column. It plays on the left and stays in view while you set the range, the layout, the text and the brief on the right. Drag the bright window over the video to place the crop (for the facecam layout, two boxes: the yellow one over the webcam, with any shape or 16:9, 4:3 or 1:1 under "Webcam shape", and the blue one over the content shown below it; each is moved and resized on its own). With the center layout, the "Show more of the picture" slider makes the crop wider, for a person who moves out of the narrow column. The bar at the bottom of the screen always shows what will be made, anything that is in the way, and "Cut the clip".
 - **Keys for the player:** Space plays and pauses, the left and right arrows move one second (a tenth with Shift), I sets the start, O sets the end, and P plays the range. They do nothing while you are typing in a box, and they go by the key's place on the keyboard, so they work on a keyboard set to another alphabet.
 - **Activity:** while a clip is being cut, rendered again, fetched, combined, or searched for moments, the left column says what is happening and at which step, under "Activity". It is there on every page and after a reload. You can start another cut meanwhile; it waits its turn. When something is ready, it offers "Open". Anything waiting or running has a **Stop** button: the work ends within a few seconds, what it was making is thrown away, and the next job in line starts. Nothing that was already finished is touched.
 - **Deleting a video:** each video in the left column has a trash icon. It asks once, then deletes the file from `in/`. Clips already cut from it stay, but can no longer be rendered again, because rendering reads the source. A compilation that uses the video will not build until the item is taken out. It is not possible while a clip is being made.
 - **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
 - **Clip:** watch the result, download it, see each brief rule as passed or failed, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
-- **Download:** paste a YouTube link from one of your channels and bring a part of the video, or the whole of it, into `in/` (see [Sources and fetching](#sources-and-fetching)).
+- **Download:** paste a YouTube link from one of your channels and bring a part of the video, or the whole of it, into `in/`; or paste a finished live stream and get the moments its chat exploded as clips (see [Sources and fetching](#sources-and-fetching)).
 - **My data:** one file to download with everything you have made, and the place to load such a file on another computer (see [My data](#my-data-moving-to-another-computer)).
 - **Unsaved changes:** the card, combine, compilation and sources pages show "Changes not saved" until you save, and their Save button stays in view.
 
@@ -207,13 +207,29 @@ To add a channel quickly, press "Add a channel", paste only its address, and pre
 The **Download** page (its own button in the left column) brings a part of a YouTube video, or the whole of one, into `in/`. Paste the link, give "From" and "To" or tick "Whole video", and press Download. The page checks the link and the length while you type, says so if the link is a stream one of your channels is broadcasting right now, and shows the progress with a Stop button. When it is done it names the file and offers "Open it to cut". Under "You can download from" it lists the channels in your list. The rules:
 
 - **Only from a channel in your list.** The channel is read from the video itself, so a link to anyone else's video is refused.
-- **A part of up to 20 minutes, or the whole video of up to 3 hours.** For a part you give a start and an end. For a whole video the length is read from YouTube, and a video over 3 hours, or one whose length YouTube does not give, is refused before anything is downloaded. A whole video is large (a 19½-minute one was 280 MB; a three-hour watchalong may be 2 to 3 GB), so delete it once it is clipped. "Suggest moments" works on videos up to 60 minutes.
+- **A part of up to 3 hours (20 minutes until 2026-11-21), or the whole video of up to 3 hours.** For a part you give a start and an end. For a whole video the length is read from YouTube, and a video over 3 hours, or one whose length YouTube does not give, is refused before anything is downloaded. A whole video is large (a 19½-minute one was 280 MB; a three-hour watchalong may be 2 to 3 GB), so delete it once it is clipped. "Suggest moments" works on videos up to 60 minutes.
 - **Quick.** 20 minutes came down in about 16 seconds on a 100 Mbit/s line, and a whole video of about an hour and a half in about 20 seconds. The tool asks YouTube for the video in small slices, a few at a time, which YouTube sends at full speed; asked for in one go, YouTube sends it at little more than playback speed. If that ever stops working, the tool falls back to the slow way by itself, and says so: the progress line reads "the slow way", and the page shows why when it is done.
 - **Up to 1080p, with the picture exactly as YouTube sends it.** A video can only be cut without loss at certain frames, so the part starts up to a few seconds before the time you gave; the tool says by how much. Set the exact start when you cut.
 - **YouTube links to one video only.** Playlists and channel links are refused.
 - **Not from a stream that is still live.** A live stream can only be recorded as it happens; a part cannot be cut out of it. Wait until the stream has ended and plays as an ordinary video. A stream that has only just ended is refused too, until YouTube has finished preparing it.
 
 The file is named after the channel, the video and the range, such as `channel-name_<video id>_1h02m00s-1h05m00s.mp4`; a whole video is named from 0 to its length, such as `channel-name_<video id>_0m00s-1h31m10s.mp4`. It then works like any other video in `in/`. When you add it to a compilation, its credit is filled in with the channel's name, and `description.txt` lists that channel's link next to the credit.
+
+**Clips from a stream's chat**, the second section of the Download page, works the other way round: paste the link of a **finished live stream**, optionally a few words (`goal, penalty`), and how many clips you want (6), and press "Get the clips". The tool reads the stream's chat and its top comments (not the video), finds its best moments, and downloads only those parts: 20 seconds before to 20 seconds after each one (15 and 15 until 2026-11-22). Change the seconds under "Seconds before and after".
+
+A best moment is found two ways:
+
+- **Where chat reacted**, not where it was merely busy. Laughing (lol, lmao, kekw, 😂, 💀), hype (**W**, let's go, pog, sheesh, 🔥), shock (omg, no way, wtf, yooo), a loss (**L**, rip, F, unlucky) and "clip it" count; commands (`!me`), poll votes ("1", "3"), a plain "yes" or "no" answering the streamer, and the same sentence pasted by many people do not. A shouted "YESSSS" or "NOOOOO" counts. The words are in `src/chat/reactions.js`, one list per kind, to add to. A chat moment is taken 5 seconds before the chat, since people type after they see it.
+- **Where viewers pointed in the comments**: "3:45:40 the jump scare", "9:59:42 THE ONE SHOWER SCENE". Two or more comments pointing at the same moment rank as high as anything, and the clip covers all of their times. A moment both chat and comments found rises to the top.
+
+- **With words**, moments where at least two messages (or a comment) hold them come first; if there are fewer than you asked for, the rest are the best other moments, and the page says how many matched. A word from the Football or Gaming words brings its group: "goal" also counts gol, golazo and GOOOOL.
+- **Without words**, the best moments.
+- Each clip says why it was chosen: how many people reacted and how ("31 people: shock 21, laughing 9"), and what viewers wrote.
+- **A quiet chat** is handled too: the tool asks less of it until it finds enough moments, but a chat of a few messages a minute is mostly greetings and side talk, so it finds fewer real moments. Only the words and like counts of comments are used, never who wrote them.
+- **Only a finished live stream has a chat.** An uploaded video has comments, not chat, and is refused with a message saying so.
+- The clips are ordinary videos in `in/`, named by the stream and their time, such as `papillon_<id>_2h09m15s-2h09m45s.mp4`, with an "Open" button for each. The stream's chat is kept (`data/chats/youtube-<id>.json`), so asking again, or fetching the chat of one of these clips on the cutting screen, does not download it again.
+
+On a 2 h 14 min watchalong, six clips took 2 minutes: 21 s to read 1,421 chat messages, then 15 to 22 s a clip. Reading the comments takes a few seconds. A busy chat takes longer to read: an 11-hour stream with 54,000 messages took tens of minutes, because the downloader reads the chat replay in order, piece by piece.
 
 From the command line:
 
@@ -225,6 +241,24 @@ node src/cli.js fetch "https://www.youtube.com/watch?v=..." --whole
 It needs the downloader program `yt-dlp`, which `npm run setup` installs into `.venv` next to the transcriber. YouTube changes often; when fetching stops working, run `npm run setup` again to update it.
 
 The list is saved in `data/sources.json`, which is not part of the repository.
+
+### Signing in to YouTube
+
+After many lookups from one connection, YouTube may answer every request with "Sign in to confirm you're not a bot" for a few hours. To get past it, give the downloader a YouTube sign-in: a cookies file saved from your browser.
+
+**Use a spare Google account, not your main one.** YouTube can flag or suspend an account it sees being used by a downloader. The file is a login: anyone who has it is signed in as that account.
+
+1. In Chrome, add the extension **Get cookies.txt LOCALLY** (check the name exactly; it saves the file on your computer and sends it nowhere). Allow it in Incognito in the extension's settings.
+2. Open an **Incognito** window, sign in to YouTube with the spare account, then open `https://www.youtube.com/robots.txt` in the same tab.
+3. Click the extension and press **Export** for `youtube.com`. Then **close the Incognito window** without signing out, so the saved sign-in stays valid.
+4. Move the file into the project, in a WSL terminal (the extension saves it in your Downloads folder, with a name like `www.youtube.com_cookies.txt`):
+
+   ```bash
+   cd ~/wlc-clipper
+   mv /mnt/c/Users/<you>/Downloads/www.youtube.com_cookies.txt data/youtube-cookies.txt
+   ```
+
+From then on the downloader uses it for every YouTube request: video downloads, chat replays, channel pictures and the live check. No restart is needed. The tool makes the file readable by you only, never prints it, and leaves it out of "My data"; `data/` is not in the repository. To sign out, delete `data/youtube-cookies.txt`. If YouTube refuses again even so, save the file again: sign-ins expire.
 
 **What is saved when.** The club a streamer supports and the removal of a channel are saved the moment you make them. A name or an address you type is saved with "Save the list" or with the row's sync arrows, and the browser asks before a reload would lose one.
 
@@ -243,6 +277,7 @@ GitHub holds the code. What you have made or added stays on the computer it was 
 - your channels, with the club each streamer supports, their pictures and subscriber counts
 - your leagues and clubs, with all their logos
 - your sound files, among them a video used behind the intro card
+- your overlay images (the logos in `overlays/`)
 - your briefs
 
 **What stays on the computer it was made on:** source videos, parts, clips, combinations, compilations, and matches with their cards. Your AI key is never put in the file; copy the file `.env` by hand if you use one.
@@ -267,8 +302,9 @@ The file is an ordinary `.tar` file, so any archive program can open it.
 
 Two optional features use an AI service. Everything else works without them.
 
-- **Suggested moments:** proposes ranges worth clipping, each with a reason, a hook, a title and a description.
+- **Suggested moments:** proposes ranges worth clipping, each with a reason, a hook, a title and a description. They can also come from a finished stream's chat, found on your computer (see [Moments from the chat](#moments-from-the-chat)).
 - **Caption fixes:** proposes corrections for words the transcriber misheard, such as names.
+- **Hooks:** "Suggest" beside the hook box on the cutting screen proposes three hooks for the clip you are setting up, from the words spoken in its range. Click one to put it in the box; change it as you like. It uses the whole-video transcript if one was already made, and otherwise transcribes only the range (a few seconds). With a brief, a hook that breaks one of its rules (a word the screen must show, a forbidden word) is marked.
 
 Both only propose. Nothing is cut, saved or rendered until you press the button yourself.
 
@@ -307,7 +343,30 @@ In testing, suggestions for a 10-minute video took about 6 seconds either way on
 
 ### Using it
 
-In the dashboard, press "Suggest moments" on the cutting screen. The first time on a video it transcribes the whole video, which takes a few minutes; the transcript is kept in `out/.cache` for next time. Suggestions appear as a list and as marks above the timeline. "Use this" fills in the range, hook, title and description for you to check before cutting. The suggestion you are working on is highlighted in the list and on the timeline, and one you have sent for cutting is marked "Already cut".
+In the dashboard, "Suggested moments" is on the cutting screen. Choose where the moments come from: **Transcript** (as before), **Chat** or **Both**. With Transcript, press "Suggest moments": the first time on a video it transcribes the whole video, which takes a few minutes; the transcript is kept in `out/.cache` for next time. The AI's answer is kept too, per video and per set of inputs, so the same inputs give the same list at once; tick "Ask again" for a new answer. Changing the event words or the guidance asks the AI again without transcribing again.
+
+Moments appear as one list and as marks above the timeline. Each shows its time, which can be edited, its score, where it was found (transcript, chat or both) and its label. "Send to cut" fills in the range, hook, title and description for you to check before cutting. Clicking a moment's number jumps the video there. The moment you are working on is highlighted, and one you have sent for cutting is marked "Already cut". Filters show only the moments from one source, or with one label.
+
+**What to look for** (optional, used by both sources):
+
+- **Events**: groups of words, each with a name, such as Goal: goal, gol, golazo, what a goal. "Football" and "Gaming" load a ready set you can change. Words are matched whole, any case, with accents and stretched letters ignored: "GOOOOL" counts as "gol", and "pen" does not match "open".
+- **Guidance**: a sentence on what a good moment is for this video, such as "big reactions to goals and referee decisions".
+
+With events or guidance, the AI is told about them, is shown the transcript lines where the words were found (as leads to check, not as facts), and names the event each moment is, or none. Without them, it is asked exactly what it was asked before.
+
+### Moments from the chat
+
+A finished live stream's chat shows where viewers reacted. The tool finds bursts of chat on your computer: where many different people wrote much more than usual. Nothing is sent anywhere for this, and the video is not transcribed.
+
+1. Open the video and, under "Chat", paste the stream's link and press "Fetch the chat", or import a chat file (JSON or CSV with a time and a text per message). Only the chat is downloaded, never the video, and only from a channel in your [Sources list](#sources-and-fetching). A stream that is live, or has only just ended, has no chat replay yet.
+2. **Offset**: how far into the stream your video begins. For a part downloaded on the Download page it is filled in from the file's name. Change it if the chat and the video do not line up.
+3. Choose Chat or Both. The chat's moments appear straight away, with a chart of messages across the video: the bursts, the usual rate, a line for each event, and the transcript's moments along the top. Click the chart to jump there.
+4. **Chat settings** change the list as you type: how many times the usual rate a burst must be (3), how many messages per 5 seconds at least (8), and how many seconds before and after to keep (15 and 10). A quiet chat needs lower numbers. With events, choose whether event words raise a moment, are required, or are ignored.
+5. **AI check** (off unless you tick it): asks the AI, in one request, what happened in each chat moment, from the chat's words and, if the video was already transcribed, what the streamer said. It sends the messages' words and times, never who wrote them. When the AI and the event words disagree, the moment is marked "needs review" and both are shown. If the check fails, the event words' labels are kept.
+
+With **Both**, a moment found by both sources becomes one item tagged with both, and those rise to the top of the list. A moment only one source found is kept. A chat moment shows what was said in it, if the video was transcribed; a transcript moment shows how busy the chat was.
+
+Chats are kept in `data/chats/`, one per video, and stay on this computer: they are not in the "My data" file.
 
 On a clip's screen, "Suggest fixes" marks the caption words it would change. Hover a marked word to see the original, edit as you like, then press "Save words and render again".
 
@@ -316,9 +375,11 @@ From the command line:
 ```bash
 node src/cli.js suggest in/video.mp4 --count 5
 node src/cli.js suggest in/video.mp4 --brief briefs/forgegui-basic.json
+node src/cli.js suggest in/video.mp4 --preset football --guidance "big reactions to goals"
+node src/cli.js suggest in/video.mp4 --terms my-terms.json --again
 ```
 
-It prints each moment with a `cut` command for its range. Videos longer than 60 minutes are refused.
+It prints each moment with a `cut` command for its range, and its event when there is one. Videos longer than 60 minutes are refused. `--terms` reads a JSON file such as `[{ "label": "Goal", "terms": ["goal", "gol"] }]`, `--preset` is `football` or `gaming`, and `--again` asks the AI again instead of showing the answer kept for the same inputs. Moments from the chat are in the dashboard only.
 
 ## Commands
 
@@ -344,6 +405,8 @@ Every command has built-in help: `node src/cli.js cut --help`.
 | `--crop-x <pixels>` | Left edge of the crop in source pixels, `center` layout only | centred |
 | `--crop-width <pixels>` | Width of the crop in source pixels, `center` layout only. Wider than the 9:16 column shows more of the picture, over a blurred copy | the 9:16 column |
 | `--cam <x,y,w,h>` | Webcam rectangle in source pixels, required for `facecam` | none |
+| `--game <x,y,w,h>` | Content rectangle in source pixels for `facecam`, shown below the webcam | the middle of the gameplay |
+| `--blur <x,y,w,h,start,end[,black]>` | Blur a part of the frame (source pixels) for part of the clip (seconds from the clip's start); `,black` blacks it out instead. Repeat for more boxes, up to 20 (see [Blur boxes](#blur-boxes)) | none |
 | `--trim <pixels>` | Cut this many pixels off every edge of the source first | `0` |
 | `--hook <text>` | Line shown at the top at the start of the clip, up to 60 characters | none |
 | `--hook-seconds <seconds>` | How long the hook stays on screen; `0` keeps it for the whole clip | `2.5` |
@@ -352,6 +415,11 @@ Every command has built-in help: `node src/cli.js cut --help`.
 | `--brief <file>` | Campaign brief to follow and check the clip against | none |
 | `--title <text>` | Title for `post.txt` | the hook |
 | `--desc <text>` | Description for `post.txt` | empty |
+| `--overlay <file>` | A PNG or WebP shown for the whole clip: a logo, or a full 9:16 picture (see [Logo overlay](#logo-overlay)) | none |
+| `--overlay-width <pixels>` | The logo's width in the clip | `220` |
+| `--overlay-position <corner>` | `top-left`, `top-right`, `bottom-left` or `bottom-right` | `top-left` |
+| `--overlay-margin <pixels>` | Distance from the corner's edges | `40` |
+| `--overlay-offset <pixels>` | Moves the logo down (or up, with a minus sign), for example into the gameplay half of the facecam layout | `0` |
 | `--out <dir>` | Output folder | `./out` |
 
 Times can be seconds (`754.5`), `mm:ss` (`12:34.5`) or `hh:mm:ss` (`1:02:03`).
@@ -360,7 +428,7 @@ Times can be seconds (`754.5`), `mm:ss` (`12:34.5`) or `hh:mm:ss` (`1:02:03`).
 
 - **`center`** crops a 9:16 column out of the frame. Move it sideways with `--crop-x`. The column is about a third of a 16:9 picture, so a person who moves can leave it. `--crop-width` makes the crop wider: it is then shown whole in the middle of the screen, with a blurred copy of itself above and below. At the full width of the video it looks like `blur`.
 - **`blur`** keeps the whole frame in the middle, over a blurred copy that fills the screen. Use it when nothing may be cropped away.
-- **`facecam`** stacks the webcam rectangle (given with `--cam`) above the middle of the gameplay.
+- **`facecam`** stacks the webcam rectangle (given with `--cam`) above the middle of the gameplay. The webcam panel takes the rectangle's shape, so nothing of a 4:3 or square webcam is cut off: full width, as tall as that shape makes it (606 px for 16:9, 810 for 4:3, 1080 for a square), between 480 and 1152 px so the gameplay keeps at least 40% of the screen. A webcam wider or taller than that loses a little of its edges. The hook sits just under the webcam panel. The content below is its own rectangle (`--game`, the blue box on the page), chosen apart from the webcam: in the bottom panel's shape it fills the panel, in another shape it is shown whole with a blurred copy of itself filling the rest, so nothing chosen is cut off ("Fit to the panel" makes it the panel's shape). Without `--game`, the middle of the gameplay is taken. Clips made before this keep their 640-pixel panel and their content when rendered again.
 
 `--trim` is for a thin border baked into a recording, such as a rounded frame. It is limited to 5% of the shorter side of the video.
 
@@ -370,6 +438,32 @@ node src/cli.js cut in/video.mp4 --start 1:00 --end 1:30 --crop-x 700
 node src/cli.js cut in/video.mp4 --start 1:00 --end 1:30 --crop-width 1000 --crop-x 200
 node src/cli.js cut in/video.mp4 --start 1:00 --end 1:30 --layout facecam --cam 1400,40,480,270
 ```
+
+## Blur boxes
+
+For something the apps would take a clip down for, such as nudity in game footage: a part of the picture is blurred, or blacked out, for a few seconds.
+
+- **On the cutting screen**, layout step: go to where it shows, press "Add a blur box", drag the pink box over it and resize it from its corner. Set "From" and "To" (seconds in the video; "Now" takes where the video is). The box is solid while the video is inside its time and dashed outside it. Choose Blur or Black.
+- **A box stays where it is drawn.** If the thing moves, add another box for the next seconds.
+- **The blur is strong on purpose**: the box is shrunk to a sixteenth and grown back before it is blurred, so only its colours are left.
+- **It is applied to the source frames before the layout**, so it covers the same thing in every layout, and it is saved in `meta.json`, so a render again keeps it.
+- From the command line: `--blur 700,300,120,120,1.5,4` (x, y, width, height in the source video's pixels, then start and end in seconds from the clip's start), and `,black` at the end for a black box.
+
+## Logo overlay
+
+Some campaigns require their logo on screen for the whole clip. Put the logo (PNG or WebP, with a see-through background) in the project's `overlays/` folder, then choose it under "Overlay" in the layout step of the cutting screen, or pass `--overlay`.
+
+- **It is shown from the first frame to the last**, end card included, and under the captions, so they stay on top. There is no timing option, on purpose.
+- **A picture of the clip's 9:16 shape is a full-frame overlay**, laid over the whole frame. **Anything else is a logo**, scaled to its width (220 px) and placed in a corner with a margin (40 px), moved down or up by the offset.
+- **The page warns** when the logo would cover the captions, reach into the bottom 15% of the frame (where the apps put their own text and buttons), or leave the frame, and shows where it lands in a small sketch of the clip.
+- **A brief can set it**, so every clip for that campaign gets it, whatever is chosen on the page:
+
+  ```json
+  "overlay": { "image": "overlays/kreekcraft-logo.png", "width": 220, "position": "top-left", "margin": 40, "offsetY": 660 }
+  ```
+
+  A relative image path is looked for from the folder you run the tool in, then next to the brief file. The checks then fail a clip rendered without that overlay.
+- `overlays/` is not part of the repository, and travels in "My data".
 
 ## Plain parts
 
@@ -458,6 +552,7 @@ Only `id` is required. A misspelled field name is an error.
 | `endCard.text` | Text on the card |
 | `endCard.image` | Picture centred on the card (optional) |
 | `keepFullFrame` | `true` if the whole source frame must stay visible; only the `blur` layout passes |
+| `overlay` | A logo or full-frame picture for every clip: `image`, and optionally `width`, `position`, `margin`, `offsetY` (see [Logo overlay](#logo-overlay)) |
 | `replacements` | Fixes for transcribed words, such as `{ "forge gooey": "ForgeGUI" }` |
 | `manualChecks` | Reminders printed after the checks |
 
@@ -483,6 +578,7 @@ node src/cli.js check out/barca-wants-who --brief briefs/other.json
 
 - Words are grouped into lines of at most three words or 18 characters.
 - A new line starts after a gap of more than 0.4 seconds between words, or at the end of a sentence.
+- Word times are corrected from the sound: the speech recogniser often starts a word too early, where the word before it ended, so the tool moves such a word to where the voice actually begins, also when game sound or music plays underneath.
 - Text is upper case, white with a black outline, in the lower part of the frame.
 - The font is Liberation Sans Bold, bundled in `assets/fonts` so clips look the same on every machine.
 - Line widths are known for the letters A to Z, digits and a few signs. Other letters are treated as very wide, so captions in another alphabet come out smaller than they need to be.

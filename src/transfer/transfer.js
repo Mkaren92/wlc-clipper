@@ -51,6 +51,7 @@ function count(names, lists) {
     clubs: lists.library?.clubs.length ?? 0,
     clubsWithLogo: lists.library?.clubs.filter((club) => club.icon).length ?? 0,
     sounds: files(/^sounds\//),
+    overlays: files(/^overlays\//),
     briefs: files(/^briefs\//),
   };
 }

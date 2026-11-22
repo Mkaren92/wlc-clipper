@@ -107,6 +107,50 @@ async function stop() {
   await refreshJobs();
   stopping.value = false;
 }
+
+// --- Clips from a finished stream's chat ---------------------------------------
+// The chat is read, and only the parts where it exploded are downloaded. The
+// choosing is the engine's (src/chat/pick.js); this only asks and shows.
+const streamLink = ref('');
+const words = ref('');
+const clipCount = ref(6);
+const before = ref(20);
+const after = ref(20);
+const clipsError = ref('');
+const checkedStream = computed(() => {
+  if (!streamLink.value.trim()) return { url: null, error: '' };
+  try {
+    return { url: videoUrl(streamLink.value), error: '' };
+  } catch (e) {
+    return { url: null, error: e.message };
+  }
+});
+const clipJobs = computed(() => jobs.list.filter((job) => job.kind === 'chat-clips'));
+const clipsRunning = computed(() => clipJobs.value.find(isActive));
+const lastClips = computed(() => clipsRunning.value ?? clipJobs.value.at(-1));
+const countOk = computed(() => Number.isInteger(clipCount.value) && clipCount.value >= 1 && clipCount.value <= 20);
+const secondsOk = computed(() => [before.value, after.value].every((n) => Number.isFinite(n) && n >= 1 && n <= 120));
+const clipsReady = computed(() => installed.value && channels.value.length > 0 && checkedStream.value.url && countOk.value && secondsOk.value && !clipsRunning.value);
+
+async function getClips() {
+  clipsError.value = '';
+  try {
+    const job = await api.clipsFromChat({ url: checkedStream.value.url, words: words.value, count: clipCount.value, before: before.value, after: after.value });
+    await track(job).catch(() => {});
+  } catch (e) {
+    clipsError.value = e.message;
+  }
+}
+async function stopClips() {
+  stopping.value = true;
+  try {
+    await api.stopJob(clipsRunning.value.id);
+  } catch {
+    // It finished by itself in the meantime.
+  }
+  await refreshJobs();
+  stopping.value = false;
+}
 </script>
 
 <template>
@@ -115,7 +159,7 @@ async function stop() {
       <h2><Icon name="download" /> Download a video</h2>
       <p class="hint first">
         Paste the link to a YouTube video from one of your channels, and give the part you want, up to
-        {{ MAX_FETCH_SECONDS / 60 }} minutes, or tick "Whole video" for all of it, up to {{ MAX_WHOLE_SECONDS / 3600 }} hours.
+        {{ MAX_FETCH_SECONDS / 3600 }} hours, or tick "Whole video" for all of it, up to {{ MAX_WHOLE_SECONDS / 3600 }} hours.
         It is saved in your videos (the <code>in</code> folder), named after the channel, ready to cut. The picture is kept
         exactly as YouTube sends it, so a part may start a few seconds before the time you give; set the exact start when you cut.
       </p>
@@ -189,6 +233,90 @@ async function stop() {
       <p v-else class="error" role="alert">{{ describe(last) }}</p>
     </section>
 
+    <section class="panel">
+      <h2><Icon name="spark" /> Clips from a stream's chat</h2>
+      <p class="hint first">
+        Paste the link of a <strong>finished live stream</strong> from one of your channels. Its chat and top comments are read
+        (not the video), and only the best moments are downloaded into your videos, from {{ before }} s before to {{ after }} s
+        after each one. A moment is where chat <em>reacted</em> (laughing, “W”, “L”, “no way”, “clip it”; commands, poll votes and
+        pasted messages do not count) or where viewers pointed in the comments (“3:45:40 the jump scare”). With words, moments
+        where they were written come first. An uploaded video has comments but no chat, so it cannot be used here.
+      </p>
+      <div class="row">
+        <div class="wide">
+          <label for="cc-link">Link to the finished stream</label>
+          <input id="cc-link" v-model="streamLink" type="text" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="wide">
+          <label for="cc-words">Words (optional)</label>
+          <input id="cc-words" v-model="words" type="text" placeholder="goal, penalty" autocomplete="off" />
+        </div>
+        <div class="tiny">
+          <label for="cc-count">Clips</label>
+          <input id="cc-count" v-model.number="clipCount" type="number" min="1" max="20" class="numbers" />
+        </div>
+        <button class="fixed primary go" :disabled="!clipsReady" @click="getClips"><Icon name="download" /> Get the clips</button>
+      </div>
+      <details class="more">
+        <summary>Seconds before and after</summary>
+        <div class="row">
+          <div class="tiny"><label for="cc-before">Before</label><input id="cc-before" v-model.number="before" type="number" min="1" max="120" class="numbers" /></div>
+          <div class="tiny"><label for="cc-after">After</label><input id="cc-after" v-model.number="after" type="number" min="1" max="120" class="numbers" /></div>
+        </div>
+      </details>
+      <p class="hint">A word from the Football or Gaming words brings its whole group: “goal” also counts gol, golazo and GOOOOL. Separate words with commas.</p>
+      <p v-if="checkedStream.error" class="error" role="alert">{{ checkedStream.error }}</p>
+      <p v-if="!countOk" class="error" role="alert">Ask for 1 to 20 clips.</p>
+      <p v-if="!secondsOk" class="error" role="alert">The seconds before and after must each be between 1 and 120.</p>
+      <p v-if="clipsError" class="error" role="alert">{{ clipsError }}</p>
+
+      <div v-if="lastClips" class="result" :class="lastClips.status">
+        <div v-if="isActive(lastClips)" class="row middle">
+          <span class="fixed running"><span class="spinner" aria-hidden="true" /> {{ describe(lastClips) }}</span>
+          <span />
+          <button class="fixed small" :disabled="stopping" @click="stopClips"><Icon name="stop" /> {{ stopping ? 'Stopping…' : 'Stop' }}</button>
+        </div>
+        <template v-else-if="lastClips.status === 'done'">
+          <p class="row middle done-line">
+            <Icon name="check" class="fixed" />
+            <span>
+              {{ lastClips.result.clips.filter((clip) => clip.name).length }} clips from <strong>{{ lastClips.result.title }}</strong>
+              ({{ lastClips.result.messages }} chat messages and {{ lastClips.result.comments ?? 0 }} comments read)<template v-if="lastClips.result.words.length">;
+                {{ lastClips.result.matched }} of them with {{ lastClips.result.words.join(' or ') }}</template>.
+            </span>
+          </p>
+          <p v-if="lastClips.result.words.length && lastClips.result.matched < lastClips.result.asked" class="muted">
+            Only {{ lastClips.result.matched }} {{ lastClips.result.matched === 1 ? 'explosion was' : 'explosions were' }} with your words, so the rest are the biggest other explosions.
+          </p>
+          <p v-if="lastClips.result.clips.length < lastClips.result.asked" class="notice">
+            You asked for {{ lastClips.result.asked }}, but only {{ lastClips.result.clips.length }}
+            {{ lastClips.result.clips.length === 1 ? 'moment stood' : 'moments stood' }} out. Even with the loosest settings, a moment needs
+            at least two people reacting at once, and this stream's chat has only {{ lastClips.result.messages }} messages<template v-if="(lastClips.result.comments ?? 0) < 10">
+            and {{ lastClips.result.comments ?? 0 }} comments</template>. That is common when a streamer's main chat is on another site.
+            For more clips from it, use "Suggested moments" on the cutting screen, which reads what is said in the video.
+          </p>
+          <ol class="clips">
+            <li v-for="clip in lastClips.result.clips" :key="clip.start">
+              <div class="row middle">
+                <strong class="fixed numbers">{{ formatClock(clip.start) }}–{{ formatClock(clip.end) }}</strong>
+                <span v-if="clip.label" class="chip mark fixed">{{ clip.label }}</span>
+                <span v-for="where in clip.sources ?? ['chat']" :key="where" class="chip fixed">{{ where === 'comments' ? 'viewers pointed here' : 'chat reacted' }}</span>
+                <span class="muted">
+                  <template v-if="clip.reactions?.length">{{ clip.people }} people: {{ clip.reactions.map((one) => `${one.label} ${one.count}`).join(', ') }}</template>
+                  <template v-if="clip.topWords?.length"> · “{{ clip.topWords.slice(0, 4).map((word) => word.word).join('”, “') }}”</template>
+                </span>
+                <button v-if="clip.name" class="fixed small" @click="emit('open', clip.name)"><Icon name="scissors" /> Open</button>
+              </div>
+              <p v-if="clip.comments" class="muted">Viewers: {{ clip.comments.texts.map((text) => `“${text}”`).join(' ') }}</p>
+              <p v-if="clip.error" class="error">Not downloaded: {{ clip.error }}</p>
+            </li>
+          </ol>
+        </template>
+        <p v-else-if="lastClips.status === 'stopped'" class="row middle"><Icon name="stop" class="fixed" /> {{ describe(lastClips) }} The clips already downloaded are kept.</p>
+        <p v-else class="error" role="alert">{{ describe(lastClips) }}</p>
+      </div>
+    </section>
+
     <section v-if="channels.length > 0" class="panel">
       <details>
         <summary>You can download from {{ channels.length }} {{ channels.length === 1 ? 'channel' : 'channels' }}</summary>
@@ -214,6 +342,13 @@ async function stop() {
 .error, .notice { margin-top: 10px; }
 .running { display: inline-flex; align-items: center; gap: 8px; }
 .result.done { border-color: var(--good); }
+.panel .result { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
+.tiny { flex: 0 1 90px; }
+.more { margin-top: 8px; }
+.more summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.clips { list-style: none; padding: 0; margin: 8px 0 0; }
+.clips li { padding: 6px 0; border-top: 1px solid var(--line); }
+.clips li p { margin: 4px 0 0; }
 .result.done .done-line .icon { color: var(--good); }
 .result.failed { border-color: var(--bad); }
 .done-line { gap: 8px; margin: 0 0 4px; }

@@ -164,10 +164,98 @@ describe('cut', () => {
   });
 });
 
+// The brief's acceptance check (2026-11-21), on this machine's ffmpeg: the brief's commands
+// were tested on 6.1. A facecam clip with a logo: the logo is in the first and the last frame,
+// it is not over the captions, and the clip is as long as without it.
+describe('logo overlay', () => {
+  /** The mean colour difference from grey (V in YUV) of a small square of one frame: high for magenta. */
+  async function redness(file, at, x, y) {
+    const seek = at === 'last' ? ['-sseof', '-0.05'] : ['-ss', String(at)];
+    const { stderr } = await run('ffmpeg', ['-hide_banner', ...seek, '-i', file, '-frames:v', '1', '-vf', `crop=20:20:${x}:${y},signalstats,metadata=print:key=lavfi.signalstats.VAVG`, '-f', 'null', '-']);
+    return Number(/VAVG=([\d.]+)/.exec(stderr)?.[1]);
+  }
+
+  it('shows the logo from the first frame to the last, under the captions, without changing the length', async () => {
+    const logo = path.join(dir, 'logo.png');
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=magenta:s=400x200,format=rgba', '-frames:v', '1', logo]);
+    const settings = { image: logo, width: 220, position: 'top-right', margin: 40, offsetY: 660 };
+    const { clipDir, meta } = await cut({
+      source, start: 1, end: 4, layout: 'facecam', cam: { x: 1400, y: 40, width: 480, height: 270 }, overlay: settings,
+      outDir: path.join(dir, 'out-overlay'), toolVersion: 'test', transcriber: fakeTranscriber,
+    });
+    expect(meta.overlay).toMatchObject({ ...settings, imageWidth: 400, imageHeight: 200, kind: 'logo' });
+    const file = path.join(clipDir, 'clip.mp4');
+    // The logo is 220x110 at x = 1080 - 220 - 40 = 820, y = 40 + 660 = 700, inside the gameplay half.
+    const inside = [900, 740];
+    const outside = [100, 740];
+    expect(await redness(file, 0, ...inside)).toBeGreaterThan(200);
+    expect(await redness(file, 'last', ...inside)).toBeGreaterThan(200);
+    expect(await redness(file, 0, ...outside)).toBeLessThan(200);
+    // Clear of the captions, which end 520 px above the bottom.
+    expect(700 + 110).toBeLessThan(1920 - 520 - 110);
+    const clip = await probe(file);
+    expect([clip.width, clip.height]).toEqual([1080, 1920]);
+    expect(Math.abs(clip.duration - 3)).toBeLessThan(0.05);
+    // A render again keeps it, from meta.json.
+    await rerender(clipDir);
+    expect(await redness(file, 'last', ...inside)).toBeGreaterThan(200);
+  }, 120_000);
+
+  it('refuses an overlay that is not a PNG, or with a wrong setting', async () => {
+    const ask = (overlay) => cut({ source, start: 1, end: 2, layout: 'center', overlay, outDir: path.join(dir, 'out-overlay-bad'), toolVersion: 'test', captions: false });
+    await expect(ask({ image: source })).rejects.toThrow(/must be a PNG or WebP/);
+    await expect(ask({ image: path.join(dir, 'logo.png'), position: 'middle' })).rejects.toThrow(/position must be one of/);
+    await expect(ask({ image: path.join(dir, 'logo.png'), width: 5 })).rejects.toThrow(/width must be a whole number from 20/);
+  });
+});
+
+describe('blur boxes', () => {
+  /** Signal statistics of a 40x40 square of the frame at `at` seconds. */
+  async function stats(file, at, x, y) {
+    const { stderr } = await run('ffmpeg', ['-hide_banner', '-ss', String(at), '-i', file, '-frames:v', '1', '-vf', `crop=40:40:${x}:${y},signalstats,metadata=print`, '-f', 'null', '-']);
+    const read = (key) => Number(new RegExp(`signalstats\\.${key}=([\\d.]+)`).exec(stderr)?.[1]);
+    return { avg: read('YAVG'), spread: read('YHIGH') - read('YLOW') };
+  }
+
+  it('blurs and blacks out parts of the frame only for their seconds, without changing the length', async () => {
+    // A vertical checkerboard of 8-pixel squares: scaled 2x into the clip, no crop.
+    const board = path.join(dir, 'board.mp4');
+    await run('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
+      "color=c=black:s=540x960:r=30,geq=lum='if(mod(floor(X/8)+floor(Y/8),2),235,16)':cb=128:cr=128",
+      '-t', '3', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', board,
+    ]);
+    const blurs = [
+      { x: 100, y: 100, width: 120, height: 120, start: 1, end: 2, style: 'blur' },
+      { x: 300, y: 500, width: 100, height: 100, start: 0.5, end: 2.5, style: 'black' },
+    ];
+    const { clipDir, meta } = await cut({ source: board, start: 0, end: 3, layout: 'center', blurs, captions: false, outDir: path.join(dir, 'out-blur'), toolVersion: 'test' });
+    expect(meta.blurs).toEqual(blurs);
+    const file = path.join(clipDir, 'clip.mp4');
+    // In the clip the blurred box is around 200..440 and the black one around 600..800, 1000..1200.
+    expect((await stats(file, 0.3, 300, 300)).spread).toBeGreaterThan(150);
+    expect((await stats(file, 1.5, 300, 300)).spread).toBeLessThan(60);
+    expect((await stats(file, 2.5, 300, 300)).spread).toBeGreaterThan(150);
+    expect((await stats(file, 0.2, 680, 1080)).avg).toBeGreaterThan(80);
+    expect((await stats(file, 1.5, 680, 1080)).avg).toBeLessThan(25);
+    // Outside the boxes the board is untouched.
+    expect((await stats(file, 1.5, 900, 300)).spread).toBeGreaterThan(150);
+    expect(Math.abs((await probe(file)).duration - 3)).toBeLessThan(0.05);
+    // A render again keeps them, from meta.json.
+    await rerender(clipDir);
+    expect((await stats(file, 1.5, 300, 300)).spread).toBeLessThan(60);
+  }, 120_000);
+
+  it('refuses a box outside the video before making anything', async () => {
+    await expect(cut({ source, start: 1, end: 2, layout: 'center', blurs: [{ x: 1900, y: 0, width: 100, height: 100, start: 0, end: 1 }], captions: false, outDir: path.join(dir, 'out-blur-bad'), toolVersion: 'test' }))
+      .rejects.toThrow(/does not fit/);
+  });
+});
+
 describe('captions and hook', () => {
   it('burns in captions and a hook without moving picture or sound', async () => {
     const { clipDir, meta, warnings } = await cut({
-      source, start: 1, end: 4, layout: 'facecam', cam: { x: 1400, y: 40, width: 480, height: 270 },
+      source, start: 1, end: 4, layout: 'facecam', cam: { x: 1400, y: 40, width: 480, height: 270 }, game: { x: 100, y: 300, width: 1200, height: 700 },
       hook: 'He did NOT expect that', outDir: path.join(dir, 'out-captions'), toolVersion: 'test',
       transcriber: fakeTranscriber,
     });
@@ -180,7 +268,11 @@ describe('captions and hook', () => {
     expect((await readdir(path.join(clipDir, 'work'))).sort()).toEqual(['captions.ass', 'meta.json', 'transcript.json']);
     const ass = await readFile(path.join(clipDir, 'work', 'captions.ass'), 'utf8');
     expect(ass).toContain(',Caption,,0,0,0,,HE DID NOT');
-    expect(ass).toContain(',Hook,,0,0,670,,{\\q0}He did NOT expect that');
+    // A 16:9 webcam box gets a 606-pixel panel of its own shape, and the hook sits just under it.
+    expect(meta.camHeight).toBe(606);
+    // The content box is saved as drawn, so a later render shows the same part.
+    expect(meta.game).toEqual({ x: 100, y: 300, width: 1200, height: 700 });
+    expect(ass).toContain(',Hook,,0,0,636,,{\\q0}He did NOT expect that');
 
     const clipFile = path.join(clipDir, 'clip.mp4');
     const clip = await probe(clipFile);

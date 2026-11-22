@@ -1,11 +1,14 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { runChecks } from '../brief/check.js';
 import { buildHashtags } from '../brief/postText.js';
 import { cleanOverlayText, HOOK_MAX_CHARS } from '../captions/ass.js';
 import { findPauses, snapToSpeech } from '../captions/pauses.js';
+import { compileTerms, matchTerms } from '../chat/terms.js';
 import { onScreenTexts } from '../cut.js';
+import { formatClock } from '../time.js';
 import { probe } from '../probe.js';
 import { extractAudio } from '../render.js';
 import { checkTranscript } from '../transcribe/index.js';
@@ -27,11 +30,18 @@ import { checkTranscript } from '../transcribe/index.js';
  * @property {string} reason       why the model picked it
  * @property {number} score        0 to 1, the model's own rating
  * @property {string[]} problems   brief rules this suggestion would fail
+ * @property {string} [label]       which event term group it is, when terms were given and the model named one
+ * @property {string[]} [matchedTerms]   the terms heard in its window, found by our own matcher
  */
+
+/** @typedef {import('../chat/terms.js').TermGroup} TermGroup */
 
 // A whole-video transcript of a longer source would take very long to make
 // on a CPU, so longer videos are refused with a message.
 const MAX_SOURCE_MINUTES = 60;
+// A fetched hour is a few hundredths over 3600 s (the owner's "0m00s-1h00m00s" was 3600.001 s and was
+// refused on 2026-11-21), so a second over the limit is let through.
+const LENGTH_SLACK_SECONDS = 1;
 const DEFAULT_MIN_SECONDS = 15;
 const DEFAULT_MAX_SECONDS = 60;
 // Room before the first word and after the last, so neither is clipped.
@@ -55,6 +65,30 @@ const answerSchema = z.object({
   ),
 });
 
+// The answer when event terms or guidance are given: the same, plus the label the model
+// chose. Kept plain like the other: the label is checked against the owner's labels in
+// tidyMoments, in our own code. Only used when steering is given, so with none the request
+// is exactly what it always was.
+const steeredSchema = z.object({
+  moments: z.array(
+    z.object({
+      start: z.number(),
+      end: z.number(),
+      hook: z.string(),
+      title: z.string(),
+      description: z.string(),
+      reason: z.string(),
+      score: z.number(),
+      label: z.string(),
+    }),
+  ),
+});
+
+// Hints from the pre-scan are capped, so a long video full of one word does not flood the prompt.
+const MAX_HINTS = 80;
+// Change this when the prompt or the tidying changes, so results kept from before are asked again.
+const RESULT_VERSION = 1;
+
 /**
  * Propose moments of a video worth clipping.
  *
@@ -67,18 +101,24 @@ const answerSchema = z.object({
  * @param {number} [options.count]
  * @param {Brief | null} [options.brief]
  * @param {string} [options.lang]
- * @param {string} options.cacheDir      where whole-video transcripts are kept
+ * @param {string} options.cacheDir      where whole-video transcripts and kept results are
  * @param {import('../transcribe/index.js').Transcriber} options.transcriber
  * @param {Ai} options.ai
+ * @param {TermGroup[]} [options.terms]   event terms that steer the model, already checked (parseTermGroups)
+ * @param {string} [options.guidance]     the owner's own words on what a good moment is
+ * @param {boolean} [options.force]       ask the model again even when a kept result exists
  * @param {(step: string) => void} [options.onStep]
- * @returns {Promise<{ moments: Moment[], model: string, usage: { input: number, output: number }, fromCache: boolean }>}
+ * @returns {Promise<{ moments: Moment[], model: string, usage: { input: number, output: number }, fromCache: boolean, resultFromCache: boolean }>}
+ *   `fromCache`: the transcript was kept from before; `resultFromCache`: so was the model's answer
  */
-export async function suggestMoments({ source, count = 5, brief = null, lang = 'en', cacheDir, transcriber, ai, onStep = () => {} }) {
+export async function suggestMoments({ source, count = 5, brief = null, lang = 'en', cacheDir, transcriber, ai, terms = [], guidance = '', force = false, onStep = () => {} }) {
   if (!ai.isConfigured()) throw new Error(ai.help);
+  const steer = { terms, guidance: String(guidance ?? '').trim() };
+  const steered = steer.terms.length > 0 || steer.guidance !== '';
   const info = await probe(path.resolve(source));
   if (info.audioStreams === 0) throw new Error('This video has no sound, so there is no speech to choose moments from.');
-  if (info.duration > MAX_SOURCE_MINUTES * 60) {
-    throw new Error(`Suggestions work on videos up to ${MAX_SOURCE_MINUTES} minutes long; this one is ${Math.round(info.duration / 60)} minutes.`);
+  if (info.duration > MAX_SOURCE_MINUTES * 60 + LENGTH_SLACK_SECONDS) {
+    throw new Error(`Suggestions work on videos up to ${MAX_SOURCE_MINUTES} minutes long; this one is ${formatClock(info.duration)}.`);
   }
 
   const { words, fromCache } = await sourceTranscript({ info, lang, cacheDir, transcriber, onStep });
@@ -91,19 +131,87 @@ export async function suggestMoments({ source, count = 5, brief = null, lang = '
     max: Math.max(2, (brief?.maxSeconds ?? DEFAULT_MAX_SECONDS) - card),
   };
 
-  onStep('thinking');
-  const { data, usage } = await ai.ask({
-    system: instructions({ count, limits, brief }),
-    user: transcriptLines(words),
-    schema: answerSchema,
-    schemaName: 'moments',
-  });
+  // The model's answer is kept per video and per set of inputs, so asking again with the same
+  // terms and guidance costs nothing, and changing them asks the model but does not transcribe.
+  const resultFile = path.join(cacheDir, `moments-${resultKey({ info, lang, count, brief, steer, model: ai.model })}.json`);
+  if (!force) {
+    const kept = await readKeptResult(resultFile);
+    if (kept) {
+      return { moments: kept.moments.map((moment) => ({ ...moment, problems: brief ? briefProblems(moment, brief) : [] })), model: kept.model, usage: { input: 0, output: 0 }, fromCache, resultFromCache: true };
+    }
+  }
 
-  const moments = tidyMoments(data.moments, { words, duration: info.duration, limits, count }).map((moment) => ({
+  onStep('thinking');
+  const compiled = steered ? compileTerms(steer.terms) : null;
+  const { data, usage } = await ai.ask(steered
+    ? { system: `${instructions({ count, limits, brief })}\n${steeringLines(steer)}`, user: withHints(words, compiled), schema: steeredSchema, schemaName: 'moments' }
+    : { system: instructions({ count, limits, brief }), user: transcriptLines(words), schema: answerSchema, schemaName: 'moments' });
+
+  const tidied = tidyMoments(data.moments, { words, duration: info.duration, limits, count, labels: steer.terms.map((group) => group.label), compiled });
+  // An answer with nothing usable in it is not kept, so "try again" really asks again.
+  if (tidied.length > 0) await keepResult(resultFile, { moments: tidied, model: ai.model });
+  const moments = tidied.map((moment) => ({
     ...moment,
     problems: brief ? briefProblems(moment, brief) : [],
   }));
-  return { moments, model: ai.model, usage, fromCache };
+  return { moments, model: ai.model, usage, fromCache, resultFromCache: false };
+}
+
+/**
+ * The transcript of a whole video if it was made before, without making it.
+ * Used where transcribing would be wrong (chat-only suggestions) and the lines
+ * are only extra information.
+ *
+ * @param {{ source: string, lang?: string, cacheDir: string }} options
+ * @returns {Promise<Word[] | null>}
+ */
+export async function keptTranscript({ source, lang = 'en', cacheDir }) {
+  const file = await stat(path.resolve(source)).catch(() => null);
+  if (!file) return null;
+  try {
+    return checkTranscript(JSON.parse(await readFile(path.join(cacheDir, transcriptKey(path.resolve(source), file, lang)), 'utf8'))).words;
+  } catch {
+    return null;
+  }
+}
+
+// A language code ("en", "pt-BR"). It goes into a file name, so nothing else is let through.
+export const LANG_PATTERN = /^[a-z]{2,3}(-[a-z]{2,4})?$/i;
+
+function transcriptKey(file, info, lang) {
+  if (!LANG_PATTERN.test(lang)) throw new Error(`"${String(lang).slice(0, 20)}" is not a language code.`);
+  return `${path.basename(file)}.${info.size}.${Math.round(info.mtimeMs)}.${lang}.json`;
+}
+
+/** A name for one set of inputs: the video as it is now, and everything that changes the answer. */
+function resultKey({ info, lang, count, brief, steer, model }) {
+  const what = JSON.stringify({ v: RESULT_VERSION, video: path.basename(info.path), size: info.size, duration: info.duration, lang, count, brief, terms: steer.terms, guidance: steer.guidance, model });
+  return createHash('sha256').update(what).digest('hex').slice(0, 24);
+}
+
+// What is read back is checked like a model's answer: kept files may be from an older version,
+// may lack `label` and `matchedTerms`, and must still load.
+const keptMoment = z.object({
+  start: z.number(), end: z.number(), hook: z.string().nullable(), title: z.string(), description: z.string(),
+  reason: z.string(), score: z.number(), label: z.string().optional(), matchedTerms: z.array(z.string()).optional(),
+});
+const keptResult = z.object({ moments: z.array(keptMoment), model: z.string() });
+
+/** @returns {Promise<{ moments: Omit<Moment, 'problems'>[], model: string } | null>} */
+export async function readKeptResult(file) {
+  try {
+    const parsed = keptResult.safeParse(JSON.parse(await readFile(file, 'utf8')));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function keepResult(file, result) {
+  await mkdir(path.dirname(file), { recursive: true });
+  const partial = `${file}.partial`;
+  await writeFile(partial, JSON.stringify(result));
+  await rename(partial, file);
 }
 
 /**
@@ -112,8 +220,7 @@ export async function suggestMoments({ source, count = 5, brief = null, lang = '
  */
 async function sourceTranscript({ info, lang, cacheDir, transcriber, onStep }) {
   const file = await stat(info.path);
-  const key = `${path.basename(info.path)}.${file.size}.${Math.round(file.mtimeMs)}.${lang}.json`;
-  const cacheFile = path.join(cacheDir, key);
+  const cacheFile = path.join(cacheDir, transcriptKey(info.path, file, lang));
   try {
     return { words: checkTranscript(JSON.parse(await readFile(cacheFile, 'utf8'))).words, fromCache: true };
   } catch {
@@ -128,7 +235,8 @@ async function sourceTranscript({ info, lang, cacheDir, transcriber, onStep }) {
   const workDir = await mkdtemp(path.join(cacheDir, 'audio-'));
   try {
     const audioFile = await extractAudio({ source: info.path, start: 0, seconds: info.duration, workDir });
-    const transcript = checkTranscript(await transcriber.transcribe(audioFile, { lang }));
+    // Batched: a whole video is long, and this transcript is read by the model, not burned in.
+    const transcript = checkTranscript(await transcriber.transcribe(audioFile, { lang, batched: true }));
     transcript.words = snapToSpeech(transcript.words, await findPauses(audioFile));
     await writeFile(cacheFile, JSON.stringify(transcript));
     return { words: transcript.words, fromCache: false };
@@ -169,6 +277,38 @@ function instructions({ count, limits, brief }) {
 }
 
 /**
+ * What the owner gave to steer the model, added after the ordinary task. Only
+ * used when there are terms or guidance.
+ */
+function steeringLines({ terms, guidance }) {
+  const lines = [];
+  if (guidance) lines.push('What makes a good moment in this video, in the words of the person asking:', guidance);
+  if (terms.length > 0) {
+    lines.push('These are the events the person is looking for, each with words that may be said about it:');
+    for (const group of terms) lines.push(`- ${group.label}: ${group.terms.join(', ')}`);
+    lines.push('Prefer moments where one of these events happens or is being reacted to. A strong moment that is none of them may still be chosen.');
+    lines.push(`For each moment also write label: the one event it is, written exactly as one of ${terms.map((group) => JSON.stringify(group.label)).join(', ')}, or "none".`);
+    lines.push('After the transcript there may be a list of hints: lines where those words were found. They are leads to check, not confirmed events: "no goal" or "was that a penalty?" contain the words without the event.');
+  } else {
+    lines.push('For each moment also write label: "none".');
+  }
+  return lines.join('\n');
+}
+
+/** The transcript, then the lines our own matcher found the terms in, as hints. */
+function withHints(words, compiled) {
+  const text = transcriptLines(words);
+  if (!compiled) return text;
+  const hints = [];
+  for (const line of text.split('\n')) {
+    const found = matchTerms(line.replace(/^\[[^\]]*\]\s*/, ''), compiled);
+    if (found.length > 0) hints.push(`${line.match(/^\[[^\]]*\]/)?.[0] ?? ''} ${found.map((group) => group.label).join(', ')}`);
+    if (hints.length >= MAX_HINTS) break;
+  }
+  return hints.length === 0 ? text : `${text}\n\nHints (lines where the words were found; check them):\n${hints.join('\n')}`;
+}
+
+/**
  * The transcript as timed lines, a sentence or so each, which is what the
  * model reads.
  *
@@ -200,10 +340,11 @@ export function transcriptLines(words) {
  * overlapping. A model's answer is a suggestion and can be wrong in any field.
  *
  * @param {unknown[]} raw
- * @param {{ words: Word[], duration: number, limits: { min: number, max: number }, count: number }} context
+ * @param {{ words: Word[], duration: number, limits: { min: number, max: number }, count: number, labels?: string[], compiled?: object | null }} context
+ *   `labels`: the owner's labels; a model's label is kept only when it is one of them
  * @returns {Omit<Moment, 'problems'>[]}
  */
-export function tidyMoments(raw, { words, duration, limits, count }) {
+export function tidyMoments(raw, { words, duration, limits, count, labels = [], compiled = null }) {
   const tidy = [];
   for (const item of Array.isArray(raw) ? raw : []) {
     if (!Number.isFinite(item?.start) || !Number.isFinite(item?.end) || item.end <= item.start) continue;
@@ -219,7 +360,7 @@ export function tidyMoments(raw, { words, duration, limits, count }) {
     const end = Math.min(duration, words[last].end + LEAD_OUT);
     if (end - start < limits.min || end - start > limits.max) continue;
 
-    tidy.push({
+    const moment = {
       start: round(start),
       end: round(end),
       hook: fitHook(item.hook),
@@ -227,7 +368,16 @@ export function tidyMoments(raw, { words, duration, limits, count }) {
       description: oneLine(item.description),
       reason: oneLine(item.reason),
       score: Number.isFinite(item.score) ? Math.min(1, Math.max(0, item.score)) : 0,
-    });
+    };
+    // Only when terms were given: the label must be one of the owner's, written any case;
+    // anything else (or "none") leaves it out. The terms heard are found by our matcher, not the model.
+    const label = labels.find((known) => known.toLowerCase() === String(item.label ?? '').trim().toLowerCase());
+    if (label) moment.label = label;
+    if (compiled) {
+      const heard = matchTerms(words.slice(first, last + 1).map((word) => word.text).join(' '), compiled).flatMap((group) => group.terms);
+      if (heard.length > 0) moment.matchedTerms = [...new Set(heard)];
+    }
+    tidy.push(moment);
   }
 
   // Best first; a moment that overlaps a better one is dropped.
@@ -262,7 +412,7 @@ function nearest(words, time, at) {
 }
 
 /** A hook that fits on screen: cleaned, and cut at a word if it is too long. */
-function fitHook(text) {
+export function fitHook(text) {
   let hook = cleanOverlayText(String(text ?? ''));
   if (hook.length > HOOK_MAX_CHARS) {
     hook = hook.slice(0, HOOK_MAX_CHARS + 1).replace(/\s+\S*$/, '').slice(0, HOOK_MAX_CHARS).trim();

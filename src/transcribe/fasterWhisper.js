@@ -33,11 +33,12 @@ async function isInstalled() {
 
 /**
  * @param {string} audioFile   16 kHz mono WAV
- * @param {{ lang: string }} options
+ * @param {{ lang: string, batched?: boolean }} options   `batched` for a whole video's transcript:
+ *   several pieces of speech at once, much faster on a long file (scripts/transcribe.py)
  * @returns {Promise<Transcript>}
  */
-async function transcribe(audioFile, { lang }) {
-  const { stdout } = await run(pythonPath(), [SCRIPT, audioFile, lang, MODEL]);
+async function transcribe(audioFile, { lang, batched = false }) {
+  const { stdout } = await run(pythonPath(), [SCRIPT, audioFile, lang, MODEL, ...(batched ? ['batched'] : [])]);
   return JSON.parse(stdout);
 }
 

@@ -182,8 +182,8 @@ This takes two to three minutes and uses every processor core.
 **It should end with** two lines like these, with no failed count:
 
 ```
- Test Files  16 passed (16)
-      Tests  407 passed (407)
+ Test Files  20 passed (20)
+      Tests  528 passed (528)
 ```
 
 The numbers grow as the project grows. What matters is that everything passed. If a test fails, see [Troubleshooting](#troubleshooting) before going on.
@@ -293,8 +293,9 @@ The project's folders, all inside `~/wlc-clipper`:
 | `parts/` | Plain parts saved with "Save this part as it is" |
 | `data/` | Matches and cards, combinations, compilations, your sources list and the channels' pictures |
 | `sounds/` | Your own sound and video files for cards |
+| `overlays/` | Logos and pictures shown over a whole clip |
 
-These five folders, and the file `.env`, are yours. They are never sent to GitHub and are not part of a download of the project. The tool creates the folders when it needs them.
+These six folders, and the file `.env`, are yours. They are never sent to GitHub and are not part of a download of the project. The tool creates the folders when it needs them.
 
 **To see the folders from Windows,** either run `explorer.exe .` in the project folder in Ubuntu, or type this into the address bar of Windows Explorer, with your Ubuntu username in place of `<you>`:
 
@@ -347,7 +348,7 @@ Suggested moments and caption fixes need an AI service. Everything else works wi
 
 The project itself comes from GitHub. Your own files do not.
 
-**The easy way** is the dashboard's "My data" page. On the old computer press "Download my data". The file lands in the old computer's Downloads folder; copy it to this one. Then, in the dashboard here, open "My data", choose that file under "Load my data", check what it shows, and press "Load it". It carries your channels and their clubs, your leagues and clubs with logos, your sounds and your briefs; videos, clips, combinations, compilations and matches stay on the old computer. See "My data" in the [README](../README.md).
+**The easy way** is the dashboard's "My data" page. On the old computer press "Download my data". The file lands in the old computer's Downloads folder; copy it to this one. Then, in the dashboard here, open "My data", choose that file under "Load my data", check what it shows, and press "Load it". It carries your channels and their clubs, your leagues and clubs with logos, your sounds, your overlay images and your briefs; videos, clips, combinations, compilations and matches stay on the old computer. See "My data" in the [README](../README.md).
 
 **By hand**, the same thing is copying these from the old computer into the same places in `~/wlc-clipper` on the new one:
 

@@ -100,6 +100,24 @@ export const api = {
   deletePart: (name) => request(`/api/parts/${enc(name)}`, { method: 'DELETE' }),
   ai: () => request('/api/ai'),
   suggest: (options) => request('/api/suggest', { method: 'POST', body: options }),
+  suggestHook: (options) => request('/api/suggest-hook', { method: 'POST', body: options }),
+  // Overlay images: PNG files in the overlays folder, named, never given as paths.
+  overlays: () => request('/api/overlays'),
+  // A video's chat, for suggested moments. Detection runs in the page; these bring a chat in and keep it.
+  chat: (video) => request(`/api/chat/${enc(video)}`),
+  keptTranscript: (video, lang) => request(`/api/transcript/${enc(video)}?lang=${enc(lang)}`),
+  fetchChat: (video, options) => request(`/api/chat/${enc(video)}/fetch`, { method: 'POST', body: options }),
+  // A chat file goes as it is, as text: it can be larger than an ordinary request.
+  importChat: async (video, name, text, offset) => {
+    const response = await fetch(`/api/chat/${enc(video)}/import?name=${enc(name)}${Number.isFinite(offset) ? `&offset=${offset}` : ''}`, { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: text });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error ?? `The server answered ${response.status}.`);
+    return data;
+  },
+  setChatOffset: (video, offset) => request(`/api/chat/${enc(video)}/offset`, { method: 'PUT', body: { offset } }),
+  deleteChat: (video) => request(`/api/chat/${enc(video)}`, { method: 'DELETE' }),
+  checkChat: (video, options) => request(`/api/chat/${enc(video)}/check`, { method: 'POST', body: options }),
+  clipsFromChat: (options) => request('/api/chat-clips', { method: 'POST', body: options }),
   fixWords: (name) => request(`/api/clips/${enc(name)}/fix-words`, { method: 'POST' }),
   render: (name) => request(`/api/clips/${enc(name)}/render`, { method: 'POST' }),
   jobs: () => request('/api/jobs'),

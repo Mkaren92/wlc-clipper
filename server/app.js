@@ -4,16 +4,20 @@ import express from 'express';
 import { z } from 'zod';
 import { getAi } from '../src/ai/client.js';
 import { proposeWordFixes } from '../src/ai/fixWords.js';
-import { suggestMoments } from '../src/ai/suggest.js';
+import { LANG_PATTERN, suggestMoments } from '../src/ai/suggest.js';
+import { suggestHooks } from '../src/ai/suggestHook.js';
 import { loadBrief } from '../src/brief/schema.js';
 import { checkClip, cut, readClip, recheck, removeClip, rerender, savePostText, saveTranscript } from '../src/cut.js';
-import { describeLayouts, LAYOUTS } from '../src/layout.js';
+import { describeLayouts, LAYOUTS, overlayKind } from '../src/layout.js';
+import { imageSize } from '../src/overlay.js';
 import { savePart } from '../src/part.js';
 import { probe } from '../src/probe.js';
 import { formatClock, parseTime } from '../src/time.js';
 import { getTranscriber } from '../src/transcribe/index.js';
 import { combinedFile, readCombination } from '../src/combine/combination.js';
+import { parseTermGroups } from '../src/chat/terms.js';
 import { addCardRoutes } from './cards.js';
+import { addChatRoutes } from './chat.js';
 import { addCombinationRoutes } from './combinations.js';
 import { addCompilationRoutes } from './compilations.js';
 import { HttpError } from './http.js';
@@ -47,11 +51,26 @@ const cutRequest = z.strictObject({
   cropX: pixels.optional(),
   cropWidth: pixels.optional(),
   cam: z.strictObject({ x: pixels, y: pixels, width: pixels, height: pixels }).optional(),
+  game: z.strictObject({ x: pixels, y: pixels, width: pixels, height: pixels }).optional(),
+  // An overlay image, named by its file in the overlays folder, and its settings.
+  overlay: z.strictObject({
+    name: z.string().min(1),
+    width: z.number().int().optional(),
+    position: z.enum(['top-left', 'top-right', 'bottom-left', 'bottom-right']).optional(),
+    margin: z.number().int().optional(),
+    offsetY: z.number().int().optional(),
+  }).optional(),
+  // Parts of the frame to hide for part of the clip; the engine checks them against the video.
+  blurs: z.array(z.strictObject({
+    x: pixels, y: pixels, width: pixels, height: pixels,
+    start: z.number().min(0), end: z.number().min(0),
+    style: z.enum(['blur', 'black']).default('blur'),
+  })).max(20).default([]),
   trim: pixels.default(0),
   hook: optionalText,
   hookSeconds: z.number().min(0).default(2.5),
   captions: z.boolean().default(true),
-  lang: z.string().trim().min(2).max(10).default('en'),
+  lang: z.string().trim().regex(LANG_PATTERN).default('en'),
   brief: optionalText,
   title: optionalText,
   description: optionalText,
@@ -59,11 +78,24 @@ const cutRequest = z.strictObject({
 
 const partRequest = z.strictObject({ video: z.string().min(1), start: time, end: time });
 
+const hookRequest = z.strictObject({
+  video: z.string().min(1),
+  start: time,
+  end: time,
+  brief: optionalText,
+  lang: z.string().trim().regex(LANG_PATTERN).default('en'),
+});
+
 const suggestRequest = z.strictObject({
   video: z.string().min(1),
   count: z.number().int().min(1).max(10).default(5),
   brief: optionalText,
-  lang: z.string().trim().min(2).max(10).default('en'),
+  lang: z.string().trim().regex(LANG_PATTERN).default('en'),
+  // Optional steering; with neither, the request to the model is what it always was.
+  terms: z.unknown().optional(),
+  guidance: z.string().max(500).default(''),
+  // Ask the model again even when an answer for the same inputs is kept.
+  force: z.boolean().default(false),
 });
 
 /**
@@ -79,6 +111,7 @@ const suggestRequest = z.strictObject({
  * @param {string} options.briefsDir   brief files
  * @param {string} options.partsDir    plain parts of videos, kept apart from the clips
  * @param {string} [options.soundsDir]  audio files to put under cards; next to the data folder when not given
+ * @param {string} [options.overlaysDir]  overlay images (PNG) for clips; next to the data folder when not given
  * @param {string} options.dataDir     saved matches, cards and compilations
  * @param {string} [options.webDir]    built dashboard pages, if they exist
  * @param {string} options.toolVersion
@@ -87,7 +120,7 @@ const suggestRequest = z.strictObject({
  * @param {import('../src/fetch.js').Downloader} [options.downloader]   replaced in tests
  * @param {(address: string) => Promise<Buffer>} [options.pictureDownload]   replaced in tests
  */
-export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsDir = path.join(dataDir, '..', 'sounds'), webDir, toolVersion, transcriber, ai = getAi(), downloader, pictureDownload }) {
+export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsDir = path.join(dataDir, '..', 'sounds'), overlaysDir = path.join(dataDir, '..', 'overlays'), webDir, toolVersion, transcriber, ai = getAi(), downloader, pictureDownload }) {
   const app = express();
   const jobs = createJobs();
 
@@ -127,6 +160,26 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
     res.sendFile(req.params.name, { root: inDir });
   });
 
+  // --- Overlays: PNG images the owner puts in the overlays folder ------------
+
+  app.get('/api/overlays', async (req, res) => {
+    await mkdir(overlaysDir, { recursive: true });
+    const names = (await listDir(overlaysDir)).filter(isOverlayName).sort();
+    res.json(await Promise.all(names.map(async (name) => {
+      try {
+        const size = await imageSize(path.join(overlaysDir, name));
+        return { name, ...size, kind: overlayKind(size.width, size.height) };
+      } catch (error) {
+        return { name, error: error.message };
+      }
+    })));
+  });
+
+  app.get('/media/overlays/:name', async (req, res) => {
+    await overlayPath(req.params.name);
+    res.sendFile(req.params.name, { root: overlaysDir });
+  });
+
   // --- Briefs --------------------------------------------------------------
 
   app.get('/api/briefs', async (req, res) => {
@@ -135,7 +188,10 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
       await Promise.all(
         files.map(async (file) => {
           try {
-            return { file, ok: true, brief: (await loadBrief(path.join(briefsDir, file))).brief };
+            const { brief } = await loadBrief(path.join(briefsDir, file));
+            // A brief's overlay is shown on the cutting screen, so the page needs its picture's size.
+            const overlaySize = brief.overlay ? await imageSize(brief.overlay.image).catch(() => null) : null;
+            return { file, ok: true, brief, ...(brief.overlay ? { overlaySize } : {}) };
           } catch (error) {
             return { file, ok: false, error: error.message };
           }
@@ -228,9 +284,13 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
   app.post('/api/cut', async (req, res) => {
     const parsed = cutRequest.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
-    const { video, brief, ...options } = parsed.data;
+    const { video, brief, overlay: chosen, ...options } = parsed.data;
     const source = await videoPath(video);
     const briefFile = brief ? briefPath(brief) : undefined;
+    // The browser names the overlay; the server finds it. The brief's own overlay wins in the engine.
+    const overlay = chosen ? { ...chosen, name: undefined, image: await overlayPath(chosen.name) } : undefined;
+    if (overlay) delete overlay.name;
+    options.overlay = overlay;
 
     const job = jobs.add('cut', `${video} ${formatClock(options.start)}–${formatClock(options.end)}`, async (onStep) =>
       summary(await cut({ ...options, source, briefFile, outDir, toolVersion, transcriber, onStep })),
@@ -301,13 +361,19 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
   app.post('/api/suggest', async (req, res) => {
     const parsed = suggestRequest.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
-    const { video, brief, count, lang } = parsed.data;
+    const { video, brief, count, lang, guidance, force } = parsed.data;
+    let terms;
+    try {
+      terms = parseTermGroups(parsed.data.terms);
+    } catch (error) {
+      throw new HttpError(400, error.message);
+    }
     const source = await videoPath(video);
     const loaded = brief ? (await loadBrief(briefPath(brief))).brief : null;
 
     const job = jobs.add('suggest', video, (onStep) =>
       suggestMoments({
-        source, count, lang, brief: loaded, ai, onStep,
+        source, count, lang, brief: loaded, ai, onStep, terms, guidance, force,
         cacheDir: path.join(outDir, '.cache'),
         transcriber: transcriber ?? getTranscriber(),
       }),
@@ -316,6 +382,18 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
   });
 
   // Proposes corrections to a clip's caption words; saves nothing.
+  // Proposes hooks for the clip about to be cut; fills in nothing. The person clicks one.
+  app.post('/api/suggest-hook', async (req, res) => {
+    const parsed = hookRequest.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
+    const { video, start, end, brief, lang } = parsed.data;
+    const source = await videoPath(video);
+    const loaded = brief ? (await loadBrief(briefPath(brief))).brief : null;
+    const job = jobs.add('hook', video, (onStep) =>
+      suggestHooks({ source, start, end, lang, brief: loaded, ai, onStep, cacheDir: path.join(outDir, '.cache'), transcriber: transcriber ?? getTranscriber() }));
+    res.status(202).json(job);
+  });
+
   app.post('/api/clips/:name/fix-words', async (req, res) => {
     const { meta, transcript } = await readClip(clipPath(req.params.name)).catch((error) => {
       throw new HttpError(404, error.message);
@@ -377,10 +455,11 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
   // --- Sources and fetching (server/sources.js) ------------------------------
 
   addSourceRoutes(app, { dataDir, inDir, jobs, downloader, pictureDownload });
+  addChatRoutes(app, { dataDir, outDir, inDir, jobs, videoPath, ai, ...(downloader ? { downloader } : {}) });
 
   // --- My data: download and load (server/transfer.js) -------------------------
 
-  addTransferRoutes(app, { folders: { data: dataDir, sounds: soundsDir, briefs: briefsDir }, jobs });
+  addTransferRoutes(app, { folders: { data: dataDir, sounds: soundsDir, briefs: briefsDir, overlays: overlaysDir }, jobs });
 
   // --- The pages themselves -------------------------------------------------
 
@@ -416,6 +495,14 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
     const file = path.join(partsDir, name);
     const info = await stat(file).catch(() => null);
     if (!info?.isFile()) throw new HttpError(404, 'No such part.');
+    return file;
+  }
+
+  async function overlayPath(name) {
+    if (!isOverlayName(name)) throw new HttpError(404, 'No such overlay.');
+    const file = path.join(overlaysDir, name);
+    const info = await stat(file).catch(() => null);
+    if (!info?.isFile()) throw new HttpError(404, 'No such overlay.');
     return file;
   }
 
@@ -456,6 +543,11 @@ function summary({ clipDir, meta, warnings, checks }) {
 /** A bare file name: no folders, not hidden. */
 function isPlainName(name) {
   return typeof name === 'string' && name.length > 0 && name === path.basename(name) && !name.startsWith('.') && !name.includes('\\');
+}
+
+/** An overlay: a plain .png or .webp file name (both can be see-through). */
+function isOverlayName(name) {
+  return isPlainName(name) && ['.png', '.webp'].includes(extension(name));
 }
 
 /** A finished part: a plain .mp4 file name. Files still being written start with a dot. */

@@ -40,6 +40,17 @@ export const briefSchema = z
         text: z.string().trim().min(1).optional(),
       })
       .optional(),
+    // A logo or full-frame picture shown for the whole clip (src/overlay.js). Every clip made
+    // with this brief gets it, and the checks fail a clip rendered without it.
+    overlay: z
+      .strictObject({
+        image: z.string().min(1),
+        width: z.number().int().min(20).max(1080).default(220),
+        position: z.enum(['top-left', 'top-right', 'bottom-left', 'bottom-right']).default('top-left'),
+        margin: z.number().int().min(0).max(400).default(40),
+        offsetY: z.number().int().min(-1920).max(1920).default(0),
+      })
+      .optional(),
     // The whole source frame must stay visible, which only the blur layout does.
     keepFullFrame: z.boolean().default(false),
     // Fixes for words the transcriber gets wrong, such as brand names:
@@ -106,6 +117,12 @@ export async function loadBrief(file) {
       throw new Error(`${briefPath}: the end-card image was not found. Looked for:\n  ${candidates.join('\n  ')}`);
     }
     brief.endCard.image = found;
+  }
+  if (brief.overlay) {
+    const candidates = [path.resolve(brief.overlay.image), path.resolve(path.dirname(briefPath), brief.overlay.image)];
+    const found = await firstExisting(candidates);
+    if (!found) throw new Error(`${briefPath}: the overlay image was not found. Looked for:\n  ${candidates.join('\n  ')}`);
+    brief.overlay.image = found;
   }
   return { brief, path: briefPath };
 }

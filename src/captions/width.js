@@ -13,10 +13,13 @@ const ADVANCE = {
 const DIGIT = 556;
 const WIDEST = 944;
 
-// Measured on ffmpeg 4.4.2: at the caption style's size of 88, one em comes
-// out as 77 px, and the 6 px outline adds 12 px in total. With these numbers
-// the estimate was within 3 px of the rendered width on six test phrases.
-const EM_PIXELS = 77;
+// The caption size. It was 88; the owner asked for a little smaller on 2026-11-21.
+export const CAPTION_SIZE = 76;
+
+// Measured on ffmpeg 4.4.2: at size 88 one em came out as 77 px; at 76, re-measured on
+// the same six phrases (2026-11-21), 66.5 px. The 6 px outline adds 12 px in total.
+// With these numbers the estimate is within 10 px of the rendered width on all six.
+const EM_PIXELS = 66.5;
 const OUTLINE_PIXELS = 12;
 
 /**

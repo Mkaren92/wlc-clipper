@@ -13,9 +13,232 @@ export const FONTS_LINK = 'fonts';
 // Background of the end card, behind the image if there is one.
 export const CARD_COLOUR = '0x111111';
 
-// The facecam layout: webcam panel on top, gameplay panel below.
+// The facecam layout: webcam panel on top, gameplay panel below. The webcam panel
+// follows the shape of the webcam box (asked for on 2026-11-21: "not all cams are
+// 16:9"): full width, as tall as that shape makes it, within these limits so the
+// gameplay always keeps at least 40% of the screen and the cam at least a quarter.
+// CAM_HEIGHT is the fixed panel of clips made before, which keep it.
 export const CAM_HEIGHT = 640;
+export const CAM_MIN_HEIGHT = 480;
+export const CAM_MAX_HEIGHT = 1152;
 const GAME_HEIGHT = OUT_HEIGHT - CAM_HEIGHT;
+
+/**
+ * How tall the webcam panel is for a webcam box of this shape: the full width
+ * of the clip, and the height that keeps the box's shape, within the limits.
+ * A box wider than 1080:480 or taller than 1080:1152 has its edges cropped.
+ *
+ * @param {{ width: number, height: number } | null | undefined} cam
+ * @returns {number} an even number of pixels
+ */
+export function camPanelHeight(cam) {
+  if (!cam || !(cam.width > 0) || !(cam.height > 0)) return CAM_HEIGHT;
+  const fitting = toEven((OUT_WIDTH * cam.height) / cam.width);
+  return Math.min(CAM_MAX_HEIGHT, Math.max(CAM_MIN_HEIGHT, fitting));
+}
+
+/**
+ * How a content box the owner drew sits in the lower panel: whole, filling the
+ * panel when it has the panel's shape, otherwise with a blurred copy of itself
+ * behind it at the sides or above and below.
+ *
+ * @param {{ width: number, height: number }} game
+ * @param {number} camHeight
+ * @returns {{ fills: boolean, blurred: 'sides' | 'top and bottom' | null }}
+ */
+export function gameFit(game, camHeight = CAM_HEIGHT) {
+  const panel = OUT_WIDTH / (OUT_HEIGHT - camHeight);
+  const shape = game.width / game.height;
+  if (Math.abs(shape - panel) <= ASPECT_TOLERANCE * 4) return { fills: true, blurred: null };
+  return { fills: false, blurred: shape < panel ? 'sides' : 'top and bottom' };
+}
+
+/**
+ * A content box of the lower panel's shape, as large as fits inside `game`'s
+ * place and centred on it: what "Fit to the panel" makes of the owner's box.
+ *
+ * @param {{ x: number, y: number, width: number, height: number }} game
+ * @param {number} camHeight
+ */
+export function fitGameToPanel(game, camHeight = CAM_HEIGHT) {
+  const window = cropWindow(game, OUT_WIDTH / (OUT_HEIGHT - camHeight));
+  return { x: window.x, y: window.y, width: window.width, height: window.height };
+}
+
+/**
+ * The gameplay window of the facecam layout under a webcam panel this tall:
+ * the largest window of the lower panel's shape. The page draws it from this.
+ *
+ * @param {{ x: number, y: number, width: number, height: number }} area   the usable area (describeLayouts)
+ * @param {number} camHeight
+ */
+export function facecamGameWindow(area, camHeight = CAM_HEIGHT) {
+  return cropWindow(area, OUT_WIDTH / (OUT_HEIGHT - camHeight));
+}
+
+// --- The overlay: a logo in a corner, or a full-frame picture, for the whole clip ---
+export const OVERLAY_POSITIONS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+export const OVERLAY_DEFAULTS = { width: 220, position: 'top-left', margin: 40, offsetY: 0 };
+export const OVERLAY_LIMITS = { width: [20, OUT_WIDTH], margin: [0, 400], offsetY: [-OUT_HEIGHT, OUT_HEIGHT] };
+// Where a line of captions is drawn: it ends 520 px above the bottom (CAPTION_MARGIN in
+// captions/ass.js) and one line at size 76 with its outline is about 110 px tall. A test
+// holds these to the subtitle file's numbers.
+export const CAPTION_AREA = { top: OUT_HEIGHT - 520 - 110, bottom: OUT_HEIGHT - 520 };
+// The bottom 15% of the frame, where the apps put their own text and buttons.
+export const BOTTOM_AREA_TOP = Math.round(OUT_HEIGHT * 0.85);
+// A picture this close to 9:16 is a full-frame overlay; anything else is a logo.
+const FULL_FRAME_TOLERANCE = 0.01;
+
+/** Whether an image of this size is a full-frame overlay (the clip's 9:16 shape) or a logo. */
+export function overlayKind(imageWidth, imageHeight) {
+  return Math.abs(imageWidth / imageHeight - OUT_WIDTH / OUT_HEIGHT) <= FULL_FRAME_TOLERANCE ? 'full' : 'logo';
+}
+
+/**
+ * Where the overlay lands in the clip, in output pixels: the whole frame for a
+ * full-frame picture, else the logo at its width in its corner, moved by the offset.
+ *
+ * @param {{ imageWidth: number, imageHeight: number, kind?: string, width: number, position: string, margin: number, offsetY: number }} overlay
+ * @returns {{ x: number, y: number, width: number, height: number }}
+ */
+export function overlayBox(overlay) {
+  if ((overlay.kind ?? overlayKind(overlay.imageWidth, overlay.imageHeight)) === 'full') return { x: 0, y: 0, width: OUT_WIDTH, height: OUT_HEIGHT };
+  const width = overlay.width;
+  const height = Math.round((width * overlay.imageHeight) / overlay.imageWidth);
+  const right = overlay.position.endsWith('right');
+  const bottom = overlay.position.startsWith('bottom');
+  const x = right ? OUT_WIDTH - width - overlay.margin : overlay.margin;
+  const y = (bottom ? OUT_HEIGHT - height - overlay.margin : overlay.margin) + overlay.offsetY;
+  return { x, y, width, height };
+}
+
+/**
+ * What the preview warns about: a logo over the captions, in the bottom 15% the apps
+ * cover, or partly off the frame. A full-frame picture is meant to cover everything.
+ *
+ * @param {Parameters<typeof overlayBox>[0]} overlay
+ * @returns {string[]}
+ */
+export function overlayWarnings(overlay) {
+  if ((overlay.kind ?? overlayKind(overlay.imageWidth, overlay.imageHeight)) === 'full') return [];
+  const box = overlayBox(overlay);
+  const warnings = [];
+  if (box.y < CAPTION_AREA.bottom && box.y + box.height > CAPTION_AREA.top) warnings.push('The logo overlaps the captions.');
+  if (box.y + box.height > BOTTOM_AREA_TOP) warnings.push('The logo reaches into the bottom 15% of the frame, which the apps cover with their own text and buttons.');
+  if (box.x < 0 || box.y < 0 || box.x + box.width > OUT_WIDTH || box.y + box.height > OUT_HEIGHT) warnings.push('Part of the logo is outside the frame.');
+  return warnings;
+}
+
+/**
+ * The filter steps that put the overlay over the laid-out picture. `[pre]` is the
+ * picture before the captions; the image is ffmpeg input number `input`. The
+ * position expressions are those of the brief: the logo's own size (w, h) is
+ * ffmpeg's to work out, from the width and the image's shape.
+ */
+function overlaySteps(overlay, input) {
+  if (overlay.kind === 'full') return `[${input}:v]scale=${OUT_WIDTH}:${OUT_HEIGHT}[lg];[pre][lg]overlay=0:0`;
+  const m = overlay.margin;
+  const x = overlay.position.endsWith('right') ? `W-w-${m}` : String(m);
+  const yBase = overlay.position.startsWith('bottom') ? `H-h-${m}` : String(m);
+  const y = overlay.offsetY === 0 ? yBase : `${yBase}${overlay.offsetY > 0 ? '+' : ''}${overlay.offsetY}`;
+  return `[${input}:v]scale=${overlay.width}:-1[lg];[pre][lg]overlay=${x}:${y}`;
+}
+
+/** ffmpeg's input number for the overlay image: after the source and the end card's one or two. */
+export function overlayInput(endCard) {
+  return 1 + (endCard ? (endCard.image ? 2 : 1) : 0);
+}
+
+// --- Blur boxes: hide part of the picture for part of the clip ---
+// Asked for by the owner on 2026-11-21: game footage can show nudity that the apps take
+// down (TikTok and Instagram treat a game's like a real one), so a part of the frame is
+// blurred or blacked out for a few seconds rather than the whole clip being lost.
+
+export const BLUR_STYLES = ['blur', 'black'];
+export const MAX_BLURS = 20;
+// Smaller than this and a blur has too little room to hide anything.
+export const BLUR_MIN_SIZE = 16;
+
+/**
+ * @typedef {object} BlurBox
+ * @property {number} x        left edge in source pixels (the whole frame, before any trim)
+ * @property {number} y
+ * @property {number} width
+ * @property {number} height
+ * @property {number} start    seconds from the clip's start
+ * @property {number} end
+ * @property {'blur' | 'black'} style
+ */
+
+/**
+ * Check blur boxes against the source and the clip's length, and tidy them: even
+ * pixels (the picture's colour is stored at half size) and times to the hundredth.
+ *
+ * @param {Partial<BlurBox>[]} blurs
+ * @param {{ width: number, height: number }} source
+ * @param {number} length   the clip's footage, in seconds
+ * @returns {BlurBox[]}
+ */
+export function checkBlurs(blurs, source, length) {
+  if (!Array.isArray(blurs)) throw new Error('The blur boxes must be a list.');
+  if (blurs.length > MAX_BLURS) throw new Error(`A clip can have at most ${MAX_BLURS} blur boxes.`);
+  return blurs.map((given, index) => {
+    const n = index + 1;
+    const style = given.style ?? 'blur';
+    if (!BLUR_STYLES.includes(style)) throw new Error(`Blur box ${n}: the style must be one of: ${BLUR_STYLES.join(', ')}.`);
+    for (const key of ['x', 'y', 'width', 'height']) {
+      if (!Number.isInteger(given[key]) || given[key] < 0) throw new Error(`Blur box ${n}: ${key} must be a whole number of pixels, 0 or more.`);
+    }
+    const x = given.x - (given.x % 2);
+    const y = given.y - (given.y % 2);
+    const width = given.width - (given.width % 2);
+    const height = given.height - (given.height % 2);
+    if (given.x + given.width > source.width || given.y + given.height > source.height) {
+      throw new Error(`Blur box ${n} does not fit inside the ${source.width}x${source.height} video.`);
+    }
+    if (width < BLUR_MIN_SIZE || height < BLUR_MIN_SIZE) throw new Error(`Blur box ${n} must be at least ${BLUR_MIN_SIZE}×${BLUR_MIN_SIZE} pixels.`);
+    const start = Math.round(Number(given.start) * 100) / 100;
+    const end = Math.round(Number(given.end) * 100) / 100;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
+      throw new Error(`Blur box ${n}: it must start at 0 s or later and end after it starts.`);
+    }
+    if (start >= length) throw new Error(`Blur box ${n} starts after the clip ends (${length.toFixed(2)} s).`);
+    return { x, y, width, height, start, end: Math.min(end, Math.round(length * 100) / 100), style };
+  });
+}
+
+/**
+ * The first steps of a graph with blur boxes: each box is covered on the source frames,
+ * before any layout, so it stays over the same thing wherever the layout puts it. A blur is
+ * a crop of the box, blurred hard and laid back where it was; black is a filled box. Both
+ * are on only between their start and end. Ends in a stream the layout goes on from.
+ *
+ * @param {BlurBox[]} blurs   already checked
+ */
+function coverSteps(blurs) {
+  const steps = [];
+  let from = INPUT;
+  blurs.forEach((box, i) => {
+    const when = `enable='between(t,${box.start},${box.end})'`;
+    if (box.style === 'black') {
+      from = `${from},drawbox=x=${box.x}:y=${box.y}:w=${box.width}:h=${box.height}:color=black:t=fill:${when}`;
+      return;
+    }
+    // A plain blur of a big box still showed shapes (2026-11-21, on game footage), so the box
+    // is first shrunk to about a sixteenth of its size and grown back, which keeps only its
+    // colours, and then blurred. The blur's reach is held to what the box allows: half its
+    // shorter side, and half that again for the colour, which is stored at half size.
+    const small = (n) => Math.max(4, 2 * Math.floor(n / 32));
+    const side = Math.min(box.width, box.height);
+    const luma = Math.max(1, Math.min(40, Math.floor(side / 2) - 1));
+    const chroma = Math.max(1, Math.min(20, Math.floor(side / 4) - 1));
+    steps.push(`${from},split=2[bv${i}][bc${i}]`);
+    steps.push(`[bc${i}]crop=${box.width}:${box.height}:${box.x}:${box.y},scale=${small(box.width)}:${small(box.height)},scale=${box.width}:${box.height}:flags=bicubic,boxblur=${luma}:3:${chroma}:3[bz${i}]`);
+    from = `[bv${i}][bz${i}]overlay=${box.x}:${box.y}:${when}`;
+  });
+  steps.push(`${from}[covered]`);
+  return `${steps.join(';')};[covered]null`;
+}
 
 // A source this close to the wanted shape is scaled without cropping.
 const ASPECT_TOLERANCE = 0.005;
@@ -41,6 +264,15 @@ const MAX_TRIM_SHARE = 0.05;
  * @param {number} [options.trim]    pixels cut off every edge of the source first
  * @param {{ x: number, y: number, width: number, height: number }} [options.cam]
  *   webcam rectangle in source pixels, facecam layout only
+ * @param {number} [options.camHeight]   the webcam panel's height (camPanelHeight); clips made
+ *   before it followed the cam's shape have none and keep CAM_HEIGHT
+ * @param {import('./overlay.js').Overlay | null} [options.overlay]   shown over the whole clip,
+ *   under the captions; without one the graph is exactly what it always was
+ * @param {{ x: number, y: number, width: number, height: number }} [options.game]
+ *   the content box in source pixels, facecam layout only; without it the middle of the
+ *   gameplay is taken, as before
+ * @param {BlurBox[]} [options.blurs]   parts of the frame hidden for part of the clip, already
+ *   checked (checkBlurs); without any the graph is exactly what it always was
  * @param {boolean} [options.subtitles]   burn in the clip folder's subtitle file
  * @param {{ at: number, seconds: number, image?: boolean }} [options.endCard]
  *   show the card for `seconds` after the footage ends at `at`. The card's
@@ -52,7 +284,7 @@ const MAX_TRIM_SHARE = 0.05;
  *   than the 9:16 column, or null. `audioLabel` names the sound output when
  *   the graph makes one; otherwise the source's sound is used as it is.
  */
-export function buildFilter({ layout, source, cropX, cropWidth, trim = 0, cam, subtitles = false, endCard }) {
+export function buildFilter({ layout, source, cropX, cropWidth, trim = 0, cam, camHeight = CAM_HEIGHT, game, overlay = null, blurs = [], subtitles = false, endCard }) {
   if (!LAYOUTS.includes(layout)) {
     throw new Error(`Unknown layout "${layout}". Use one of: ${LAYOUTS.join(', ')}.`);
   }
@@ -65,14 +297,18 @@ export function buildFilter({ layout, source, cropX, cropWidth, trim = 0, cam, s
   if (cam && layout !== 'facecam') {
     throw new Error('--cam only applies to the facecam layout.');
   }
+  if (game && layout !== 'facecam') {
+    throw new Error('--game only applies to the facecam layout.');
+  }
 
   const area = usableArea(source, trim);
-  const end = pictureEnd({ subtitles, endCard });
+  const end = pictureEnd({ subtitles, endCard, overlay });
+  const input = blurs.length > 0 ? coverSteps(blurs) : INPUT;
 
   let picture;
-  if (layout === 'center') picture = centerFilter(area, cropX, cropWidth, end);
-  else if (layout === 'blur') picture = { graph: blurGraph(area, end), cropX: null, cropWidth: null };
-  else picture = { graph: facecamGraph(source, area, cam, end), cropX: null, cropWidth: null };
+  if (layout === 'center') picture = centerFilter(area, cropX, cropWidth, end, input);
+  else if (layout === 'blur') picture = { graph: blurGraph(area, end, input), cropX: null, cropWidth: null };
+  else picture = { graph: facecamGraph(source, area, cam, end, camHeight, game, input), cropX: null, cropWidth: null };
 
   // The card adds time after the footage, so the sound needs silence to match.
   if (endCard && source.audioStreams > 0) {
@@ -85,7 +321,7 @@ export function buildFilter({ layout, source, cropX, cropWidth, trim = 0, cam, s
  * The last steps of every layout: square pixels, then the end card, then the
  * subtitles on top of everything.
  */
-function pictureEnd({ subtitles, endCard }) {
+function pictureEnd({ subtitles, endCard, overlay = null }) {
   let steps = 'setsar=1';
   if (endCard) {
     const size = `${OUT_WIDTH}:${OUT_HEIGHT}`;
@@ -103,6 +339,9 @@ function pictureEnd({ subtitles, endCard }) {
         ].join(';')
       : `${hold};[base][1:v]${cover}`;
   }
+  // The overlay goes over the picture and the end card, and under the captions, from the
+  // first frame to the last.
+  if (overlay) steps = `${steps}[pre];${overlaySteps(overlay, overlayInput(endCard))}`;
   if (subtitles) steps += `,subtitles=${SUBTITLE_FILE}:fontsdir=${FONTS_LINK}`;
   return `${steps}[v]`;
 }
@@ -135,6 +374,7 @@ export function describeLayouts(source, trim = 0, cropWidth) {
     center: centerWindow(area, cropWidth),
     centerWidths: column.minX === null ? null : { min: column.width, max: toEven(area.width) },
     game: cropWindow(area, OUT_WIDTH / GAME_HEIGHT),
+    // The shape of the webcam panel before it followed the box; kept for the default box.
     camAspect: OUT_WIDTH / CAM_HEIGHT,
   };
 }
@@ -202,7 +442,7 @@ function centerWindow(area, cropWidth) {
  * Crop a 9:16 column out of the source and scale it to the output size. With
  * a wider crop, the crop is shown whole over a blurred copy of itself.
  */
-function centerFilter(area, cropX, cropWidth, end) {
+function centerFilter(area, cropX, cropWidth, end, input = INPUT) {
   const column = cropWindow(area, OUT_WIDTH / OUT_HEIGHT);
   if (column.minX === null && (cropX !== undefined || cropWidth !== undefined)) {
     const option = cropX !== undefined ? '--crop-x' : '--crop-width';
@@ -211,11 +451,11 @@ function centerFilter(area, cropX, cropWidth, end) {
   const window = centerWindow(area, cropWidth);
   if (window.width > column.width) {
     const x = clamp(cropX ?? window.x, window.minX, window.maxX);
-    return { graph: blurGraph({ ...window, x, trimmed: true }, end), cropX: x, cropWidth: window.width };
+    return { graph: blurGraph({ ...window, x, trimmed: true }, end, input), cropX: x, cropWidth: window.width };
   }
   const fit = fitCrop(area, OUT_WIDTH / OUT_HEIGHT, cropX);
   return {
-    graph: `${INPUT},${fit.step}scale=${OUT_WIDTH}:${OUT_HEIGHT},${end}`,
+    graph: `${input},${fit.step}scale=${OUT_WIDTH}:${OUT_HEIGHT},${end}`,
     cropX: fit.cropX,
     cropWidth: null,
   };
@@ -226,11 +466,11 @@ function centerFilter(area, cropX, cropWidth, end) {
  * screen. `area` is the frame for the blur layout, or the center layout's
  * wider crop.
  */
-function blurGraph(area, end) {
+function blurGraph(area, end, input = INPUT) {
   const size = `${OUT_WIDTH}:${OUT_HEIGHT}`;
   const trim = area.trimmed ? `,${cropStep(area)}` : '';
   return [
-    `${INPUT}${trim},split=2[a][b]`,
+    `${input}${trim},split=2[a][b]`,
     `[a]scale=${size}:force_original_aspect_ratio=increase,crop=${size},boxblur=20:5[bg]`,
     `[b]scale=${size}:force_original_aspect_ratio=decrease:force_divisible_by=2[fg]`,
     `[bg][fg]overlay=(W-w)/2:(H-h)/2,${end}`,
@@ -238,17 +478,41 @@ function blurGraph(area, end) {
 }
 
 /** The webcam rectangle on top, the middle of the gameplay below it. */
-function facecamGraph(source, area, cam, end) {
+function facecamGraph(source, area, cam, end, camHeight, game, input = INPUT) {
   if (!cam) throw new Error('The facecam layout needs --cam x,y,w,h: the webcam rectangle in source pixels.');
   if (cam.width <= 0 || cam.height <= 0 || cam.x + cam.width > source.width || cam.y + cam.height > source.height) {
     throw new Error(`The --cam rectangle does not fit inside the ${source.width}x${source.height} video.`);
   }
-  const camSize = `${OUT_WIDTH}:${CAM_HEIGHT}`;
-  const game = fitCrop(area, OUT_WIDTH / GAME_HEIGHT);
+  if (!Number.isInteger(camHeight) || camHeight % 2 !== 0 || camHeight < CAM_MIN_HEIGHT || camHeight > CAM_MAX_HEIGHT) {
+    throw new Error(`The webcam panel must be an even number of pixels from ${CAM_MIN_HEIGHT} to ${CAM_MAX_HEIGHT} tall.`);
+  }
+  const gameHeight = OUT_HEIGHT - camHeight;
+  const camSize = `${OUT_WIDTH}:${camHeight}`;
+  // A box of the panel's own shape fills it exactly; one past the limits loses only its edges.
+  const camPart = `[a]${cropStep(cam)},scale=${camSize}:force_original_aspect_ratio=increase,crop=${camSize}[cam]`;
+  if (game) {
+    // The owner's own content box, chosen apart from the webcam box: shown whole. In the
+    // panel's shape it fills it; in another shape a blurred copy of it fills the rest, as the
+    // center layout's wider crop does, so nothing the owner chose is cut away.
+    if (!(game.width > 0) || !(game.height > 0) || game.x < 0 || game.y < 0 || game.x + game.width > source.width || game.y + game.height > source.height) {
+      throw new Error(`The --game rectangle does not fit inside the ${source.width}x${source.height} video.`);
+    }
+    const size = `${OUT_WIDTH}:${gameHeight}`;
+    const content = gameFit(game, camHeight).fills
+      ? [`[b]${cropStep(game)},scale=${size}[game]`]
+      : [
+        `[b]${cropStep(game)},split=2[gb][gf]`,
+        `[gb]scale=${size}:force_original_aspect_ratio=increase,crop=${size},boxblur=20:5[gbg]`,
+        `[gf]scale=${size}:force_original_aspect_ratio=decrease:force_divisible_by=2[gfg]`,
+        `[gbg][gfg]overlay=(W-w)/2:(H-h)/2[game]`,
+      ];
+    return [`${input},split=2[a][b]`, camPart, ...content, `[cam][game]vstack=inputs=2,${end}`].join(';');
+  }
+  const window = fitCrop(area, OUT_WIDTH / gameHeight);
   return [
-    `${INPUT},split=2[a][b]`,
-    `[a]${cropStep(cam)},scale=${camSize}:force_original_aspect_ratio=increase,crop=${camSize}[cam]`,
-    `[b]${game.step}scale=${OUT_WIDTH}:${GAME_HEIGHT}[game]`,
+    `${input},split=2[a][b]`,
+    camPart,
+    `[b]${window.step}scale=${OUT_WIDTH}:${gameHeight}[game]`,
     `[cam][game]vstack=inputs=2,${end}`,
   ].join(';');
 }

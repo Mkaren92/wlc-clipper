@@ -9,6 +9,9 @@ const STEP_NAMES = {
   items: 'making the segments',
   looking: 'looking the video up',
   fetching: 'downloading the part',
+  chat: 'downloading the chat replay',
+  finding: 'finding the best moments',
+  comments: 'reading the comments',
   'fetching-slow': 'downloading the part the slow way',
   pictures: 'asking YouTube',
   tidying: 'preparing the video',
@@ -22,6 +25,8 @@ export const jobs = reactive({
   list: [],
   /** Moments last suggested for each video, by file name. */
   suggestions: {},
+  // What the suggested-moments list shows, per video, for the marks above the timeline.
+  momentMarks: {},
   /** Suggestions already sent for cutting, by file name: a list of "start-end" keys. */
   cutMoments: {},
   /** Finished jobs the person has closed the notice for. */
@@ -97,11 +102,17 @@ export function describe(job) {
     channel: `Looking up ${job.label}`,
     render: `Rendering ${job.label} again`,
     suggest: `Finding moments in ${job.label}`,
+    hook: `Writing hooks for ${job.label}`,
+    chat: `Fetching the chat of ${job.label}`,
+    'chat-check': `Checking the chat moments of ${job.label}`,
+    'chat-clips': `Getting ${job.label}`,
   }[job.kind] ?? job.label;
   if (job.status === 'queued') return `${what}: waiting for the job before it`;
   if (job.status === 'running') {
     const seconds = Math.max(0, Math.round((jobs.now - (job.startedAt ?? job.createdAt)) / 1000));
-    return `${what}: ${STEP_NAMES[job.step] ?? (job.kind === 'part' || job.kind === 'combine' ? 'encoding' : 'starting')}… ${seconds} s`;
+    // A job that makes several parts says which one it is on.
+    const which = job.detail?.total ? `downloading clip ${job.detail.done + 1} of ${job.detail.total}` : null;
+    return `${what}: ${which ?? STEP_NAMES[job.step] ?? (job.kind === 'part' || job.kind === 'combine' ? 'encoding' : 'starting')}… ${seconds} s`;
   }
   if (job.status === 'stopped') return `${what}: stopped.`;
   if (job.status === 'failed') return `${what} failed. ${job.error}`;
@@ -115,5 +126,9 @@ export function describe(job) {
     fetch: `${job.result?.name} is in your videos.${job.result?.early > 0.05 ? ` It starts ${job.result.early.toFixed(1)} s before the time you asked.` : ''}`,
     render: `${job.label} was rendered again.`,
     suggest: `Suggestions for ${job.label} are ready.`,
+    hook: `Hooks for ${job.label} are ready.`,
+    chat: `The chat of ${job.label} is in: ${job.result?.messages ?? 0} messages.`,
+    'chat-clips': `${job.result?.clips?.filter((clip) => clip.name).length ?? 0} clips are in your videos${job.result?.words?.length ? `, ${job.result.matched} with your words` : ''}.`,
+    'chat-check': job.result?.error ? `The chat check for ${job.label} did not work: ${job.result.error}` : `The chat moments of ${job.label} are checked.`,
   }[job.kind];
 }

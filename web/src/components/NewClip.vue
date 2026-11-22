@@ -7,6 +7,8 @@ import { clock } from '../format.js';
 import { describe, isActive, jobs, track } from '../jobs.js';
 import FramePicker from './FramePicker.vue';
 import Icon from './Icon.vue';
+import MomentFinder from './MomentFinder.vue';
+import { BOTTOM_AREA_TOP, CAM_MAX_HEIGHT, CAM_MIN_HEIGHT, CAPTION_AREA, BLUR_MIN_SIZE, camPanelHeight, facecamGameWindow, MAX_BLURS, fitGameToPanel, gameFit, OUT_HEIGHT, OUT_WIDTH, OVERLAY_DEFAULTS, OVERLAY_POSITIONS, overlayBox, overlayWarnings } from '../../../src/layout.js';
 
 const props = defineProps({
   video: { type: String, required: true },
@@ -37,6 +39,58 @@ const cropX = ref(undefined);
 // Width of the center crop in source pixels; undefined is the 9:16 column.
 const cropWidth = ref(undefined);
 const cam = ref(undefined);
+// The webcam box's shape: free, or kept at one of these while resizing.
+const CAM_SHAPES = [{ name: 'Free', aspect: null }, { name: '16:9', aspect: 16 / 9 }, { name: '4:3', aspect: 4 / 3 }, { name: '1:1', aspect: 1 }];
+const camShape = ref(null);
+// The content box under the webcam: its own box, resized apart from the webcam's.
+const game = ref(undefined);
+const gameShown = computed(() => (cam.value && game.value ? gameFit(game.value, camPanelHeight(cam.value)) : null));
+// --- Blur boxes: part of the picture hidden for some seconds (checked by checkBlurs in src/layout.js) ---
+// Kept in the video's own seconds, so a box stays on the same footage when the clip's start moves.
+const blurs = ref([]);
+function addBlur() {
+  const side = Math.max(BLUR_MIN_SIZE, Math.round(Math.min(info.value.width, info.value.height) * 0.15));
+  const from = Number(here());
+  blurs.value = [...blurs.value, {
+    x: Math.round((info.value.width - side) / 2), y: Math.round((info.value.height - side) / 2), width: side, height: side,
+    from, to: Number(Math.min(from + 2, duration.value || from + 2).toFixed(2)), style: 'blur',
+  }];
+}
+const removeBlur = (i) => (blurs.value = blurs.value.filter((_, n) => n !== i));
+function changeBlur(i, change) {
+  const copy = [...blurs.value];
+  copy[i] = { ...copy[i], ...change };
+  blurs.value = copy;
+}
+const inClip = (box) => startSeconds.value !== null && endSeconds.value !== null && box.to > startSeconds.value && box.from < endSeconds.value;
+function blurProblem(box) {
+  if (!(box.to > box.from)) return 'It ends before it starts.';
+  if (startSeconds.value !== null && endSeconds.value !== null && !inClip(box)) return "It is outside the clip's range, so it is left out.";
+  return '';
+}
+// What the engine takes: seconds from the clip's start, cut to the clip.
+const blursToSend = () => blurs.value.filter(inClip).map((box) => ({
+  x: box.x, y: box.y, width: box.width, height: box.height, style: box.style,
+  start: Math.round(Math.max(0, box.from - startSeconds.value) * 100) / 100,
+  end: Math.round((Math.min(box.to, endSeconds.value) - startSeconds.value) * 100) / 100,
+}));
+function fitGame() {
+  game.value = fitGameToPanel(game.value, camPanelHeight(cam.value));
+}
+function chooseCamShape(aspect) {
+  camShape.value = aspect;
+  if (!aspect || !cam.value || !info.value) return;
+  // Keep the box's width and place, and make it the chosen shape, inside the video.
+  const height = Math.min(Math.round(cam.value.width / aspect), info.value.height - cam.value.y);
+  cam.value = { ...cam.value, width: Math.round(height * aspect), height };
+}
+// The top panel of the clip, as tall as the box's shape makes it (the engine's sums).
+const camPanel = computed(() => {
+  if (!cam.value) return null;
+  const height = camPanelHeight(cam.value);
+  const fitting = (1080 * cam.value.height) / cam.value.width;
+  return { height, game: OUT_HEIGHT - height, cropped: fitting < CAM_MIN_HEIGHT - 2 ? 'sides' : fitting > CAM_MAX_HEIGHT + 2 ? 'top and bottom' : null };
+});
 const trim = ref(0);
 const hook = ref('');
 const hookSeconds = ref(2.5); // 0 keeps the hook for the whole clip
@@ -73,35 +127,68 @@ async function savePart() {
 
 // --- AI suggestions ---------------------------------------------------------
 
-const ai = ref(null); // { configured, service, model }
-const suggestCount = ref(5);
-const suggestError = ref('');
-const moments = computed(() => jobs.suggestions[props.video] ?? []);
-const suggestJob = computed(() => jobs.list.find((job) => job.kind === 'suggest' && isActive(job) && job.label === props.video));
-const noMoments = computed(() => props.video in jobs.suggestions && moments.value.length === 0);
-api.ai().then((answer) => (ai.value = answer), () => {});
+// --- Overlay: a logo or full-frame picture for the whole clip, from the overlays folder ---
+const overlays = ref([]);
+api.overlays().then((list) => (overlays.value = list.filter((one) => !one.error)), () => {});
+const overlayName = ref('');
+const overlaySettings = ref({ ...OVERLAY_DEFAULTS });
+const POSITION_NAMES = { 'top-left': 'Top left', 'top-right': 'Top right', 'bottom-left': 'Bottom left', 'bottom-right': 'Bottom right' };
+// The brief wins: a brief with an overlay uses its own, whatever is chosen here.
+const briefOverlay = computed(() => {
+  const entry = props.briefs.find((b) => b.file === brief.value && b.ok);
+  return entry?.brief?.overlay ? { ...entry.brief.overlay, name: entry.brief.overlay.image.split(/[\\/]/).pop(), size: entry.overlaySize } : null;
+});
+// What will be drawn, in the clip's own pixels: the engine's sums (src/layout.js).
+const overlayShown = computed(() => {
+  if (briefOverlay.value) {
+    if (!briefOverlay.value.size) return null;
+    return { ...briefOverlay.value, imageWidth: briefOverlay.value.size.width, imageHeight: briefOverlay.value.size.height };
+  }
+  const image = overlays.value.find((one) => one.name === overlayName.value);
+  return image ? { ...overlaySettings.value, imageWidth: image.width, imageHeight: image.height, kind: image.kind } : null;
+});
+const overlayPlace = computed(() => (overlayShown.value ? overlayBox(overlayShown.value) : null));
+const overlayProblems = computed(() => (overlayShown.value ? overlayWarnings(overlayShown.value) : []));
+const sketch = (top, height) => ({ top: `${(top / OUT_HEIGHT) * 100}%`, height: `${(height / OUT_HEIGHT) * 100}%` });
 
-async function suggest() {
-  suggestError.value = '';
+// --- Hooks from the AI: proposals for the clip being set up, clicked into the hook box ---
+const hookIdeas = ref([]);
+const hookError = ref('');
+const hookJob = computed(() => jobs.list.find((job) => job.kind === 'hook' && isActive(job) && job.label === props.video));
+async function suggestHook() {
+  hookError.value = '';
+  hookIdeas.value = [];
   try {
-    await track(await api.suggest({
-      video: props.video, count: suggestCount.value || 5, brief: brief.value, lang: lang.value,
-    }));
+    const started = await api.suggestHook({ video: props.video, start: start.value, end: end.value, brief: brief.value, lang: lang.value });
+    // The answer is shown here, beside the box; the side column need not announce it as well.
+    jobs.dismissed.push(started.id);
+    hookIdeas.value = (await track(started)).hooks;
+    if (hookIdeas.value.length === 0) hookError.value = 'No usable hook came back. Try again.';
   } catch (error) {
-    suggestError.value = error.message;
+    hookError.value = error.message;
   }
 }
+
+// The list itself is in MomentFinder.vue (transcript, chat or both). The marks above the
+// timeline follow what that list shows.
+const ai = ref(null); // { configured, service, model }
+const moments = computed(() => jobs.momentMarks[props.video] ?? []);
+api.ai().then((answer) => (ai.value = answer), () => {});
+// The longest clip the chosen brief allows, which caps a moment merged from two sources.
+const maxSeconds = computed(() => {
+  const chosen = props.briefs.find((one) => one.file === brief.value && one.ok)?.brief;
+  return Math.max(1, (chosen?.maxSeconds ?? 60) - (chosen?.endCard?.seconds ?? 0));
+});
 
 // Which suggestion the form was filled from, so it can be shown as the one
 // being worked on. It stays marked while the range is fine-tuned by hand.
 const keyOf = (moment) => `${moment.start}-${moment.end}`;
 const usedKey = ref('');
 const usedNumber = computed(() => moments.value.findIndex((moment) => keyOf(moment) === usedKey.value) + 1);
-const alreadyCut = (moment) => (jobs.cutMoments[props.video] ?? []).includes(keyOf(moment));
 
 // Fill the form from a suggestion. Nothing is cut until "Cut the clip" is pressed.
 function useMoment(moment) {
-  usedKey.value = keyOf(moment);
+  usedKey.value = moment.key ?? keyOf(moment);
   start.value = String(moment.start);
   end.value = String(moment.end);
   hook.value = moment.hook ?? '';
@@ -144,9 +231,12 @@ const widthSlider = computed({
 // Give the webcam box a starting place the first time facecam is chosen.
 watch(layout, (name) => {
   if (name !== 'facecam' || cam.value || !info.value) return;
-  const width = Math.round(info.value.width * 0.375);
-  const height = Math.round(width / info.value.layouts.camAspect);
+  const width = Math.round(info.value.width * 0.3);
+  const height = Math.round(width / (16 / 9));
   cam.value = { x: Math.round((info.value.width - width) / 2), y: Math.round(info.value.height * 0.1), width, height };
+  // The content box starts as the middle of the gameplay under that webcam; from then on it is the owner's.
+  const start = facecamGameWindow(info.value.layouts.area, camPanelHeight(cam.value));
+  game.value = { x: start.x, y: start.y, width: start.width, height: start.height };
 });
 
 /** Read "90", "1:30" or "1:02:03.5" as seconds; null when it is not a time. */
@@ -277,6 +367,9 @@ async function cut() {
       cropX: layout.value === 'center' ? cropX.value : undefined,
       cropWidth: layout.value === 'center' ? cropWidth.value : undefined,
       cam: layout.value === 'facecam' ? cam.value : undefined,
+      game: layout.value === 'facecam' ? game.value : undefined,
+      blurs: blursToSend(),
+      overlay: overlayName.value && !briefOverlay.value ? { name: overlayName.value, ...overlaySettings.value } : undefined,
       trim: trim.value || 0,
       hook: hook.value,
       hookSeconds: hookSeconds.value,
@@ -324,8 +417,8 @@ async function cut() {
         </p>
 
         <FramePicker
-          ref="picker" v-model:crop-x="cropX" v-model:cam="cam"
-          :src="api.videoUrl(video)" :info="info" :layout="layout"
+          ref="picker" v-model:crop-x="cropX" v-model:cam="cam" v-model:cam-shape="camShape" v-model:game="game" v-model:blurs="blurs"
+          :src="api.videoUrl(video)" :info="info" :layout="layout" :now="time"
           @time="onTime" @duration="duration = $event" @playing="playing = $event" @unplayable="playable = false"
         />
 
@@ -442,15 +535,92 @@ async function cut() {
               It starts {{ cropX }} px from the left. <button class="small" @click="cropX = undefined">Centre it</button>
             </template>
           </p>
-          <p v-if="layout === 'facecam' && cam" class="hint">
-            Drag the yellow box on the video over the webcam, and its corner to resize it. Now
-            {{ cam.width }}×{{ cam.height }} at {{ cam.x }}, {{ cam.y }}.
-          </p>
+          <div v-if="layout === 'facecam' && cam" class="cam-shape">
+            <div class="row middle">
+              <span class="fixed muted">Webcam shape</span>
+              <span class="choices fixed" role="group" aria-label="Webcam shape">
+                <button v-for="shape in CAM_SHAPES" :key="shape.name" :aria-pressed="camShape === shape.aspect" @click="chooseCamShape(shape.aspect)">{{ shape.name }}</button>
+              </span>
+            </div>
+            <p class="hint">
+              Drag the yellow box on the video over the webcam, and its corner to fit it. Now
+              {{ cam.width }}×{{ cam.height }} at {{ cam.x }}, {{ cam.y }}.
+              In the clip the webcam is the top {{ camPanel.height }} px and the gameplay the {{ camPanel.game }} px below.
+              <template v-if="camPanel.cropped">The box is too {{ camPanel.cropped === 'sides' ? 'wide' : 'tall' }} for the panel, so a little of its {{ camPanel.cropped }} is cut off.</template>
+            </p>
+            <p v-if="game" class="hint">
+              The blue box is the content shown below the webcam: move and resize it on its own. Now {{ game.width }}×{{ game.height }} at {{ game.x }}, {{ game.y }}.
+              <template v-if="gameShown?.fills">It fills the bottom panel.</template>
+              <template v-else-if="gameShown">It is shown whole, with a blurred copy of itself at the {{ gameShown.blurred }}.
+                <button class="small" @click="fitGame">Fit to the panel</button>
+              </template>
+            </p>
+          </div>
 
           <div class="option trim">
             <label for="trim">Trim each edge (pixels)</label>
             <input id="trim" v-model.number="trim" type="number" min="0" />
             <p class="hint">For a thin frame baked into a recording. Leave at 0 otherwise.</p>
+          </div>
+
+          <div class="option overlay">
+            <label for="overlay">Overlay: a logo for the whole clip</label>
+            <p v-if="briefOverlay" class="hint">The brief sets the overlay: <strong>{{ briefOverlay.name }}</strong>, {{ POSITION_NAMES[briefOverlay.position] }}, {{ briefOverlay.width }} px wide. It is used for this clip.</p>
+            <template v-else>
+              <select id="overlay" v-model="overlayName">
+                <option value="">None</option>
+                <option v-for="one in overlays" :key="one.name" :value="one.name">{{ one.name }} ({{ one.kind === 'full' ? 'full frame' : 'logo' }})</option>
+              </select>
+              <p v-if="overlays.length === 0" class="hint">Put PNG or WebP images (with transparency) in the project's <code>overlays</code> folder and reload to choose one here.</p>
+              <div v-if="overlayShown && overlayShown.kind === 'logo'" class="row overlay-settings">
+                <div class="narrow"><label for="ov-width">Width (px)</label><input id="ov-width" v-model.number="overlaySettings.width" type="number" min="20" max="1080" /></div>
+                <div class="narrow"><label for="ov-margin">Margin (px)</label><input id="ov-margin" v-model.number="overlaySettings.margin" type="number" min="0" max="400" /></div>
+                <div class="narrow"><label for="ov-offset">Move down (px)</label><input id="ov-offset" v-model.number="overlaySettings.offsetY" type="number" step="10" /></div>
+                <div class="fixed">
+                  <span class="label-like">Corner</span>
+                  <span class="choices" role="group" aria-label="Corner">
+                    <button v-for="position in OVERLAY_POSITIONS" :key="position" :aria-pressed="overlaySettings.position === position" @click="overlaySettings.position = position">{{ POSITION_NAMES[position] }}</button>
+                  </span>
+                </div>
+              </div>
+            </template>
+            <div v-if="overlayPlace" class="row middle overlay-preview">
+              <!-- A small 9:16 sketch of the clip: where the logo lands beside the captions and the bottom 15%. -->
+              <div class="sketch fixed" aria-hidden="true">
+                <div v-if="layout === 'facecam' && cam" class="band cam-band" :style="sketch(0, camPanelHeight(cam))" />
+                <div class="band caption-band" :style="sketch(CAPTION_AREA.top, CAPTION_AREA.bottom - CAPTION_AREA.top)" />
+                <div class="band bottom-band" :style="sketch(BOTTOM_AREA_TOP, OUT_HEIGHT - BOTTOM_AREA_TOP)" />
+                <div class="logo-box" :style="{ left: `${(overlayPlace.x / OUT_WIDTH) * 100}%`, top: `${(overlayPlace.y / OUT_HEIGHT) * 100}%`, width: `${(overlayPlace.width / OUT_WIDTH) * 100}%`, height: `${(overlayPlace.height / OUT_HEIGHT) * 100}%` }" />
+              </div>
+              <div>
+                <p class="hint">Shown from the first frame to the last, under the captions. The sketch shows the clip: <span class="key-logo">the logo</span>, <span class="key-caption">the captions</span>, <span class="key-bottom">the bottom 15%</span><template v-if="layout === 'facecam'">, <span class="key-cam">the webcam</span></template>.</p>
+                <p v-for="problem in overlayProblems" :key="problem" class="fail small-print">{{ problem }}</p>
+              </div>
+            </div>
+            <p v-else-if="briefOverlay && !briefOverlay.size" class="error">The brief's overlay image cannot be read.</p>
+          </div>
+
+          <div class="option blurs">
+            <label>Blur part of the picture for some seconds</label>
+            <p class="hint">
+              For something the apps would take the clip down for, such as nudity in game footage. Go to where it shows and press "Add a blur box",
+              then drag the pink box over it and resize it from its corner. The box stays where it is drawn: if the thing moves, add another box for the next seconds.
+            </p>
+            <div v-for="(box, i) in blurs" :key="i" class="row middle blur-row">
+              <strong>{{ i + 1 }}</strong>
+              <div class="narrow"><label :for="'blur-from-' + i">From (s)</label><input :id="'blur-from-' + i" :value="box.from" type="number" step="0.1" min="0" @change="changeBlur(i, { from: Number($event.target.value) })" /></div>
+              <button title="Set to where the video is now" @click="changeBlur(i, { from: Number(here()) })">Now</button>
+              <div class="narrow"><label :for="'blur-to-' + i">To (s)</label><input :id="'blur-to-' + i" :value="box.to" type="number" step="0.1" min="0" @change="changeBlur(i, { to: Number($event.target.value) })" /></div>
+              <button title="Set to where the video is now" @click="changeBlur(i, { to: Number(here()) })">Now</button>
+              <span class="choices fixed" role="group" aria-label="How it is hidden">
+                <button :aria-pressed="box.style === 'blur'" @click="changeBlur(i, { style: 'blur' })">Blur</button>
+                <button :aria-pressed="box.style === 'black'" @click="changeBlur(i, { style: 'black' })">Black</button>
+              </span>
+              <button title="Go to where this box starts" @click="seek(box.from)">Go to</button>
+              <button title="Remove this box" @click="removeBlur(i)">Remove</button>
+              <p v-if="blurProblem(box)" class="fail small-print">{{ blurProblem(box) }}</p>
+            </div>
+            <button :disabled="blurs.length >= MAX_BLURS" @click="addBlur">Add a blur box</button>
           </div>
         </section>
 
@@ -462,14 +632,31 @@ async function cut() {
                 Hook: a line shown at the top
                 <span class="chip" :class="{ bad: hook.length > HOOK_LIMIT }">{{ hook.length }}/{{ HOOK_LIMIT }}</span>
               </label>
-              <input id="hook" v-model="hook" type="text" :aria-invalid="hook.length > HOOK_LIMIT" />
+              <div class="joined">
+                <input id="hook" v-model="hook" type="text" :aria-invalid="hook.length > HOOK_LIMIT" />
+                <button
+                  :disabled="!ai?.configured || Boolean(rangeProblem) || Boolean(hookJob)"
+                  :title="ai?.configured ? 'Ask the AI for hooks for this clip. It reads the words spoken in the range, not the video.' : ai?.help"
+                  @click="suggestHook"
+                >
+                  <span v-if="hookJob" class="spinner" aria-hidden="true" /><Icon v-else name="spark" /> Suggest
+                </button>
+              </div>
             </div>
             <div class="narrow">
               <label for="hook-seconds">Hook time (seconds)</label>
               <input id="hook-seconds" v-model.number="hookSeconds" type="number" min="0" step="0.5" />
             </div>
           </div>
-          <p class="hint">A hook time of 0 keeps the hook for the whole clip.</p>
+          <p v-if="hookJob" class="hint" role="status">{{ describe(hookJob) }}</p>
+          <div v-if="hookIdeas.length" class="hook-ideas" role="group" aria-label="Suggested hooks">
+            <button v-for="idea in hookIdeas" :key="idea.text" class="small" :class="{ primary: hook === idea.text }" :title="idea.problems.join(' · ')" @click="hook = idea.text">
+              {{ idea.text }}<span v-if="idea.problems.length" class="chip bad">brief</span>
+            </button>
+          </div>
+          <p v-for="problem in [...new Set(hookIdeas.flatMap((idea) => idea.problems))]" :key="problem" class="fail small-print">Brief: {{ problem }}</p>
+          <p v-if="hookError" class="error" role="alert">{{ hookError }}</p>
+          <p class="hint">A hook time of 0 keeps the hook for the whole clip. “Suggest” sends only the words spoken in this range to {{ ai?.service ?? 'the AI' }}; click a hook to use it.</p>
 
           <div class="row option">
             <label class="check fixed"><input v-model="captions" type="checkbox" /> Burn in captions</label>
@@ -508,42 +695,10 @@ async function cut() {
           or captions. It uses only the start and end, and the file goes to the <code>parts</code> folder.
         </p>
 
-        <section v-if="ai" class="panel">
-          <h2><Icon name="spark" /> Suggested moments</h2>
-          <p v-if="!ai.configured" class="muted">{{ ai.help }} Then restart the dashboard.</p>
-          <template v-else>
-            <p class="hint first">
-              Transcribes the whole video on this computer, then sends the transcript text (not the video) to
-              {{ ai.service }} ({{ ai.model }}). The first time on a video takes a few minutes.
-            </p>
-            <div class="row middle suggest">
-              <div class="fixed count">
-                <label for="count">How many</label>
-                <input id="count" v-model.number="suggestCount" type="number" min="1" max="10" />
-              </div>
-              <button class="fixed" :disabled="Boolean(suggestJob)" @click="suggest"><Icon name="spark" /> Suggest moments</button>
-              <span v-if="suggestJob" role="status"><span class="spinner" aria-hidden="true" /> {{ describe(suggestJob) }}</span>
-              <span v-else-if="noMoments" class="muted">No usable moments came back. Try again.</span>
-            </div>
-            <p v-if="suggestError" class="error" role="alert">{{ suggestError }}</p>
-            <ol v-if="moments.length > 0" class="moments">
-              <li v-for="(moment, i) in moments" :key="i" :class="{ current: keyOf(moment) === usedKey }">
-                <div class="row middle">
-                  <strong class="fixed numbers">{{ i + 1 }}. {{ clock(moment.start) }}–{{ clock(moment.end) }}</strong>
-                  <span class="fixed muted">{{ (moment.end - moment.start).toFixed(1) }} s · rated {{ moment.score.toFixed(2) }}</span>
-                  <span v-if="alreadyCut(moment)" class="chip good"><Icon name="check" /> Already cut</span>
-                  <span class="spacer" />
-                  <button class="fixed small" :class="{ primary: keyOf(moment) === usedKey }" @click="useMoment(moment)">
-                    {{ keyOf(moment) === usedKey ? 'In use' : 'Use this' }}
-                  </button>
-                </div>
-                <p>{{ moment.reason }}</p>
-                <p v-if="moment.hook" class="muted">Hook: “{{ moment.hook }}”</p>
-                <p v-for="found in moment.problems" :key="found" class="fail">Brief: {{ found }}</p>
-              </li>
-            </ol>
-          </template>
-        </section>
+        <MomentFinder
+          v-if="ai" :key="video" :video="video" :ai="ai" :brief="brief" :lang="lang" :max-seconds="maxSeconds"
+          :used-key="usedKey" :cut-keys="jobs.cutMoments[video] ?? []" @use="useMoment" @seek="seek"
+        />
       </div>
     </div>
 
@@ -633,13 +788,6 @@ label .chip { margin-left: 6px; }
 .words span { font-size: 12px; color: var(--muted); line-height: 1.35; }
 
 .first { margin: 0 0 10px; }
-.count { width: 90px; }
-.suggest [role='status'] { display: inline-flex; align-items: center; gap: 8px; }
-.moments { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.moments li { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
-.moments li.current { border-color: var(--accent); background: var(--accent-tint); box-shadow: inset 3px 0 0 var(--accent); }
-.moments p { margin: 6px 0 0; }
-.moments .spacer { flex: 1 1 0; }
 
 /* The bar at the bottom of the screen. */
 .cutbar {
@@ -655,4 +803,24 @@ label .chip { margin-left: 6px; }
 .summary strong { color: var(--text); }
 .problem { display: flex; align-items: center; gap: 8px; color: var(--warn); font-weight: 600; }
 .running { display: flex; align-items: center; gap: 8px; }
+.hook-ideas { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.hook-ideas button { text-align: left; white-space: normal; }
+.small-print { font-size: 13px; margin: 4px 0 0; }
+.overlay { margin-top: 14px; }
+.blurs { margin-top: 14px; }
+.blur-row { gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.overlay select { max-width: 100%; }
+.overlay-settings { margin-top: 8px; }
+.label-like { display: block; margin-bottom: 4px; font-size: 13px; font-weight: 550; color: var(--muted); }
+.overlay-preview { margin-top: 10px; gap: 14px; align-items: flex-start; }
+/* The clip in small: 9:16, with the areas the logo should keep clear of. */
+.sketch { position: relative; width: 72px; height: 128px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--soft); overflow: hidden; }
+.sketch .band { position: absolute; left: 0; right: 0; }
+.cam-band, .key-cam { background: var(--soft-strong); }
+.caption-band, .key-caption { background: var(--warn-bg); }
+.bottom-band, .key-bottom { background: var(--bad-bg); }
+.logo-box, .key-logo { background: var(--accent); }
+.logo-box { position: absolute; opacity: 0.85; border-radius: 2px; }
+.key-logo, .key-caption, .key-bottom, .key-cam { padding: 0 4px; border-radius: 3px; }
+.key-logo { color: var(--accent-text); }
 </style>

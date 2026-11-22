@@ -1,6 +1,6 @@
 import { CAM_HEIGHT, OUT_HEIGHT, OUT_WIDTH } from '../layout.js';
 import { formatAssTime } from '../time.js';
-import { captionWidth } from './width.js';
+import { CAPTION_SIZE, captionWidth } from './width.js';
 
 // The bundled font. The file sits in assets/fonts, and the name here must
 // match the family name inside it.
@@ -15,7 +15,8 @@ export const DISCLOSURE_SECONDS = 3;
 // keeps the box below the top 200 px of the frame.
 const HOOK_MARGIN = 240;
 // In the facecam layout the hook sits just under the webcam panel, off the face.
-const HOOK_MARGIN_FACECAM = CAM_HEIGHT + 30;
+// In the facecam layout the hook sits just under the webcam panel, however tall it is.
+const HOOK_BELOW_CAM = 30;
 // Captions end 520 px above the bottom edge, clear of the player's buttons.
 const CAPTION_MARGIN = 520;
 const CAPTION_SIDE_MARGIN = 60;
@@ -35,7 +36,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Caption,${FONT_NAME},88,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,${CAPTION_SIDE_MARGIN},${CAPTION_SIDE_MARGIN},${CAPTION_MARGIN},1
+Style: Caption,${FONT_NAME},${CAPTION_SIZE},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,${CAPTION_SIDE_MARGIN},${CAPTION_SIDE_MARGIN},${CAPTION_MARGIN},1
 Style: Hook,${FONT_NAME},64,&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,18,0,8,80,80,${HOOK_MARGIN},1
 
 [Events]
@@ -57,12 +58,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
  * @param {number} options.clipSeconds   length of the footage, without the card
  * @returns {string}
  */
-export function buildAss({ groups = [], hook = null, hookSeconds = HOOK_SECONDS, disclosure = null, endCard = null, layout, clipSeconds }) {
+export function buildAss({ groups = [], hook = null, hookSeconds = HOOK_SECONDS, disclosure = null, endCard = null, layout, clipSeconds, camHeight = CAM_HEIGHT }) {
   const lines = [HEADER];
 
   // 0 means "use the style's margin". \q0 lets these lines wrap; captions
   // never wrap (WrapStyle 2) because their groups are short by construction.
-  const topMargin = layout === 'facecam' ? HOOK_MARGIN_FACECAM : 0;
+  const topMargin = layout === 'facecam' ? camHeight + HOOK_BELOW_CAM : 0;
   // The disclosure is written first: when two top lines are on screen
   // together, the renderer puts the earlier event above the later one.
   if (disclosure) {

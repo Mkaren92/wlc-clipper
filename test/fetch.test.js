@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildDescription } from '../src/compilation/description.js';
-import { fastFailure, fetchVideo, leadInOf, removeHiddenLeadIn, videoUrl } from '../src/fetch.js';
+import { downloadTimeout, fastFailure, fetchVideo, leadInOf, removeHiddenLeadIn, videoUrl } from '../src/fetch.js';
 import * as fetchLink from '../src/fetchLink.js';
 import { checkStreamUrl, startRangeRelay } from '../src/rangeRelay.js';
 import { run } from '../src/run.js';
@@ -47,6 +47,14 @@ describe('videoUrl', () => {
 });
 
 // The Download page runs these same checks in the browser, so they must stay free of Node imports.
+describe('downloadTimeout', () => {
+  it('gives a long part time to come even the slow way, at about half playback speed', () => {
+    expect(downloadTimeout(60)).toBe(30 * 60 * 1000);
+    // 3 hours the slow way took about 100 minutes by the measured rate (11 minutes for 20).
+    expect(downloadTimeout(3 * 3600)).toBeGreaterThan(3 * 3600 * (11 / 20) * 1000 * 1.5);
+  });
+});
+
 describe('fetchLink', () => {
   it('is what fetch uses', () => {
     expect(fetchLink.videoUrl).toBe(videoUrl);
@@ -54,8 +62,9 @@ describe('fetchLink', () => {
 
   it('checks a range the way fetch does', () => {
     expect(fetchLink.checkFetchRange(60, 90)).toBe(30);
-    expect(fetchLink.checkFetchRange(0, fetchLink.MAX_FETCH_SECONDS)).toBe(1200);
-    expect(() => fetchLink.checkFetchRange(0, 1201)).toThrow(/at most 20 minutes/);
+    expect(fetchLink.checkFetchRange(0, 1201)).toBe(1201);
+    expect(fetchLink.checkFetchRange(0, fetchLink.MAX_FETCH_SECONDS)).toBe(10800);
+    expect(() => fetchLink.checkFetchRange(0, 10801)).toThrow(/at most 3 hours/);
     expect(() => fetchLink.checkFetchRange(90, 60)).toThrow(/end must be after the start/);
     expect(() => fetchLink.checkFetchRange(-1, 5)).toThrow(/end must be after the start/);
     expect(() => fetchLink.checkFetchRange(Number.NaN, 5)).toThrow(/end must be after the start/);
@@ -422,10 +431,10 @@ describe('fetchVideo', () => {
     expect(calls).toEqual([]);
   });
 
-  it('needs a range, of at most 20 minutes, inside the video', async () => {
+  it('needs a range, of at most 3 hours, inside the video', async () => {
     await expect(ask({ start: 100, end: 100 })).rejects.toThrow(/end must be after the start/);
     await expect(ask({ start: undefined, end: undefined })).rejects.toThrow(/start and the end/);
-    await expect(ask({ start: 0, end: 1201 })).rejects.toThrow(/at most 20 minutes/);
+    await expect(ask({ start: 0, end: 10801 })).rejects.toThrow(/at most 3 hours/);
     await expect(ask({ start: 7190, end: 7300 })).rejects.toThrow(/only 2:00:00.00 long/);
   });
 

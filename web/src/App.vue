@@ -29,7 +29,7 @@ const PAGES = [
   { id: 'cards', name: 'Cards', icon: 'card', title: 'Match cards', about: 'Still cards shown between reaction clips: a goal, a red card, the final score. Saved per match, and used on the Compilations page.' },
   { id: 'combine', name: 'Combine', icon: 'split', title: 'Combine two videos', about: 'Put a reaction and the thing reacted to side by side, line them up by eye, and make one video of the two to use in a compilation.' },
   { id: 'compilations', name: 'Compilations', icon: 'layers', title: 'Compilations', about: 'Put videos and cards in order and make one video out of them, with credits and a description file.' },
-  { id: 'download', name: 'Download', icon: 'download', title: 'Download', about: 'Bring part of a YouTube video into your videos, from a channel that has agreed.' },
+  { id: 'download', name: 'Download', icon: 'download', title: 'Download', about: 'Bring part of a YouTube video, a whole one, or the moments a finished stream\'s chat exploded into your videos, from a channel that has agreed.' },
   { id: 'sources', name: 'Sources', icon: 'link', title: 'Sources', about: 'The channels that have agreed to let you use their videos.' },
   { id: 'data', name: 'My data', icon: 'box', title: 'My data', about: 'Everything you have made or added here, as one file to take to another computer, and the place to load such a file.' },
 ];
@@ -159,7 +159,7 @@ function openJob(job) {
   if (job.kind === 'pictures' || job.kind === 'channel') return go('sources');
   if (job.kind === 'fetch') return openVideo(job.result.name);
   go('clips');
-  if (job.kind === 'suggest') view.value = { kind: 'video', name: job.label };
+  if (job.kind === 'suggest' || job.kind === 'chat' || job.kind === 'chat-check') view.value = { kind: 'video', name: job.label };
   else if (job.kind === 'part') view.value = { kind: 'part', name: job.result.name };
   else openClip(job.kind === 'cut' ? job.result.clip : job.label);
 }
@@ -207,7 +207,7 @@ onMounted(async () => {
             </span>
             <span v-else class="buttons">
               <button v-if="job.status === 'done'" class="small primary" @click="openJob(job)">
-                {{ job.kind === 'suggest' ? 'Show' : 'Open' }}
+                {{ ['suggest', 'chat', 'chat-check'].includes(job.kind) ? 'Show' : 'Open' }}
               </button>
               <button class="small" @click="jobs.dismissed.push(job.id)">Close</button>
             </span>

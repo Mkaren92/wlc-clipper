@@ -6,7 +6,9 @@
 //   travel       the channels list (with the club each streamer supports),
 //                the channels' pictures and subscriber counts, the leagues
 //                and clubs with their logos, the owner's sound files (among
-//                them the video played behind the intro card), and briefs
+//                them the video played behind the intro card), and briefs;
+//                and, since 2026-11-21, the overlay images (campaign logos),
+//                which briefs name
 //   stay local   source videos, parts, clips, combinations, compilations,
 //                matches and their cards
 //
@@ -17,6 +19,7 @@
 // Never in a data file, whatever is asked:
 //   .env            the AI key lives only there
 //   data/backups    copies of this machine's own lists
+//   data/youtube-cookies.txt   the YouTube sign-in, a password (acceptEntry refuses it)
 import { lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { isSoundFileName } from '../compilation/sounds.js';
@@ -24,7 +27,7 @@ import { isSoundFileName } from '../compilation/sounds.js';
 /**
  * The folders the travelling data lives in, by the name each has inside a data file.
  *
- * @typedef {{ data: string, sounds: string, briefs: string }} Folders
+ * @typedef {{ data: string, sounds: string, briefs: string, overlays?: string }} Folders
  */
 
 const ID = '[a-z0-9][a-z0-9-]{0,79}';
@@ -46,6 +49,7 @@ export function acceptEntry(name) {
   const [folder, file, ...more] = name.split('/');
   if (more.length > 0 || !file || !isPlain(file)) return false;
   if (folder === 'sounds') return isSoundFileName(file);
+  if (folder === 'overlays') return /\.(png|webp)$/i.test(file);
   return folder === 'briefs' && file.endsWith('.json');
 }
 

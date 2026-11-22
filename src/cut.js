@@ -6,8 +6,10 @@ import { applyReplacements } from './brief/replacements.js';
 import { loadBrief } from './brief/schema.js';
 import { buildAss, checkHook, cleanOverlayText, HOOK_SECONDS } from './captions/ass.js';
 import { groupWords } from './captions/group.js';
+import { findVoiceLevels, snapToVoice } from './captions/onsets.js';
 import { findPauses, snapToSpeech } from './captions/pauses.js';
-import { buildFilter, OUT_FPS, OUT_HEIGHT, OUT_WIDTH, SUBTITLE_FILE } from './layout.js';
+import { buildFilter, camPanelHeight, checkBlurs, OUT_FPS, OUT_HEIGHT, OUT_WIDTH, SUBTITLE_FILE } from './layout.js';
+import { describeOverlay } from './overlay.js';
 import { probe } from './probe.js';
 import { CLIP_FILE, extractAudio, render } from './render.js';
 import { isStopped } from './run.js';
@@ -80,6 +82,9 @@ export async function cut({
   cropWidth,
   trim = 0,
   cam,
+  game,
+  overlay,
+  blurs = [],
   hook,
   hookSeconds = HOOK_SECONDS,
   captions = true,
@@ -99,8 +104,12 @@ export async function cut({
   if (!Number.isFinite(hookSeconds) || hookSeconds < 0) {
     throw new Error('The hook time must be 0 or more seconds. 0 keeps the hook for the whole clip.');
   }
+  // The webcam panel follows the box's shape; saved, so a later render keeps it.
+  const camHeight = layout === 'facecam' && cam ? camPanelHeight(cam) : null;
   // Built here only to reject bad options before anything is written.
-  const filter = buildFilter({ layout, source: info, cropX, cropWidth, trim, cam });
+  // Parts of the frame hidden for part of the clip, in source pixels and clip seconds.
+  const blurBoxes = checkBlurs(blurs, info, end - start);
+  const filter = buildFilter({ layout, source: info, cropX, cropWidth, trim, cam, camHeight: camHeight ?? undefined, game, blurs: blurBoxes });
 
   /** @type {Brief | null} */
   let brief = null;
@@ -128,7 +137,11 @@ export async function cut({
       const lines = failed.map((check) => `  ${check.rule}: ${check.detail}`);
       throw new Error(`The brief "${brief.id}" does not allow this clip:\n${lines.join('\n')}`);
     }
-  } else if (title !== undefined || description !== undefined) {
+  }
+  // The brief wins: its overlay is used even when another was asked for.
+  const chosenOverlay = brief?.overlay ?? overlay ?? null;
+  const overlaySpec = chosenOverlay ? await describeOverlay(chosenOverlay) : null;
+  if (!briefFile && (title !== undefined || description !== undefined)) {
     // No brief: the post text is what was given, with no hashtags and no rules to check.
     post = { title: cleanLine(title ?? hookText ?? ''), description: (description ?? '').trim(), hashtags: [] };
   }
@@ -159,6 +172,11 @@ export async function cut({
     cropWidth: filter.cropWidth,
     trim,
     cam: cam ?? null,
+    camHeight,
+    game: game ?? null,
+    // The overlay as it was chosen, with its image's absolute path, so a render keeps it.
+    overlay: overlaySpec,
+    blurs: blurBoxes,
     hook: hookText,
     hookSeconds,
     captions: wantCaptions,
@@ -189,6 +207,7 @@ export async function cut({
       const audioFile = await extractAudio({ source: sourcePath, start, seconds: end - start, workDir });
       const transcript = checkTranscript(await transcriber.transcribe(audioFile, { lang }));
       transcript.words = snapToSpeech(transcript.words, await findPauses(audioFile));
+      transcript.words = snapToVoice(transcript.words, await findVoiceLevels(audioFile));
       if (brief) transcript.words = applyReplacements(transcript.words, brief.replacements);
       await writeJson(path.join(workDir, TRANSCRIPT_FILE), transcript);
       await rm(audioFile, { force: true });
@@ -332,6 +351,8 @@ export async function recheck(clipDir) {
 async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
   const seconds = meta.end - meta.start;
   const card = meta.brief?.endCard ?? null;
+  // The overlay's image is read again: it must still be where it was when the clip was cut.
+  const overlaySpec = meta.overlay ? await describeOverlay(meta.overlay) : null;
   const total = seconds + (card?.seconds ?? 0);
 
   let groups = [];
@@ -352,6 +373,7 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
       endCard: shown.endCard ? { text: shown.endCard, seconds: card.seconds } : null,
       layout: meta.layout,
       clipSeconds: seconds,
+      camHeight: meta.camHeight ?? undefined,
     });
     await writeFile(subtitlePath, ass);
   } else {
@@ -365,6 +387,10 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
     cropWidth: meta.cropWidth ?? undefined,
     trim: meta.trim,
     cam: meta.cam ?? undefined,
+    camHeight: meta.camHeight ?? undefined,
+    game: meta.game ?? undefined,
+    overlay: overlaySpec,
+    blurs: meta.blurs,
     subtitles,
     endCard: card ? { at: seconds, seconds: card.seconds, image: Boolean(card.image) } : undefined,
   });
@@ -378,6 +404,7 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
       graph: filter.graph,
       audioLabel: filter.audioLabel,
       endCard: card,
+      overlay: overlaySpec,
       clipDir,
       workDir,
       subtitles,
@@ -438,6 +465,7 @@ async function checkAgainst(clipDir, workDir, meta, brief, clip) {
     // What is drawn comes from the brief the clip was rendered with, even
     // when it is being checked against a different one.
     onScreen: onScreenTexts(meta.hook, meta.brief),
+    overlay: meta.overlay ?? null,
     words,
     subtitleFile: await readIfExists(path.join(workDir, SUBTITLE_FILE)),
     clip,
@@ -485,6 +513,14 @@ async function readMeta(workDir) {
     cropWidth: null,
     trim: 0,
     cam: null,
+    // Clips from before the webcam panel followed the box: the fixed 640 (buildFilter's default).
+    camHeight: null,
+    // Clips from before the content box: the middle of the gameplay, as it was.
+    game: null,
+    // Clips from before overlays existed have none.
+    overlay: null,
+    // Nor blur boxes.
+    blurs: [],
     hook: null,
     hookSeconds: HOOK_SECONDS,
     captions: false,

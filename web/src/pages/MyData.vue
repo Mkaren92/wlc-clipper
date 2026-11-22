@@ -19,7 +19,7 @@ const chooser = ref(null);
 // What is counted, in the owner's words, in the order it is shown.
 const KINDS = [
   ['channels', 'Channels'], ['channelsWithClub', '… with a club'], ['channelPictures', '… with a picture'],
-  ['leagues', 'Leagues'], ['clubs', 'Clubs'], ['clubsWithLogo', '… with a logo'], ['sounds', 'Sounds'], ['briefs', 'Briefs'],
+  ['leagues', 'Leagues'], ['clubs', 'Clubs'], ['clubsWithLogo', '… with a logo'], ['sounds', 'Sounds'], ['overlays', 'Overlays'], ['briefs', 'Briefs'],
 ];
 
 const megabytes = (bytes) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(2)} GB` : bytes >= 1e6 ? `${Math.round(bytes / 1e6)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`);
@@ -36,6 +36,7 @@ const replaced = computed(() => {
     else if (name === 'data/source-subscribers.json') said.add('The subscriber counts');
     else if (second === 'source-pictures') said.add('Channel pictures');
     else if (folder === 'sounds') said.add(`The sound ${second}`);
+    else if (folder === 'overlays') said.add(`The overlay ${second}`);
     else if (folder === 'briefs') said.add(`The brief ${second}`);
   }
   return [...said];
@@ -105,6 +106,7 @@ async function cancel() {
         <li><strong>Your channels</strong>, with the club each streamer supports, their pictures and subscriber counts</li>
         <li><strong>Your leagues and clubs</strong>, with all their logos</li>
         <li><strong>Your sounds</strong>, among them the video behind the intro card</li>
+        <li><strong>Your overlay images</strong>, the logos in the <code>overlays</code> folder</li>
         <li><strong>Your briefs</strong></li>
       </ul>
       <p v-if="state"><a class="button" :href="api.dataFileUrl()" download><Icon name="download" /> Download my data · {{ megabytes(state.file.bytes) }}</a></p>

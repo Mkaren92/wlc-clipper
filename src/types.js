@@ -49,6 +49,14 @@
  * @property {number} trim     pixels cut off every edge of the source first
  * @property {{ x: number, y: number, width: number, height: number } | null} cam
  *   webcam rectangle in source pixels, facecam layout only
+ * @property {import('./overlay.js').Overlay | null} overlay
+ *   the logo or full-frame picture shown for the whole clip; null for none
+ * @property {import('./layout.js').BlurBox[]} blurs
+ *   parts of the frame blurred or blacked out for part of the clip; empty for none
+ * @property {{ x: number, y: number, width: number, height: number } | null} game
+ *   the facecam's content box in source pixels; null takes the middle of the gameplay
+ * @property {number | null} camHeight
+ *   the webcam panel's height in the clip; null for clips made before it followed the box (640)
  * @property {string | null} hook
  * @property {number} hookSeconds   how long the hook stays on screen; 0 means the whole clip
  * @property {boolean} captions   whether the clip has a transcript to caption from

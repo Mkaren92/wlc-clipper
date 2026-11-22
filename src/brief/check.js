@@ -139,6 +139,16 @@ const RULES = [
     return result('Format', problems.length === 0, problems.join('; '));
   },
 
+  // A brief with an overlay: the clip must have been rendered with that image.
+  function overlay({ brief, overlay: shown }) {
+    if (!brief.overlay) return null;
+    const wanted = brief.overlay.image.split(/[\\/]/).pop();
+    if (shown === undefined) return null; // not known here (a check made before anything is drawn)
+    if (!shown) return result('Overlay', false, `the brief asks for the overlay ${wanted}, and the clip was rendered without one`);
+    const got = String(shown.image).split(/[\\/]/).pop();
+    return result('Overlay', got === wanted, got === wanted ? `${got} is shown for the whole clip` : `the brief asks for ${wanted}, and the clip shows ${got}`);
+  },
+
   function fullFrame({ brief, layout }) {
     if (!brief.keepFullFrame) return null;
     return result(

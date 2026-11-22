@@ -1,10 +1,10 @@
-// Brings part of a video into the videos folder from a YouTube link.
+// Brings part of a video, or a whole one, into the videos folder from a YouTube link.
 //
-// This is the one place the tool takes anything from outside, and it is
-// narrow on purpose: YouTube links only, a time range and not a whole
-// video, and only from a channel the owner has marked as agreed in the
-// sources list.
-import { access, mkdir, readdir, rename, rm, statfs } from 'node:fs/promises';
+// This is the one way video comes in from outside, and it is narrow on purpose:
+// YouTube links to one video only, a range or the whole video of at most 3 hours,
+// and only from a channel the owner has marked as agreed in the sources list.
+import { lstatSync } from 'node:fs';
+import { access, chmod, mkdir, readdir, rename, rm, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clipSlug } from './cut.js';
@@ -23,10 +23,14 @@ import { formatClock } from './time.js';
  *
  * @typedef {object} Downloader
  * @property {() => Promise<boolean>} isInstalled
- * @property {(url: string) => Promise<{ id: string, title: string, channel: string, channelId: string, handle: string, duration: number, live?: string }>} info
+ * @property {(url: string) => Promise<{ id: string, title: string, channel: string, channelId: string, handle: string, duration: number, live?: string, chat?: boolean }>} info
  *   `live` is YouTube's word for a stream's state: "is_live" while it is going on
  * @property {(job: { url: string, start: number, end: number, whole?: boolean, dir: string, name: string, onStep?: (step: string) => void }) => Promise<{ slow?: string } | void>} download
  *   writes `<dir>/<name>.mp4`; `slow` says why the fast way was not used, when it was not
+ * @property {(job: { url: string, dir: string, name: string }) => Promise<string>} [chat]
+ *   fetches only a video's chat replay into `<dir>/<name>.live_chat.json` and returns that path
+ * @property {(url: string) => Promise<Array<{ text: string, likes: number }>>} [comments]
+ *   a video's top comments: only their words and like counts, never who wrote them
  * @property {(url: string) => Promise<{ name: string, channelId: string, handle: string, pictureUrl: string, subscribers?: number | null }>} channel
  *   what YouTube says about a channel, for its profile picture and subscriber count (see pictures.js)
  * @property {(url: string) => Promise<{ live: boolean, videoId?: string, title?: string, channelId?: string, handle?: string, viewers?: number, started?: number }>} live
@@ -35,6 +39,21 @@ import { formatClock } from './time.js';
 
 // Room allowed per second of video at up to 1080p, for the free-space check.
 const BYTES_PER_SECOND = 1_500_000;
+
+/**
+ * How long a download of `seconds` of video may take before it is given up. The slow way
+ * comes at a little under playback speed (11 minutes for 20 on 2026-11-21), so a fixed
+ * limit would end a long part half done. Stop ends it sooner whenever the owner wants.
+ *
+ * @param {number} seconds   the length asked for
+ */
+export function downloadTimeout(seconds) {
+  return Math.max(30 * 60, 1.2 * seconds + 15 * 60) * 1000;
+}
+
+// Reading a chat replay goes from the start, piece by piece: an 11-hour stream with 54,000
+// messages took tens of minutes. Allowed up to three hours; Stop ends it sooner.
+const CHAT_TIMEOUT = 3 * 60 * 60 * 1000;
 
 // The link and range checks live in a file of their own, which the Download page also uses.
 export { MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoUrl };
@@ -228,9 +247,9 @@ const FORMAT = 'bv*[height<=1080]+ba/b[height<=1080]/b';
  *
  * @param {{ call: (args: string[], options?: object) => Promise<{ stdout: string }>, url: string, start: number, end: number, whole?: boolean, file: string }} job
  */
-export async function relayDownload({ call, url, start, end, whole = false, file }) {
-  const { stdout } = await call(['--skip-download', '--dump-single-json', '-f', FORMAT, '--', url], { timeout: 60_000 });
-  const data = JSON.parse(stdout);
+export async function relayDownload({ call, url, start, end, whole = false, file, lookup = null }) {
+  // `lookup` gives the stream's addresses kept from a moment ago, so several parts of one stream ask once.
+  const data = lookup ? await lookup(url) : JSON.parse((await call(['--skip-download', '--dump-single-json', '-f', FORMAT, '--', url], { timeout: 60_000 })).stdout);
   const formats = data.requested_formats ?? [data];
   const streams = formats.map((format) => format.url);
   if (streams.length < 1 || streams.length > 2) throw new Error('Unexpected streams.');
@@ -241,7 +260,7 @@ export async function relayDownload({ call, url, start, end, whole = false, file
     // A whole video is read from start to end; a part is cut with -ss and -t before each -i.
     const inputs = relay.urls.flatMap((address) => (whole ? ['-i', address] : ['-ss', String(start), '-t', String(end - start), '-i', address]));
     const maps = streams.length === 2 ? ['-map', '0:v:0', '-map', '1:a:0'] : ['-map', '0:v:0', '-map', '0:a:0?'];
-    await run('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', ...inputs, ...maps, '-c', 'copy', '-f', 'mp4', partial], { timeout: (whole ? 90 : 30) * 60 * 1000 });
+    await run('ffmpeg', ['-y', '-hide_banner', '-loglevel', 'error', ...inputs, ...maps, '-c', 'copy', '-f', 'mp4', partial], { timeout: downloadTimeout(end - start) });
     await rename(partial, file);
   } catch (error) {
     await rm(partial, { force: true });
@@ -249,6 +268,67 @@ export async function relayDownload({ call, url, start, end, whole = false, file
   } finally {
     await relay.close();
   }
+}
+
+/**
+ * Where the owner's YouTube sign-in is kept: a cookies file in the Netscape format
+ * that browsers' "cookies.txt" exporters write. Asked for by the owner on
+ * 2026-11-21, when YouTube refused every lookup with "confirm you're not a bot".
+ *
+ * It is the owner's login, so: it lives in `data/` (git-ignored, and not in the
+ * "My data" file, which takes only files it names), it is made readable by the
+ * owner only, its contents are never read or printed by this tool, and only its
+ * path is handed to the downloader. CLIPPER_YOUTUBE_COOKIES points elsewhere.
+ *
+ * @param {string} root   the project folder
+ * @returns {string}
+ */
+export function youtubeCookiesFile(root) {
+  return process.env.CLIPPER_YOUTUBE_COOKIES || path.join(root, 'data', 'youtube-cookies.txt');
+}
+
+/** The downloader's sign-in options: none without a cookies file, and never for a link or a folder. */
+async function cookiesArgs(file) {
+  let info;
+  try {
+    info = lstatSync(file);
+  } catch {
+    return [];
+  }
+  if (!info.isFile()) return [];
+  // Only the owner may read it, whoever else uses this computer.
+  if ((info.mode & 0o077) !== 0) await chmod(file, 0o600).catch(() => {});
+  return ['--cookies', file];
+}
+
+/** Whether the downloader is signed in to YouTube, for the pages to say so. */
+export function isSignedIn(root = fileURLToPath(new URL('..', import.meta.url))) {
+  try {
+    return lstatSync(youtubeCookiesFile(root)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * YouTube's own refusal, when that is why the downloader failed, in our words.
+ * Seen on 2026-11-21 after a day of many lookups: every video answered "Sign in
+ * to confirm you're not a bot", and the old message blamed the link.
+ *
+ * @param {unknown} error   what run() threw; its message ends with the program's last lines
+ * @returns {Error | null}
+ */
+export function youtubeRefusal(error) {
+  const text = String(/** @type {Error} */ (error)?.message ?? '');
+  if (/confirm you.?re not a bot/i.test(text)) {
+    return new Error(isSignedIn()
+      ? 'YouTube is asking to confirm this is not a bot even with your YouTube sign-in. The cookies file may be out of date: save it again from the browser (see the README, "Signing in to YouTube"), or try again later. The link itself is fine.'
+      : 'YouTube is asking to confirm this is not a bot, so it is not answering the downloader for now. This usually passes by itself within a few hours. To get past it now, sign the downloader in to YouTube (see the README, "Signing in to YouTube"). The link itself is fine.');
+  }
+  if (/HTTP Error 429|Too Many Requests/i.test(text)) {
+    return new Error('YouTube says too many requests came from this connection. Wait a while and try again.');
+  }
+  return null;
 }
 
 /**
@@ -275,7 +355,23 @@ export function fastFailure(error) {
 export function ytDlp() {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const python = process.env.CLIPPER_PYTHON ?? path.join(root, '.venv', 'bin', 'python');
-  const call = (args, options) => run(python, ['-m', 'yt_dlp', '--no-playlist', '--no-warnings', ...args], options);
+  const cookies = youtubeCookiesFile(root);
+  const call = async (args, options) => {
+    // Signed in when the owner has saved a cookies file; looked for on every call, so adding
+    // or removing it needs no restart. Only its path is passed, never its contents.
+    const signIn = await cookiesArgs(cookies);
+    return run(python, ['-m', 'yt_dlp', '--no-playlist', '--no-warnings', ...signIn, ...args], options);
+  };
+  // A stream's addresses, kept for half an hour: YouTube's stay valid for hours, and asking takes about 4 s.
+  const streams = new Map();
+  const lookup = async (url) => {
+    const kept = streams.get(url);
+    if (kept && Date.now() - kept.at < 30 * 60 * 1000) return kept.data;
+    const { stdout } = await call(['--skip-download', '--dump-single-json', '-f', FORMAT, '--', url], { timeout: 60_000 });
+    const data = JSON.parse(stdout);
+    streams.set(url, { at: Date.now(), data });
+    return data;
+  };
 
   return {
     async isInstalled() {
@@ -283,8 +379,8 @@ export function ytDlp() {
     },
     async info(url) {
       // The link goes after "--", so it can never be read as an option.
-      const { stdout } = await call(['--skip-download', '--dump-single-json', '--', url]).catch(() => {
-        throw new Error('The video could not be looked up. Check the link, and that it is public.');
+      const { stdout } = await call(['--skip-download', '--dump-single-json', '--', url]).catch((error) => {
+        throw youtubeRefusal(error) ?? new Error('The video could not be looked up. Check the link, and that it is public.');
       });
       const data = JSON.parse(stdout);
       return {
@@ -292,12 +388,37 @@ export function ytDlp() {
         channelId: data.channel_id ?? '', handle: data.uploader_id ?? '', duration: Number(data.duration) || 0,
         // "is_live", "is_upcoming", "post_live" (just ended, not yet prepared), "was_live" or "not_live".
         live: typeof data.live_status === 'string' ? data.live_status : '',
+        // Whether YouTube offers a chat replay (a finished stream with chat on).
+        chat: Boolean(data.subtitles?.live_chat),
       };
+    },
+    async chat({ url, dir, name }) {
+      // Only the chat replay: --skip-download keeps the video itself from being fetched.
+      // Checked on a real stream on 2026-11-21: it writes <name>.live_chat.json, one JSON object a line.
+      await call(['--skip-download', '--write-subs', '--sub-langs', 'live_chat', '-P', dir, '-o', `${name}.%(ext)s`, '--', url], { timeout: CHAT_TIMEOUT }).catch((error) => {
+        throw youtubeRefusal(error) ?? new Error('The chat replay could not be fetched. Try again; if it keeps failing, run "npm run setup" to update the downloader.');
+      });
+      const file = path.join(dir, `${name}.live_chat.json`);
+      await access(file).catch(() => {
+        throw new Error('YouTube gave no chat replay for this video.');
+      });
+      return file;
+    },
+    async comments(url) {
+      // The top 500 comments with their replies left out: about 3 s. Only their words and like
+      // counts are kept, never who wrote them (src/chat/comments.js reads timestamps from them).
+      const { stdout } = await call([
+        '--skip-download', '--write-comments', '--extractor-args', 'youtube:max_comments=500,500,0,0;comment_sort=top', '--dump-single-json', '--', url,
+      ], { timeout: 180_000 }).catch((error) => {
+        throw youtubeRefusal(error) ?? new Error('The comments could not be read.');
+      });
+      const data = JSON.parse(stdout);
+      return (Array.isArray(data.comments) ? data.comments : []).map((comment) => ({ text: String(comment?.text ?? '').slice(0, 500), likes: Number(comment?.like_count) || 0 }));
     },
     async channel(url) {
       // Only the channel's own details: no videos are listed, and nothing is downloaded.
-      const { stdout } = await call(['--skip-download', '--flat-playlist', '--playlist-items', '0', '--dump-single-json', '--', url]).catch(() => {
-        throw new Error('The channel could not be looked up. Check its address.');
+      const { stdout } = await call(['--skip-download', '--flat-playlist', '--playlist-items', '0', '--dump-single-json', '--', url]).catch((error) => {
+        throw youtubeRefusal(error) ?? new Error('The channel could not be looked up. Check its address.');
       });
       const data = JSON.parse(stdout);
       // The profile picture is named; the same list also holds the banner in several sizes.
@@ -333,8 +454,10 @@ export function ytDlp() {
       // which is slow but needs nothing from us, and the reason is kept so the owner sees it.
       let reason = '';
       for (let attempt = 1; attempt <= 2; attempt++) {
+        // The second try asks YouTube for fresh addresses.
+        if (attempt === 2) streams.delete(url);
         try {
-          await relayDownload({ call, url, start, end, whole, file: path.join(dir, `${name}.mp4`) });
+          await relayDownload({ call, url, start, end, whole, file: path.join(dir, `${name}.mp4`), lookup });
           return {};
         } catch (error) {
           if (isStopped()) throw error;
@@ -352,8 +475,9 @@ export function ytDlp() {
         '-P', dir,
         '-o', `${name}.%(ext)s`,
         '--', url,
-      ], { timeout: (whole ? 90 : 30) * 60 * 1000 }).catch(() => {
-        throw failed();
+      ], { timeout: downloadTimeout(end - start) }).catch((error) => {
+        if (isStopped()) throw error;
+        throw youtubeRefusal(error) ?? failed();
       });
       return { slow: reason };
     },

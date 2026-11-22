@@ -187,6 +187,22 @@ describe('runChecks', () => {
     expect(check({ ...brief, layout: 'blur' })['Full frame'].pass).toBe(true);
   });
 
+  it('fails a clip rendered without the brief\'s overlay, or with another image', () => {
+    const brief = withBrief({ overlay: { image: 'assets/kreekcraft-logo.png', width: 220, position: 'top-left', margin: 40, offsetY: 660 } });
+    expect(check({ ...brief, overlay: null }).Overlay).toEqual({ rule: 'Overlay', pass: false, detail: 'the brief asks for the overlay kreekcraft-logo.png, and the clip was rendered without one' });
+    expect(check({ ...brief, overlay: { image: '/home/me/assets/kreekcraft-logo.png' } }).Overlay.pass).toBe(true);
+    expect(check({ ...brief, overlay: { image: '/home/me/other.png' } }).Overlay).toMatchObject({ pass: false, detail: 'the brief asks for kreekcraft-logo.png, and the clip shows other.png' });
+    // No overlay in the brief: no such rule.
+    expect(check({ overlay: null }).Overlay).toBeUndefined();
+  });
+
+  it('reads an overlay in a brief, with its defaults, and refuses a wrong field or value', () => {
+    expect(parseBrief({ id: 'b', overlay: { image: 'logo.png' } }).overlay).toEqual({ image: 'logo.png', width: 220, position: 'top-left', margin: 40, offsetY: 0 });
+    expect(() => parseBrief({ id: 'b', overlay: { image: 'logo.png', colour: 'red' } })).toThrow();
+    expect(() => parseBrief({ id: 'b', overlay: { image: 'logo.png', position: 'middle' } })).toThrow();
+    expect(() => parseBrief({ id: 'b', overlay: { image: 'logo.png', width: 5000 } })).toThrow();
+  });
+
   it('leaves out rules whose input does not exist yet', () => {
     const { words, subtitleFile, clip, ...early } = base;
     const brief = withBrief({ disclosure: { mode: 'onscreen', text: 'Sponsored' } });

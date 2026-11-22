@@ -7,3 +7,5 @@ web/dist/
 parts/
 data/
 sounds/
+# Campaign logos and other overlay images: the owner's, and the repository is public.
+overlays/

@@ -1,0 +1,203 @@
+{
+  "note": "What suggestMoments sent before event terms and guidance existed (recorded 2026-11-21). With neither given it must send exactly this.",
+  "words": [
+    {
+      "text": "What",
+      "start": 0,
+      "end": 0.3
+    },
+    {
+      "text": "a",
+      "start": 0.3,
+      "end": 0.4
+    },
+    {
+      "text": "goal!",
+      "start": 0.4,
+      "end": 0.9
+    },
+    {
+      "text": "He",
+      "start": 1.5,
+      "end": 1.7
+    },
+    {
+      "text": "scores",
+      "start": 1.7,
+      "end": 2.1
+    },
+    {
+      "text": "again.",
+      "start": 2.1,
+      "end": 2.6
+    },
+    {
+      "text": "No",
+      "start": 3.4,
+      "end": 3.6
+    },
+    {
+      "text": "way",
+      "start": 3.6,
+      "end": 3.9
+    },
+    {
+      "text": "that",
+      "start": 3.9,
+      "end": 4.1
+    },
+    {
+      "text": "was",
+      "start": 4.1,
+      "end": 4.3
+    },
+    {
+      "text": "a",
+      "start": 4.3,
+      "end": 4.4
+    },
+    {
+      "text": "penalty?",
+      "start": 4.4,
+      "end": 5
+    },
+    {
+      "text": "GOOOOOL",
+      "start": 6,
+      "end": 6.8
+    },
+    {
+      "text": "incredible",
+      "start": 7,
+      "end": 7.6
+    },
+    {
+      "text": "scenes",
+      "start": 7.6,
+      "end": 8.2
+    }
+  ],
+  "plain": {
+    "system": "You choose moments from a video transcript that would work as short vertical clips for social media.\nPick the 5 best moments. Each must stand on its own: a viewer who sees only that clip understands it.\nEach moment must last between 15 and 60 seconds.\nStart a moment where a sentence starts and end it where a sentence ends. Use only times that appear in the transcript.\nMoments must not overlap.\nFor each moment write:\n- hook: one line shown on screen at the start, at most 60 characters, plain text, no hashtags, no emoji. It must be true to what is said.\n- title: a short title for the post.\n- description: one or two sentences for the post.\n- reason: one sentence on why this moment works.\n- score: your rating from 0 to 1.\nEach transcript line starts with its start and end time in seconds, in square brackets.",
+    "user": "[0.0-0.9] What a goal!\n[1.5-2.6] He scores again.\n[3.4-5.0] No way that was a penalty?\n[6.0-8.2] GOOOOOL incredible scenes",
+    "schemaName": "moments",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "moments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "number"
+              },
+              "end": {
+                "type": "number"
+              },
+              "hook": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "score": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "start",
+              "end",
+              "hook",
+              "title",
+              "description",
+              "reason",
+              "score"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "moments"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "withBrief": {
+    "brief": {
+      "id": "b",
+      "minSeconds": 3,
+      "maxSeconds": 8,
+      "onScreenTextMustInclude": [
+        "ForgeGUI"
+      ],
+      "forbiddenTerms": [
+        "scam"
+      ],
+      "descriptionMustInclude": [
+        "ad"
+      ]
+    },
+    "count": 3,
+    "system": "You choose moments from a video transcript that would work as short vertical clips for social media.\nPick the 3 best moments. Each must stand on its own: a viewer who sees only that clip understands it.\nEach moment must last between 3 and 8 seconds.\nStart a moment where a sentence starts and end it where a sentence ends. Use only times that appear in the transcript.\nMoments must not overlap.\nFor each moment write:\n- hook: one line shown on screen at the start, at most 60 characters, plain text, no hashtags, no emoji. It must be true to what is said.\n- title: a short title for the post.\n- description: one or two sentences for the post.\n- reason: one sentence on why this moment works.\n- score: your rating from 0 to 1.\nEach transcript line starts with its start and end time in seconds, in square brackets.\nThe clips are for a campaign with these rules:\n- The hook must contain: ForgeGUI.\n- The description must contain at least one of: ad.\n- Never use these words in the hook, title or description, and avoid moments where they are spoken: scam.",
+    "user": "[0.0-0.9] What a goal!\n[1.5-2.6] He scores again.\n[3.4-5.0] No way that was a penalty?\n[6.0-8.2] GOOOOOL incredible scenes",
+    "schemaName": "moments",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "moments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "number"
+              },
+              "end": {
+                "type": "number"
+              },
+              "hook": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "score": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "start",
+              "end",
+              "hook",
+              "title",
+              "description",
+              "reason",
+              "score"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "moments"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -107,6 +107,10 @@ label.check {
 .row > * { flex: 1 1 120px; min-width: 0; }
 .row > .fixed { flex: 0 0 auto; }
 .row.middle { align-items: center; }
+/* A progress line names a file, and a file name has no spaces to break at: without this
+   "Finding moments in asianjeff_YvgmvcjYtwo_0m00s-1h00m00s.mp4" ran out of its panel. */
+.running { overflow-wrap: anywhere; min-width: 0; }
+.running > .spinner { flex-shrink: 0; }
 .stack > * + * { margin-top: var(--gap); }
 .pass { color: var(--good); font-weight: 650; }
 .fail { color: var(--bad); font-weight: 650; }

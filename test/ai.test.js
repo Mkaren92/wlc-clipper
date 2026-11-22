@@ -1,13 +1,17 @@
 // The AI features, with a stand-in for the AI service. These tests need no
 // key and no network.
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { getAi } from '../src/ai/client.js';
 import { proposeWordFixes, tidyFixes } from '../src/ai/fixWords.js';
-import { suggestMoments, tidyMoments, transcriptLines } from '../src/ai/suggest.js';
+import { keptTranscript, readKeptResult, suggestMoments, tidyMoments, transcriptLines } from '../src/ai/suggest.js';
 import { parseBrief } from '../src/brief/schema.js';
+import { suggestHooks, tidyHooks } from '../src/ai/suggestHook.js';
+import { parseTermGroups } from '../src/chat/terms.js';
 import { run } from '../src/run.js';
 
 /** Sixty words, one per second: word N is spoken from N to N + 0.5. */
@@ -133,13 +137,197 @@ describe('suggestMoments', () => {
     const result = await suggestMoments({ source, cacheDir: path.join(dir, 'cache'), transcriber, ai: ai({ moments: [] }) });
     expect(result.fromCache).toBe(true);
     expect(transcribed).toBe(before);
-    expect(await readdir(path.join(dir, 'cache'))).toHaveLength(1);
+    // One transcript; the model's answers are kept beside it under their own names.
+    expect((await readdir(path.join(dir, 'cache'))).filter((name) => !name.startsWith('moments-'))).toHaveLength(1);
   }, 60_000);
+
+  // The brief for event terms: with no terms and no guidance, the request must be exactly
+  // what it was before they existed. The fixture was recorded from the old code.
+  describe('event terms and guidance', () => {
+    const before = JSON.parse(readFileSync(new URL('./fixtures/suggest-prompt-before.json', import.meta.url), 'utf8'));
+    const steeredTranscriber = { name: 'fake', isInstalled: async () => true, transcribe: async () => ({ language: 'en', words: before.words }) };
+    let video;
+    beforeAll(async () => {
+      // A source of its own with the fixture's words, and a sine as its sound so no pauses move them.
+      video = path.join(dir, 'steered.mp4');
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440',
+        '-t', '9', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', video]);
+    }, 60_000);
+    const shape = (request) => ({ system: request.system, user: request.user, schemaName: request.schemaName, schema: z.toJSONSchema(request.schema) });
+    const terms = parseTermGroups([{ label: 'Goal', terms: ['goal', 'gol'] }, { label: 'Penalty', terms: ['penalty', 'pen'] }]);
+
+    it('sends exactly the old request when no terms and no guidance are given', async () => {
+      asked.length = 0;
+      const cacheDir = path.join(dir, 'steer-cache-1');
+      await suggestMoments({ source: video, cacheDir, transcriber: steeredTranscriber, ai: ai({ moments: [] }) });
+      await suggestMoments({ source: video, count: 3, brief: parseBrief(before.withBrief.brief), cacheDir, transcriber: steeredTranscriber, ai: ai({ moments: [] }), terms: [], guidance: '   ' });
+      expect(shape(asked[0])).toEqual(before.plain);
+      const { brief, count, ...withBrief } = before.withBrief;
+      expect(shape(asked[1])).toEqual(withBrief);
+    }, 60_000);
+
+    it('adds the guidance, the labels and the pre-scan hints, and keeps a label the model gives', async () => {
+      asked.length = 0;
+      // The fixture's brief allows 3 to 8 seconds, which these two moments fit.
+      const answer = { moments: [{ ...moment(0, 3.9, { hook: 'What a goal' }), label: 'goal' }, { ...moment(4.3, 8.2, { score: 0.4 }), label: 'Something else' }] };
+      const result = await suggestMoments({
+        source: video, count: 3, brief: parseBrief(before.withBrief.brief), cacheDir: path.join(dir, 'steer-cache-2'), transcriber: steeredTranscriber, ai: ai(answer),
+        terms, guidance: 'Big reactions to goals and referee decisions',
+      });
+      const [request] = asked;
+      // The old request is still there, word for word; the steering comes after it.
+      expect(request.system.startsWith(before.withBrief.system)).toBe(true);
+      expect(request.system).toContain('Big reactions to goals and referee decisions');
+      expect(request.system).toContain('- Goal: goal, gol');
+      expect(request.system).toContain('leads to check, not confirmed events');
+      // The hints: the lines our matcher found, with their times. "GOOOOOL" is "gol".
+      expect(request.user.startsWith(before.plain.user)).toBe(true);
+      expect(request.user).toContain('Hints');
+      expect(request.user).toContain('[0.0-0.9] Goal');
+      expect(request.user).toContain('[3.4-5.0] Penalty');
+      expect(request.user).toContain('[6.0-8.2] Goal');
+      expect(z.toJSONSchema(request.schema).properties.moments.items.required).toContain('label');
+      // A label is kept only when it is one of the owner's, in the owner's spelling; the terms heard come from our matcher.
+      expect(result.moments).toHaveLength(2);
+      expect(result.moments[0]).toMatchObject({ label: 'Goal', matchedTerms: ['goal'] });
+      expect(result.moments[1].label).toBeUndefined();
+      expect(result.moments[1].matchedTerms).toEqual(['gol', 'penalty']); // in the order of the owner's groups
+    }, 60_000);
+
+    it('keeps the answer per set of inputs: the same inputs ask nothing, new terms ask the model but do not transcribe', async () => {
+      const cacheDir = path.join(dir, 'steer-cache-3');
+      // The fixture's brief allows 3 to 8 seconds, so this moment is usable and is kept.
+      const brief = parseBrief(before.withBrief.brief);
+      asked.length = 0;
+      const first = await suggestMoments({ source: video, brief, cacheDir, transcriber: steeredTranscriber, ai: ai({ moments: [moment(0, 3.9)] }), terms });
+      expect(first.moments).toHaveLength(1);
+      const again = await suggestMoments({ source: video, brief, cacheDir, transcriber: steeredTranscriber, ai: ai({ moments: [] }), terms });
+      expect(asked).toHaveLength(1);
+      expect(again).toMatchObject({ resultFromCache: true, fromCache: true });
+      expect(again.moments).toEqual(first.moments);
+      const other = await suggestMoments({ source: video, brief, cacheDir, transcriber: steeredTranscriber, ai: ai({ moments: [] }), terms, guidance: 'only goals' });
+      expect(asked).toHaveLength(2);
+      expect(other).toMatchObject({ resultFromCache: false, fromCache: true });
+      const forced = await suggestMoments({ source: video, brief, cacheDir, transcriber: steeredTranscriber, ai: ai({ moments: [] }), terms, force: true });
+      expect(asked).toHaveLength(3);
+      expect(forced.resultFromCache).toBe(false);
+    }, 60_000);
+
+    it('does not keep an answer with nothing usable in it, so asking again asks the model', async () => {
+      const cacheDir = path.join(dir, 'steer-cache-empty');
+      const brief = parseBrief(before.withBrief.brief);
+      asked.length = 0;
+      await suggestMoments({ source: video, brief, cacheDir, transcriber: steeredTranscriber, ai: ai({ moments: [] }) });
+      const again = await suggestMoments({ source: video, brief, cacheDir, transcriber: steeredTranscriber, ai: ai({ moments: [moment(0, 3.9)] }) });
+      expect(asked).toHaveLength(2);
+      expect(again.resultFromCache).toBe(false);
+      expect(again.moments).toHaveLength(1);
+    }, 60_000);
+
+    it('takes only a language code, since it goes into a file name', async () => {
+      expect(await keptTranscript({ source: video, lang: '../../a', cacheDir: path.join(dir, 'steer-cache-1') })).toBeNull();
+      await expect(suggestMoments({ source: video, lang: '/../x', cacheDir: path.join(dir, 'steer-cache-lang'), transcriber: steeredTranscriber, ai: ai({ moments: [] }) }))
+        .rejects.toThrow(/not a language code/);
+    });
+
+    it('loads a kept result written without label or matchedTerms', async () => {
+      const file = path.join(dir, 'old-result.json');
+      await writeFile(file, JSON.stringify({ model: 'fake-1', moments: [{ start: 1, end: 9, hook: null, title: 'T', description: 'D', reason: 'R', score: 0.5 }] }));
+      const kept = await readKeptResult(file);
+      expect(kept.moments[0]).toEqual({ start: 1, end: 9, hook: null, title: 'T', description: 'D', reason: 'R', score: 0.5 });
+      await writeFile(file, '{"moments": "not a list"}');
+      expect(await readKeptResult(file)).toBeNull();
+    });
+
+    it('reads a kept transcript without making one', async () => {
+      expect(await keptTranscript({ source: video, cacheDir: path.join(dir, 'steer-cache-1') })).toEqual(before.words);
+      expect(await keptTranscript({ source: video, cacheDir: path.join(dir, 'nowhere') })).toBeNull();
+    });
+  });
 
   it('says what is missing when no key is set', async () => {
     const noKey = { ...ai({ moments: [] }), isConfigured: () => false, help: 'Set the thing up.' };
     await expect(suggestMoments({ source, cacheDir: dir, transcriber, ai: noKey })).rejects.toThrow('Set the thing up.');
   });
+});
+
+// The "Suggest" button beside the hook box (2026-11-21): hooks for the range about to be cut.
+describe('hook suggestions', () => {
+  let dir;
+  let source;
+  const asked = [];
+  let transcribed = [];
+  const said = [['He', 0.2, 0.4], ['really', 0.4, 0.8], ['did', 0.8, 1.0], ['that.', 1.0, 1.4], ['No', 2.0, 2.2], ['way!', 2.2, 2.6]].map(([text, start, end]) => ({ text, start, end }));
+  const transcriber = {
+    name: 'fake', isInstalled: async () => true,
+    transcribe: async (file) => {
+      transcribed.push(file);
+      return { language: 'en', words: said };
+    },
+  };
+  const ai = (answer) => ({
+    service: 'Fake', model: 'fake-1', help: 'Set it up.', isConfigured: () => true,
+    ask: async (request) => {
+      asked.push(request);
+      if (answer instanceof Error) throw answer;
+      return { data: answer, usage: { input: 10, output: 5 } };
+    },
+  });
+  beforeAll(async () => {
+    dir = await mkdtemp(path.join(os.tmpdir(), 'clipper-hook-'));
+    source = path.join(dir, 'secret-name.mp4');
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440',
+      '-t', '6', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', source]);
+  }, 60_000);
+  afterAll(() => rm(dir, { recursive: true, force: true }));
+
+  it('transcribes only the range when no transcript is kept, and sends only its words', async () => {
+    asked.length = 0;
+    transcribed = [];
+    const result = await suggestHooks({ source, start: 1, end: 4, cacheDir: path.join(dir, 'none'), transcriber, ai: ai({ hooks: ['He REALLY did that', 'No way he did that?', 'Wait for it'] }) });
+    expect(transcribed).toHaveLength(1);
+    expect(result).toMatchObject({ transcribed: true, model: 'fake-1' });
+    expect(result.hooks.map((hook) => hook.text)).toEqual(['He REALLY did that', 'No way he did that?', 'Wait for it']);
+    const [request] = asked;
+    expect(request.user).toBe('[0.2-1.4] He really did that.\n[2.0-2.6] No way!');
+    expect(request.system).toContain('at most 60 characters');
+    // Nothing that names a file or a folder leaves the machine.
+    expect(request.user + request.system).not.toContain('secret-name');
+    expect(request.user + request.system).not.toContain(dir);
+  }, 60_000);
+
+  it('takes the range\'s words from a kept whole-video transcript, on the clip\'s clock, without transcribing', async () => {
+    asked.length = 0;
+    transcribed = [];
+    const cacheDir = path.join(dir, 'cache');
+    // Keep a whole-video transcript the way suggested moments does.
+    await suggestMoments({ source, cacheDir, transcriber: { ...transcriber, transcribe: async () => ({ language: 'en', words: [{ text: 'Before.', start: 0.5, end: 0.9 }, { text: 'Inside', start: 2.1, end: 2.5 }, { text: 'the', start: 2.5, end: 2.7 }, { text: 'range.', start: 2.7, end: 3.1 }, { text: 'After.', start: 5.2, end: 5.6 }] }) }, ai: ai({ moments: [] }) });
+    asked.length = 0;
+    const result = await suggestHooks({ source, start: 2, end: 4, cacheDir, transcriber, ai: ai({ hooks: ['Inside the range'] }) });
+    expect(transcribed).toHaveLength(0);
+    expect(result.transcribed).toBe(false);
+    expect(asked[0].user).toBe('[0.1-1.1] Inside the range.');
+  }, 60_000);
+
+  it('makes what comes back safe: fitted, cleaned, without repeats, and checked against the brief', () => {
+    const brief = parseBrief({ id: 'b', onScreenTextMustInclude: ['ForgeGUI'], forbiddenTerms: ['scam'] });
+    const long = 'This is a very long hook that keeps going well past the sixty character limit of the screen';
+    const hooks = tidyHooks([`"${long}"`, 'Not a {\\b1}scam', 'not a scam', '', 42, 'ForgeGUI did it'], brief);
+    expect(hooks[0].text.length).toBeLessThanOrEqual(60);
+    expect(hooks[0].text.startsWith('This is a very long hook')).toBe(true);
+    expect(hooks[1]).toEqual({ text: 'Not a b1scam', problems: ['On-screen text: not found in the hook, disclosure or end-card text: ForgeGUI'] });
+    // The third proposal repeats nothing new, so at most three distinct hooks are kept.
+    expect(hooks.map((hook) => hook.text)).toEqual([hooks[0].text, 'Not a b1scam', 'not a scam']);
+    expect(hooks[2].problems.some((problem) => problem.startsWith('Forbidden terms: "scam"'))).toBe(true);
+    expect(tidyHooks('nonsense')).toEqual([]);
+  });
+
+  it('says what is missing, in its own words', async () => {
+    await expect(suggestHooks({ source, start: 1, end: 4, cacheDir: dir, transcriber, ai: { ...ai({}), isConfigured: () => false } })).rejects.toThrow('Set it up.');
+    await expect(suggestHooks({ source, start: 4, end: 1, cacheDir: dir, transcriber, ai: ai({}) })).rejects.toThrow(/start and the end/);
+    const silent = { ...transcriber, transcribe: async () => ({ language: 'en', words: [] }) };
+    await expect(suggestHooks({ source, start: 1, end: 4, cacheDir: path.join(dir, 'none2'), transcriber: silent, ai: ai({}) })).rejects.toThrow(/No speech was found/);
+  }, 60_000);
 });
 
 describe('getAi', () => {

@@ -37,7 +37,14 @@ const fakeAi = {
 // Stands in for the downloader: every video is from "@agreed", and a download is a small test video.
 const fakeDownloader = {
   isInstalled: async () => true,
-  info: async () => ({ id: 'dQw4w9WgXcQ', title: 'A watchalong', channel: 'Agreed Channel', channelId: 'UCxxx', handle: '@agreed', duration: 600 }),
+  info: async () => ({ id: 'dQw4w9WgXcQ', title: 'A watchalong', channel: 'Agreed Channel', channelId: 'UCxxx', handle: '@agreed', duration: 600, chat: true }),
+  // A chat replay of two messages, in the shape yt-dlp writes.
+  chat: async (job) => {
+    const line = (ms, who, text) => JSON.stringify({ replayChatItemAction: { videoOffsetTimeMsec: String(ms), actions: [{ addChatItemAction: { item: { liveChatTextMessageRenderer: { message: { runs: [{ text }] }, authorExternalChannelId: who, timestampText: { simpleText: '0:01' } } } } }] } });
+    const file = path.join(job.dir, `${job.name}.live_chat.json`);
+    await writeFile(file, [line(1000, 'UC1', 'GOAL'), line(2000, 'UC2', 'what a goal')].join('\n'));
+    return file;
+  },
   channel: async () => ({ name: 'Agreed Channel', channelId: 'UCxxx', handle: '@agreed', pictureUrl: 'https://yt3.googleusercontent.com/made-up-picture', subscribers: 18000 }),
   live: async () => ({ live: true, videoId: 'dQw4w9WgXcQ', title: 'On air', channelId: 'UCxxx', handle: '@agreed', viewers: 77, started: 1795174296 }),
   download: async (job) => {
@@ -575,6 +582,98 @@ describe('AI suggestions', () => {
     expect(done).toMatchObject({ status: 'done', result: { model: 'fake-1', fromCache: false } });
     expect(done.result.moments).toHaveLength(0);
     expect((await api('/api/clips')).data).toEqual([]);
+  }, 60_000);
+
+  it('lists overlay images by name with their size and kind, and refuses anything but a plain PNG name', async () => {
+    const overlaysDir = path.join(dir, 'overlays');
+    await mkdir(overlaysDir, { recursive: true });
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=red:s=400x200,format=rgba', '-frames:v', '1', path.join(overlaysDir, 'logo.png')]);
+    await writeFile(path.join(overlaysDir, 'notes.txt'), 'not an image');
+    expect((await api('/api/overlays')).data).toEqual([{ name: 'logo.png', width: 400, height: 200, kind: 'logo' }]);
+    expect((await api('/media/overlays/logo.png')).status).toBe(200);
+    expect((await api('/media/overlays/notes.txt')).status).toBe(404);
+    expect((await api('/media/overlays/..%2Fsecret.mp4')).status).toBe(404);
+    // A cut naming an overlay that is not there is refused before anything starts.
+    expect((await api('/api/cut', { method: 'POST', body: { video: 'game.mp4', start: 0, end: 1, overlay: { name: 'missing.png' } } })).status).toBe(404);
+    expect((await api('/api/cut', { method: 'POST', body: { video: 'game.mp4', start: 0, end: 1, overlay: { name: 'logo.png', position: 'middle' } } })).status).toBe(400);
+    // A brief with an overlay tells the page its picture's size.
+    await writeFile(path.join(dir, 'briefs', 'with-logo.json'), JSON.stringify({ id: 'with-logo', overlay: { image: path.join(overlaysDir, 'logo.png'), offsetY: 660 } }));
+    const listed = (await api('/api/briefs')).data.find((one) => one.file === 'with-logo.json');
+    expect(listed).toMatchObject({ ok: true, overlaySize: { width: 400, height: 200 }, brief: { overlay: { offsetY: 660, position: 'top-left' } } });
+    await rm(path.join(dir, 'briefs', 'with-logo.json'));
+  }, 60_000);
+
+  it('suggests hooks for a range as a background job, and refuses a range it cannot read', async () => {
+    expect((await api('/api/suggest-hook', { method: 'POST', body: { video: 'game.mp4', start: 'x', end: 2 } })).status).toBe(400);
+    expect((await api('/api/suggest-hook', { method: 'POST', body: { video: 'nope.mp4', start: 0, end: 2 } })).status).toBe(404);
+    expect((await api('/api/suggest-hook', { method: 'POST', body: { video: 'game.mp4', start: 0, end: 2 }, headers: { Origin: 'https://example.com' } })).status).toBe(403);
+    const started = await api('/api/suggest-hook', { method: 'POST', body: { video: 'game.mp4', start: '0:00', end: 3 } });
+    expect(started.status).toBe(202);
+    // The stand-in AI answers in the moments' shape, so no hook comes back, and nothing breaks.
+    expect(await finished(started.data.id)).toMatchObject({ status: 'done', kind: 'hook', result: { hooks: [] } });
+  }, 60_000);
+
+  it('takes event terms and guidance, refuses terms it cannot read, and asks again when nothing usable was kept', async () => {
+    const terms = [{ label: 'Goal', terms: ['goal', 'gol'] }];
+    expect((await api('/api/suggest', { method: 'POST', body: { video: 'game.mp4', terms: [{ label: 'Goal', terms: [] }] } })).status).toBe(400);
+    expect((await api('/api/suggest', { method: 'POST', body: { video: 'game.mp4', terms: [{ label: 'Goal', terms: ['x'], colour: 'red' }] } })).status).toBe(400);
+    const first = await finished((await api('/api/suggest', { method: 'POST', body: { video: 'game.mp4', brief: 'demo.json', terms, guidance: 'goals' } })).data.id);
+    expect(first).toMatchObject({ status: 'done', result: { resultFromCache: false } });
+    // The stand-in's moment is shorter than any clip may be, so the answer has nothing usable
+    // and is not kept: the same request asks again. Keeping a usable answer is tested in ai.test.js.
+    const again = await finished((await api('/api/suggest', { method: 'POST', body: { video: 'game.mp4', brief: 'demo.json', terms, guidance: 'goals' } })).data.id);
+    expect(again.result.resultFromCache).toBe(false);
+    const forced = await finished((await api('/api/suggest', { method: 'POST', body: { video: 'game.mp4', brief: 'demo.json', terms, guidance: 'goals', force: true } })).data.id);
+    expect(forced.result.resultFromCache).toBe(false);
+  }, 60_000);
+});
+
+describe('chat for suggested moments', () => {
+  const agreed = [{ id: 'a', name: 'Agreed Channel', url: 'https://www.youtube.com/@agreed', status: 'agreed', note: '' }];
+
+  it('has no chat until one is brought in, and never transcribes to show the transcript', async () => {
+    const { data } = await api('/api/chat/game.mp4');
+    expect(data).toMatchObject({ chat: null, suggested: null, downloaderInstalled: true });
+    expect(data.duration).toBeCloseTo(4, 0);
+    expect((await api('/api/chat/nope.mp4')).status).toBe(404);
+    expect((await api('/api/chat/..%2Fsecret.mp4')).status).toBe(404);
+    // The transcript from the suggestion test above is kept, so it is shown; nothing new is made.
+    expect((await api('/api/transcript/game.mp4')).data.words.length).toBeGreaterThan(0);
+  });
+
+  it('imports a chat file as text, shifts it by the offset, and removes it', async () => {
+    const csv = 'time,author,text\n0.5,ann,GOOOOL\n2,bob,what a goal\n3.5,cat,lol\n9,dan,past the end';
+    const imported = await fetch(`${base}/api/chat/game.mp4/import?name=chat.csv`, { method: 'PUT', headers: { 'Content-Type': 'text/csv' }, body: csv });
+    expect(imported.status).toBe(200);
+    const body = await imported.json();
+    expect(body.chat).toMatchObject({ origin: { kind: 'file', name: 'chat.csv' }, offset: 0, total: 4 });
+    // Only the messages inside the 4-second video.
+    expect(body.chat.messages.map((m) => m.t)).toEqual([0.5, 2, 3.5]);
+    const shifted = await api('/api/chat/game.mp4/offset', { method: 'PUT', body: { offset: 1 } });
+    // The offset is the seconds of the chat before the video starts: every message moves 1 s earlier.
+    expect(shifted.data.chat.messages.map((m) => m.t)).toEqual([1, 2.5]);
+    expect((await api('/api/chat/game.mp4/offset', { method: 'PUT', body: { offset: 'soon' } })).status).toBe(400);
+    const broken = await fetch(`${base}/api/chat/game.mp4/import?name=chat.csv`, { method: 'PUT', body: 'nothing,useful\n1,2' });
+    expect(broken.status).toBe(400);
+    expect((await api('/api/chat/game.mp4', { method: 'DELETE' })).status).toBe(200);
+    expect((await api('/api/chat/game.mp4')).data.chat).toBeNull();
+  });
+
+  it('fetches a chat replay only from an agreed channel, as a job, and checks candidates with the AI', async () => {
+    await api('/api/sources', { method: 'PUT', body: [] });
+    const refused = await finished((await api('/api/chat/game.mp4/fetch', { method: 'POST', body: { url: 'https://youtu.be/dQw4w9WgXcQ' } })).data.id);
+    expect(refused).toMatchObject({ status: 'failed', error: expect.stringMatching(/not in your sources list/) });
+    await api('/api/sources', { method: 'PUT', body: agreed });
+    const fetched = await finished((await api('/api/chat/game.mp4/fetch', { method: 'POST', body: { url: 'https://youtu.be/dQw4w9WgXcQ', offset: 0 } })).data.id);
+    expect(fetched).toMatchObject({ status: 'done', kind: 'chat', result: { messages: 2, offset: 0 } });
+    expect((await api('/api/chat/game.mp4')).data.chat.origin).toEqual({ kind: 'youtube', videoId: 'dQw4w9WgXcQ' });
+
+    expect((await api('/api/chat/game.mp4/check', { method: 'POST', body: { candidates: [{ start: 0, end: 3, label: 'Goal' }], terms: [{ label: 'Goal' }] } })).status).toBe(400);
+    const checked = await finished((await api('/api/chat/game.mp4/check', { method: 'POST', body: { candidates: [{ start: 0, end: 3, label: 'Goal' }], terms: [{ label: 'Goal', terms: ['goal'] }] } })).data.id);
+    // The stand-in AI answers in another shape, so the keyword result is kept and nothing breaks.
+    expect(checked).toMatchObject({ status: 'done', kind: 'chat-check', result: { error: null, results: [{ ai: null, needsReview: false }] } });
+    await api('/api/chat/game.mp4', { method: 'DELETE' });
+    await api('/api/sources/a', { method: 'DELETE' });
   }, 60_000);
 });
 

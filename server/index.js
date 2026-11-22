@@ -21,6 +21,7 @@ const { app } = createApp({
   briefsDir: path.join(root, 'briefs'),
   partsDir: path.join(root, 'parts'),
   soundsDir: path.join(root, 'sounds'),
+  overlaysDir: path.join(root, 'overlays'),
   dataDir: path.join(root, 'data'),
   webDir: existsSync(webDir) ? webDir : undefined,
   toolVersion: pkg.version,

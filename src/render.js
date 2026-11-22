@@ -38,10 +38,11 @@ const ENCODE_SETTINGS = [
  * @param {string} options.graph
  * @param {string | null} [options.audioLabel]   sound output of the graph, if it makes one
  * @param {{ seconds: number, image?: string } | null} [options.endCard]
+ * @param {{ image: string } | null} [options.overlay]   the overlay image, held still for the whole clip
  * @param {string} [options.output]   file to write
  * @returns {string[]}
  */
-export function renderArgs({ source, start, seconds, graph, audioLabel = null, endCard = null, output = PARTIAL_FILE }) {
+export function renderArgs({ source, start, seconds, graph, audioLabel = null, endCard = null, overlay = null, output = PARTIAL_FILE }) {
   const total = seconds + (endCard?.seconds ?? 0);
   // The card's plain background is ffmpeg's second input. Its picture, when
   // there is one, is the third, held still for the whole clip.
@@ -53,12 +54,15 @@ export function renderArgs({ source, start, seconds, graph, audioLabel = null, e
       cardInput.push('-loop', '1', '-framerate', String(OUT_FPS), '-t', toSeconds(total), '-i', endCard.image);
     }
   }
+  // The overlay image comes after them, like the card's picture: held for the whole clip.
+  const overlayInput = overlay ? ['-loop', '1', '-framerate', String(OUT_FPS), '-t', toSeconds(total), '-i', overlay.image] : [];
   return [
     '-hide_banner', '-loglevel', 'error', '-y',
     '-ss', toSeconds(start),
     '-t', toSeconds(seconds),
     '-i', source,
     ...cardInput,
+    ...overlayInput,
     '-filter_complex', graph,
     '-map', '[v]',
     '-map', audioLabel ?? '0:a:0?',

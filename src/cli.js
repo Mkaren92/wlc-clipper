@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Command, InvalidArgumentError, Option } from 'commander';
 import { getAi } from './ai/client.js';
 import { suggestMoments } from './ai/suggest.js';
 import { loadBrief } from './brief/schema.js';
+import { PRESETS } from './chat/presets.js';
+import { parseTermGroups } from './chat/terms.js';
 import { checkClip, cut, rerender } from './cut.js';
 import { loadEnv } from './env.js';
 import { fetchVideo } from './fetch.js';
@@ -38,6 +41,18 @@ function secondsOption(value) {
     throw new InvalidArgumentError('Give a number of seconds, 0 or more.');
   }
   return seconds;
+}
+
+/** One --blur: x,y,w,h in source pixels, start,end in seconds from the clip's start, and optionally "black". */
+function blurOption(value, list) {
+  const parts = value.split(',').map((part) => part.trim());
+  const style = parts.length === 7 ? parts.pop() : 'blur';
+  const numbers = parts.map(Number);
+  if (numbers.length !== 6 || numbers.some((n) => !Number.isFinite(n)) || !['blur', 'black'].includes(style)) {
+    throw new InvalidArgumentError('Give x,y,w,h,start,end, for example 600,300,120,120,1.5,4, and optionally ,black at the end.');
+  }
+  const [x, y, width, height, start, end] = numbers;
+  return [...list, { x, y, width, height, start, end, style }];
 }
 
 function camOption(value) {
@@ -80,6 +95,16 @@ program
   .option('--crop-x <pixels>', 'left edge of the crop in source pixels, for the center layout', pixelOption)
   .option('--crop-width <pixels>', 'width of the crop in source pixels, for the center layout; wider than the 9:16 column shows more of the picture over a blurred copy', pixelOption)
   .option('--cam <x,y,w,h>', 'webcam rectangle in source pixels, required for the facecam layout', camOption)
+  .option('--overlay <file>', 'a PNG or WebP shown for the whole clip: a logo in a corner, or a full 9:16 picture')
+  .option('--overlay-width <pixels>', 'the logo\'s width in the clip', pixelOption)
+  .option('--overlay-position <corner>', 'top-left, top-right, bottom-left or bottom-right')
+  .option('--overlay-margin <pixels>', 'distance from the corner\'s edges', pixelOption)
+  .option('--overlay-offset <pixels>', 'moves the logo down (or up, with a minus sign)', (value) => {
+    if (!/^-?\d+$/.test(value.trim())) throw new InvalidArgumentError('Give a whole number of pixels, such as 660 or -40.');
+    return Number(value);
+  })
+  .option('--game <x,y,w,h>', 'content rectangle in source pixels for the facecam layout; without it, the middle of the gameplay', camOption)
+  .option('--blur <x,y,w,h,start,end[,black]>', 'blur part of the frame (source pixels) for part of the clip (seconds from the clip\'s start); add ",black" to black it out instead; repeat for more', blurOption, [])
   .option('--trim <pixels>', 'cut this many pixels off every edge of the source first, to remove a frame baked into the recording', pixelOption, 0)
   .option('--hook <text>', 'line shown at the top at the start of the clip')
   .option('--hook-seconds <seconds>', 'how long the hook stays on screen; 0 keeps it for the whole clip', secondsOption, 2.5)
@@ -99,6 +124,11 @@ program
         cropX: options.cropX,
         cropWidth: options.cropWidth,
         cam: options.cam,
+        game: options.game,
+        blurs: options.blur,
+        overlay: options.overlay
+          ? { image: options.overlay, width: options.overlayWidth, position: options.overlayPosition, margin: options.overlayMargin, offsetY: options.overlayOffset }
+          : undefined,
         trim: options.trim,
         hook: options.hook,
         hookSeconds: options.hookSeconds,
@@ -179,11 +209,18 @@ program
   .option('--brief <file>', 'campaign brief the clips should follow')
   .option('--lang <code>', 'language spoken in the video', 'en')
   .option('--out <dir>', 'output folder; the whole-video transcript is kept in its .cache', './out')
+  .option('--terms <file>', 'event terms: a JSON file such as [{ "label": "Goal", "terms": ["goal", "gol"] }]')
+  .option('--preset <name>', 'event terms from a preset: football or gaming')
+  .option('--guidance <text>', 'what a good moment is for this video, in your own words')
+  .option('--again', 'ask the AI again even when an answer for the same inputs is kept')
   .action(async (file, options) => {
     const ai = getAi();
     const brief = options.brief ? (await loadBrief(options.brief)).brief : null;
+    if (options.terms && options.preset) throw new Error('Give either --terms or --preset, not both.');
+    if (options.preset && !Object.hasOwn(PRESETS, options.preset)) throw new Error(`There is no preset named "${options.preset}". Choose ${Object.keys(PRESETS).join(' or ')}.`);
+    const terms = options.preset ? PRESETS[options.preset].groups : parseTermGroups(options.terms ? JSON.parse(await readFile(options.terms, 'utf8')) : []);
     const steps = { transcribing: 'Transcribing the whole video (kept for next time)...', thinking: `Asking ${ai.service} (${ai.model})...` };
-    const { moments, usage, fromCache } = await suggestMoments({
+    const { moments, usage, fromCache, resultFromCache } = await suggestMoments({
       source: file,
       count: options.count,
       brief,
@@ -191,15 +228,20 @@ program
       cacheDir: path.join(path.resolve(options.out), '.cache'),
       transcriber: getTranscriber(),
       ai,
+      terms,
+      guidance: options.guidance ?? '',
+      force: Boolean(options.again),
       onStep: (step) => console.log(steps[step] ?? step),
     });
-    if (fromCache) console.log('Used the transcript kept from an earlier run.');
+    if (resultFromCache) console.log('Showing the answer kept from an earlier run with the same inputs. Add --again to ask again.');
+    else if (fromCache) console.log('Used the transcript kept from an earlier run.');
     if (moments.length === 0) console.log('No usable moments came back. Try again, or a different --count.');
 
     moments.forEach((moment, i) => {
       const seconds = (moment.end - moment.start).toFixed(1);
       console.log(`\n${i + 1}. ${formatClock(moment.start)} to ${formatClock(moment.end)} (${seconds} s), rated ${moment.score.toFixed(2)}`);
       console.log(`   Why:   ${moment.reason}`);
+      if (moment.label) console.log(`   Event: ${moment.label}${moment.matchedTerms ? ` (heard: ${moment.matchedTerms.join(', ')})` : ''}`);
       if (moment.hook) console.log(`   Hook:  ${moment.hook}`);
       console.log(`   Title: ${moment.title}`);
       console.log(`   Text:  ${moment.description}`);

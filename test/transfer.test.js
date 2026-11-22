@@ -96,7 +96,7 @@ describe('what counts as the owner\'s data', () => {
   it('takes what the owner chose to carry: the lists, pictures, sounds and briefs', () => {
     for (const name of [
       'data/sources.json', 'data/clubs.json', 'data/source-subscribers.json', 'data/source-pictures/north-stand.png',
-      'sounds/goal.mp3', 'sounds/intro.mp4', 'briefs/mine.json',
+      'sounds/goal.mp3', 'sounds/intro.mp4', 'briefs/mine.json', 'overlays/kreek-logo.webp', 'overlays/logo.png',
     ]) expect(acceptEntry(name), name).toBe(true);
   });
 
@@ -113,6 +113,7 @@ describe('what counts as the owner\'s data', () => {
     for (const name of [
       'data/backups/sources/x.json', 'data/sounds-made/goal-v2.wav', 'data/clubs.before-something.json', 'data/.incoming/files/data/sources.json',
       'env', '.env', 'package.json', 'src/cli.js', 'server/app.js', 'sounds/readme.txt', 'sounds/sub/goal.mp3', 'briefs/notes.txt',
+      'overlays/logo.webp:Zone.Identifier', 'overlays/sub/logo.png', 'overlays/notes.txt', 'data/youtube-cookies.txt',
       'data/source-pictures/../../x.png', 'data/sources.json/x',
     ]) expect(acceptEntry(name), name).toBe(false);
   });
