@@ -359,7 +359,7 @@ or `CLIPPER_AI=claude`. Restart the dashboard after changing `.env`.
 
 ### What is sent
 
-Only text: the video's transcript, or a clip's caption words, plus the brief's rules. The video, the audio and file names stay on your computer. Speech is still turned into text locally by Whisper.
+Only text: the video's transcript, or a clip's caption words, plus the brief's rules and your event words and guidance. With the AI check of chat moments ticked, also the chat messages' words and times. For hook suggestions, also the streamer's name, the times and loudness (in decibels) of stretches where the voice is much louder than usual, and, if ticked, how many chat messages of each kind reacted. Never who wrote a chat message. The video, the audio and file names stay on your computer. Speech is still turned into text locally by Whisper.
 
 In testing, suggestions for a 10-minute video took about 6 seconds either way once the transcript existed. With OpenAI it used about 5,300 tokens in and 550 out, around two cents.
 

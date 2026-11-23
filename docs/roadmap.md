@@ -36,10 +36,12 @@ Version 1 of the spec is complete: all three "evenings".
 - A logo overlay for the whole clip: a logo in a corner or a full-frame picture, chosen on the cutting screen, with `--overlay`, or set by a brief (checked)
 - Swear words covered in the captions and the hook (`F*CK`, `SH*T`), and the voice muffled for the length of each such word; two boxes on the cutting screen, both on unless unticked (2026-11-23); the muffle covers the middle 60% of the word
 - Captions where the recogniser first heard nothing: a second pass with its voice filter fills long silences with the words it is sure of (2026-11-23)
-- Hook suggestions: "Suggest" beside the hook box proposes three hooks for the clip being set up
+- Hook suggestions: "Suggest" beside the hook box proposes three hooks for the clip being set up, about the moment and the feeling rather than the words (2026-11-22): it is given the streamer's name, where the voice is loud, and, when ticked, counts of chat's reactions
+- A channel tag: the streamer's channel (`@theburntpeanut`) drawn at the top for all the footage, with the hook just under it; `--tag`, or the box on the cutting screen, which offers the handle of a fetched video's channel (2026-11-22)
+- Clips from a stream's chat are 1 minute (30 s before and after) since 2026-11-22, and "Skip parts already suggested" gives new parts when asking a stream again
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-559 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube.
+578 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube.
 
 ## Waiting on the owner
 
@@ -83,7 +85,8 @@ Found in a review on 2026-11-22. They are in the pages, which need driving in a 
 - How YouTube treats a muffled swear word. Its guidelines name only bleeping and muting as obscured. The owner listened to a muffled "What the fuck" on 2026-11-23 and liked it; the rest was measured (see `docs/decisions.md`).
 - The second recogniser pass, beyond the one clip it was built on: whether it ever fills a real silence with words that were not said, and how much longer cuts take.
 - The word list for covering and muffling, in long use: which words it misses, and whether it ever covers a name.
-- A hook suggestion from the real AI service. Only a stand-in answered in the tests; the button was looked at on the dashboard, not pressed.
+- A hook suggestion from the real AI service, with the streamer's name, the loud stretches and chat's reactions. Only a stand-in answered in the tests; the button was looked at on the dashboard, not pressed, and the "use chat's reactions" checkbox was only built.
+- The channel tag box on the cutting screen and the "Skip parts already suggested" checkbox on the Download page, driven in a browser (both pages were built only); and a clip with a channel tag and covered swear words together (each is tested alone).
 - The YouTube sign-in with a real cookies file. The tests use a stand-in for the downloader; whether a saved sign-in gets past "confirm you're not a bot", and for how long, was not seen.
 - Whether the chat defaults (3×, 8 messages, 5 people per 5 s) suit the owner's channels. On the one channel on this machine they find nothing.
 - The Download page in a browser, beyond the owner's own use. The owner has downloaded from it (11 minutes in about 13 s, a whole video of about 1.5 hours in about 20 s), but Claude has not driven it in a browser or read its console, and its "slow way" notice has not been seen.
