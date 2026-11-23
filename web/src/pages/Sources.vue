@@ -77,6 +77,7 @@ function takeSaved(answer, sourceId) {
   const fresh = answer.sources.find((known) => known.id === sourceId);
   const saved = JSON.parse(savedText.value).filter((known) => known.id !== sourceId || fresh).map((known) => (known.id === sourceId ? fresh : known));
   savedText.value = JSON.stringify(saved);
+  version.value = answer.version ?? version.value;
   pictures.value = answer.pictures ?? {};
   subscribers.value = answer.subscribers ?? {};
 }
@@ -119,7 +120,11 @@ const unsaved = computed(() => JSON.stringify(sources.value) !== savedText.value
 // Only what is saved counts: a channel typed in allows nothing until the list is saved.
 const allowed = computed(() => JSON.parse(savedText.value).filter((source) => source.status === 'agreed'));
 
+// The mark the saved list came with. Sent back with "Save the list", so a list that changed
+// meanwhile (a sync from the other PC, another tab) is not written over with this page's older copy.
+const version = ref('');
 function show(answer) {
+  version.value = answer.version ?? '';
   pictures.value = answer.pictures ?? {};
   subscribers.value = answer.subscribers ?? {};
   sources.value = answer.sources;
@@ -155,7 +160,7 @@ async function save() {
   error.value = '';
   note.value = '';
   try {
-    show(await api.saveSources(sources.value));
+    show(await api.saveSources(sources.value, version.value));
     note.value = 'Saved.';
   } catch (e) {
     error.value = e.message;
@@ -196,6 +201,7 @@ async function sync(source) {
     jobs.dismissed.push(started.id);
     Object.assign(source, result.source);
     const answer = await api.sources();
+    version.value = answer.version ?? version.value;
     pictures.value = answer.pictures ?? {};
     subscribers.value = answer.subscribers ?? {};
     savedText.value = JSON.stringify(answer.sources);

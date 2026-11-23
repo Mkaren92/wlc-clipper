@@ -1,5 +1,8 @@
 // The sources list and the fetch step (src/sources.js, src/fetch.js).
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { fetchVideo, filePrefix, ytDlp } from '../src/fetch.js';
 import { checkLive } from '../src/live.js';
 import { fetchPictures, listPictures, listSubscribers, pictureFile, removeOtherPictures, syncSource } from '../src/pictures.js';
@@ -31,8 +34,12 @@ const fetchRequest = z.strictObject({ url: z.string().min(1).max(300), start: ti
  */
 export function addSourceRoutes(app, { dataDir, inDir, jobs, downloader = ytDlp(), pictureDownload }) {
   // `prefixes` is what a file fetched from each source is named after, by source id.
+  // A mark that changes whenever the saved list does. A page sends it back with a whole-list save,
+  // so a page that read the list before a sync (or another tab) changed it cannot write the old list back.
+  const versionNow = async () => createHash('sha256').update(await readFile(path.join(dataDir, 'sources.json'), 'utf8').catch(() => '')).digest('hex').slice(0, 16);
   const answer = async (sources) => ({
     sources,
+    version: await versionNow(),
     // Which channels have a picture, by source id, with a number that changes when the picture does.
     pictures: await listPictures(dataDir, sources),
     // How many subscribers each channel had when it was last looked up, by source id.
@@ -46,6 +53,10 @@ export function addSourceRoutes(app, { dataDir, inDir, jobs, downloader = ytDlp(
   });
 
   app.put('/api/sources', async (req, res) => {
+    const based = req.get('X-List-Version');
+    if (based && based !== (await versionNow())) {
+      throw new HttpError(409, 'The channels list changed since this page read it (a sync from your other PC, or another tab). Reload the page, then make your change again.');
+    }
     const sources = await saveSources(dataDir, req.body).catch((error) => {
       throw new HttpError(400, error.message);
     });

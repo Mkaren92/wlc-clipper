@@ -39,9 +39,10 @@ export function isStopped() {
  *
  * @param {string} command
  * @param {string[]} args
- * @param {{ cwd?: string, input?: string, timeout?: number }} [options]
+ * @param {{ cwd?: string, input?: string, timeout?: number, env?: Record<string, string> }} [options]
  *   `input` is written to the program's standard input. `timeout` is in
- *   milliseconds; the program is stopped when it runs longer.
+ *   milliseconds; the program is stopped when it runs longer. `env` adds
+ *   to the settings the program is started with.
  * @returns {Promise<{ stdout: string, stderr: string }>}
  */
 export function run(command, args, options = {}) {
@@ -52,9 +53,13 @@ export function run(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd: options.cwd,
       timeout: options.timeout,
+      env: options.env ? { ...process.env, ...options.env } : undefined,
       stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
     if (options.input !== undefined) child.stdin.end(options.input);
+    // Read as text, so a letter of several bytes that falls across two pieces is not broken in two.
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => (stdout += chunk));

@@ -68,7 +68,7 @@ Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 - **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
 - **Clip:** watch the result, download it, see each brief rule as passed or failed, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
 - **Download:** paste a YouTube link from one of your channels and bring a part of the video, or the whole of it, into `in/`; or paste a finished live stream and get the moments its chat exploded as clips (see [Sources and fetching](#sources-and-fetching)).
-- **My data:** one file to download with everything you have made, and the place to load such a file on another computer (see [My data](#my-data-moving-to-another-computer)).
+- **My data:** keeps what you chose to carry the same on every computer through a private GitHub repository of yours, by itself; and, as a fallback, one file to download and load on another computer (see [My data](#my-data-moving-to-another-computer)).
 - **Unsaved changes:** the card, combine, compilation and sources pages show "Changes not saved" until you save, and their Save button stays in view.
 
 Only this computer can reach the dashboard; it is not visible on your network.
@@ -270,9 +270,9 @@ cp "data/backups/sources/2026-11-20T18-22-45-123Z.json" data/sources.json
 
 ## My data: moving to another computer
 
-GitHub holds the code. What you have made or added stays on the computer it was made on. The **My data** page turns the part you chose to carry into one file, and loads such a file on another computer.
+The public repository holds the code. What you have made or added stays on the computer it was made on, unless you carry it. The **My data** page carries the part you chose in two ways: **Sync with GitHub**, which keeps it the same on every computer by itself, and one file to download and load by hand.
 
-**What travels in the file:**
+**What travels, either way:**
 
 - your channels, with the club each streamer supports, their pictures and subscriber counts
 - your leagues and clubs, with all their logos
@@ -280,7 +280,26 @@ GitHub holds the code. What you have made or added stays on the computer it was 
 - your overlay images (the logos in `overlays/`)
 - your briefs
 
-**What stays on the computer it was made on:** source videos, parts, clips, combinations, compilations, and matches with their cards. Your AI key is never put in the file; copy the file `.env` by hand if you use one.
+**What stays on the computer it was made on:** source videos, parts, clips, combinations, compilations, and matches with their cards. Your AI key and your YouTube sign-in are never carried; copy the file `.env` by hand if you use one.
+
+### Sync with GitHub
+
+Your data goes to a **private** repository of your own on GitHub, separate from the public one with the code. Each computer needs `git` and an SSH key that your GitHub account accepts (`ssh -T git@github.com` must greet you by name).
+
+1. On GitHub make a new repository: any name, such as `wlc-clipper-data`, **Private**, nothing else ticked.
+2. On the computer that has your data, open "My data", paste the repository's address (as the browser shows it is fine), press "Check this address", then "Connect and send".
+3. On every other computer do the same. The page shows what is on GitHub beside what is there and asks whose lists to keep: choose "Take GitHub's data onto this computer".
+
+From then on nothing needs pressing. The dashboard syncs when it starts and within a minute of a change, here or on the other computer. The section shows "In sync", what last arrived or was sent, and has "Sync now". The "My data" button in the left column shows "check sync" when something needs a look.
+
+- **The tool refuses** the repository that holds the code, and a repository that is public.
+- **Changed on both computers before they synced:** different channels or clubs are put together. If the very same channel or club was changed on both, the one sent first is kept, the page says which, and the other is still in the repository's history.
+- **Nothing is deleted here.** A file that was replaced or removed on the other computer is moved into `data/backups/sync/` (the newest 20 rounds are kept). When a computer connects, its lists as they were are kept in `data/backups/before-connect-<date and time>/`.
+- **No internet:** nothing changes, and your work is sent on the next try.
+- **"Save the list" on the Sources page** is refused when the list changed since the page read it (a sync brought something from the other computer). Reload the page and make the change again; anything typed and not saved is lost by the reload.
+- "Disconnect" stops syncing on that computer. Its data stays, and so does what is on GitHub.
+
+### By hand, with one file
 
 **To take your work to another computer:**
 

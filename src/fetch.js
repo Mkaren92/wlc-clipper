@@ -58,6 +58,9 @@ const CHAT_TIMEOUT = 3 * 60 * 60 * 1000;
 // The link and range checks live in a file of their own, which the Download page also uses.
 export { MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoUrl };
 
+/** Free bytes on the disk that holds `dir`, or null when it cannot be told. */
+const diskFree = (dir) => statfs(dir).then((disk) => disk.bavail * disk.bsize, () => null);
+
 /**
  * Fetch a time range of a video into `outDir`, or the whole video.
  *
@@ -70,10 +73,12 @@ export { MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoUrl };
  * @param {string} options.outDir   the videos folder
  * @param {Downloader} [options.downloader]
  * @param {(step: string) => void} [options.onStep]
+ * @param {(dir: string) => Promise<number | null>} [options.freeSpace]   free bytes on the disk that holds
+ *   `dir`, or null when it cannot be told; replaced in tests, which must not depend on this machine's disk
  * @returns {Promise<{ name: string, file: string, seconds: number, early: number, source: Source, title: string, slow: string | null }>}
  *   `early` is how many seconds before the asked start the file begins; `slow` says why it came the slow way, if it did
  */
-export async function fetchVideo({ url, start, end, whole = false, sources, outDir, downloader = ytDlp(), onStep = () => {} }) {
+export async function fetchVideo({ url, start, end, whole = false, sources, outDir, downloader = ytDlp(), onStep = () => {}, freeSpace = diskFree }) {
   const link = videoUrl(url);
   if (!whole) checkFetchRange(start, end);
   if (!(await downloader.isInstalled())) {
@@ -108,9 +113,9 @@ export async function fetchVideo({ url, start, end, whole = false, sources, outD
 
   const dir = path.resolve(outDir);
   await mkdir(dir, { recursive: true });
-  const disk = await statfs(dir).catch(() => null);
+  const free = await freeSpace(dir);
   const needed = (end - start) * BYTES_PER_SECOND + 200_000_000;
-  if (disk && disk.bavail * disk.bsize < needed) {
+  if (free !== null && free < needed) {
     throw new Error(`There may not be enough free disk space for this: about ${(needed / 1e9).toFixed(1)} GB is needed.`);
   }
 

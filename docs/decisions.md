@@ -393,6 +393,22 @@ From a brief the owner supplied on 2026-11-21: a campaign's logo visible for the
 - **A brief's overlay is checked by its file's name**, so the same logo found at another path on another machine still passes.
 - **Not verified:** the overlay controls driven in a browser (the page was built; a scratch-dashboard run was stopped by the owner), and a brief with an overlay used for a real cut.
 
+## Syncing the owner's data through GitHub
+
+On 2026-11-23 the data file had not made it to the home PC, and the owner asked for something live instead. A hosted database was weighed against a private GitHub repository; the owner chose GitHub. It needs no new account, no key to store (the machine's SSH key is used) and no new dependency (the `git` program), and it keeps every earlier state. "Download my data" and "Load my data" stay as a fallback until the home PC has synced once.
+
+- **The same contents as the data file.** `src/transfer/contents.js` stays the one list of what travels.
+- **A copy of the repository in `data/.sync/repo`, filled from the machine's files, not the files themselves under git.** The data lives in four folders of a public repository's working tree; a copy keeps the two repositories apart and lets the lists be written through the usual functions with their backups.
+- **Logos as files in the copy.** Measured on the owner's list: 10.8 MB as saved, 18 KB plus 74 logo files (6.2 MB) in the copy, and splitting and joining gives back the same file byte for byte.
+- **Merged by the tool, not by git.** git is used to store, fetch and push; a merge commit is made with the `ours` strategy and its contents are then decided file by file against the last state both machines agreed on. A list changed on both is merged record by record; text merging of JSON was never an option.
+- **A record changed on both machines keeps GitHub's** (the one sent first), and the owner is told which. The other version is in the history. Asking the owner to choose each time was judged worse for a list of clubs and channels.
+- **Each round starts from the last state fully written to this machine**, and writes back only what differs from its own snapshot, and nothing if the machine changed meanwhile. A review found the first version could write an older list over a club marked during a round, and could push deletions after a round that was cut off. Both are tested: a pause in the middle of a round, and a round refused halfway followed by another.
+- **Looks once a minute, in the server.** One small question to GitHub (`ls-remote`) and a comparison of file names, sizes and times here; a round only when either changed. Not a job, so it never queues behind a cut, but it waits while one runs.
+- **Whether a repository is public is asked without any sign-in and without the machine's git settings**, and the three answers are kept apart: it answers (public, refused), it refuses (private or absent, accepted), or it could not be asked (refused).
+- **What was run on the real GitHub (2026-11-23):** the public check both ways, the first send from this machine (138 files), and a stand-in for the home PC in a scratch folder taking everything back, identical byte for byte. A change going between two real computers was not run.
+- **The first real connect failed halfway and the second worked.** The copy had lost its `.git` folder after the files were written; nothing had been sent. The cause was not proven. Two sync actions at once would do it, so the server now runs one at a time.
+- **Fetch tests no longer depend on the machine's disk.** With 2.7 GB free the whole-video test failed on the real free-space check; `fetchVideo` now takes the free-space reader as an option, and a test covers the refusal.
+
 ## Clip folder
 
 - **A clip folder is named after its hook**, at the owner's request: numbers said nothing about what a clip was. The hook is lower-cased and everything that is not a letter or a digit becomes a dash, cut at a word to 50 characters; a taken name gets `-2`, `-3`. With no hook, or a hook with nothing usable in it, the folder is the next free `clip-NNN` as before. Older numbered folders keep working. The dashboard lists clips newest first by the folder's creation time, since the names no longer sort by age, and it accepts a clip name made only of letters, digits and dashes.

@@ -322,7 +322,8 @@ describe('fetchVideo', () => {
     },
   });
   const link = 'https://youtu.be/dQw4w9WgXcQ';
-  const ask = (options) => fetchVideo({ url: link, start: 3720, end: 3900, sources, outDir: dir, downloader: downloader(), ...options });
+  // The disk is a stand-in with plenty of room: a test must not pass or fail by how full this machine is.
+  const ask = (options) => fetchVideo({ url: link, start: 3720, end: 3900, sources, outDir: dir, downloader: downloader(), freeSpace: async () => 1e12, ...options });
 
   beforeAll(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'clipper-fetch-'));
@@ -407,6 +408,14 @@ describe('fetchVideo', () => {
     expect((await readdir(dir)).filter((name) => name.includes('10m00s'))).toEqual([]);
     expect(await readdir(dir)).toContain('northstand_other.mp4.part'); // only this fetch's own pieces are removed
     await rm(path.join(dir, 'northstand_other.mp4.part'));
+  });
+
+  it('refuses before downloading when the disk has too little room, and goes on when the room cannot be told', async () => {
+    calls.length = 0;
+    await expect(ask({ start: 600, end: 615, freeSpace: async () => 50_000_000 })).rejects.toThrow(/not be enough free disk space/);
+    expect(calls).toEqual([]);
+    const fetched = await ask({ start: 600, end: 615, freeSpace: async () => null });
+    await rm(fetched.file);
   });
 
   // The owner asked on 2026-11-21 for whole videos as well, up to three hours.

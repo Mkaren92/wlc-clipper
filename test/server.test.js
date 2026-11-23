@@ -81,6 +81,8 @@ beforeAll(async () => {
     transcriber: fakeTranscriber,
     ai: fakeAi,
     downloader: fakeDownloader,
+    // Sync is tried against a repository in a folder, never GitHub, and only when a test asks.
+    syncAnyAddress: true,
     // Stands in for fetching a picture: any address gives the test video's first frame as a picture.
     pictureDownload: async () => {
       const file = path.join(dir, 'picture.png');
@@ -479,7 +481,7 @@ describe('sources and fetching', () => {
   const source = (status) => [{ id: 'a', name: 'Agreed Channel', url: 'https://www.youtube.com/@agreed', status, note: '' }];
 
   it('keeps the sources list, and fetches only from a channel marked as agreed', async () => {
-    expect((await api('/api/sources')).data).toEqual({ sources: [], pictures: {}, subscribers: {}, prefixes: {}, downloaderInstalled: true });
+    expect((await api('/api/sources')).data).toEqual({ sources: [], version: expect.any(String), pictures: {}, subscribers: {}, prefixes: {}, downloaderInstalled: true });
     expect((await api('/api/sources', { method: 'PUT', body: [{ id: 'a', name: 'X', url: 'https://example.com/@x' }] })).status).toBe(400);
 
     // Asked, but not agreed yet: the fetch is refused and nothing is written.
@@ -785,6 +787,61 @@ describe('cutting', () => {
     expect((await api('/api/clips/clip-999/render', { method: 'POST' })).status).toBe(404);
     expect((await api('/api/jobs/999')).status).toBe(404);
     expect((await api('/api/nothing')).status).toBe(404);
+  });
+});
+
+describe('sync with a repository', () => {
+  it('looks at an address, connects, sends a change when asked, and disconnects', async () => {
+    const github = path.join(dir, 'data-repo.git');
+    await run('git', ['init', '-q', '--bare', '-b', 'main', github]);
+    await api('/api/sources', { method: 'PUT', body: [{ id: 'a', name: 'Agreed Channel', url: 'https://www.youtube.com/@agreed', clubs: ['Barcelona'] }] });
+    expect((await api('/api/sync')).data).toMatchObject({ connected: false, state: 'off' });
+
+    // Only this machine's own pages may point the data anywhere.
+    for (const [address, method] of [['/api/sync/look', 'POST'], ['/api/sync/connect', 'POST'], ['/api/sync/now', 'POST'], ['/api/sync', 'DELETE']]) {
+      expect((await api(address, { method, body: { address: github }, headers: { Origin: 'https://example.com' } })).status, address).toBe(403);
+    }
+    const nowhere = await api('/api/sync/look', { method: 'POST', body: { address: path.join(dir, 'no-such-repo.git') } });
+    expect([nowhere.status, nowhere.data.error]).toEqual([400, expect.stringMatching(/could not be reached/)]);
+
+    const looked = await api('/api/sync/look', { method: 'POST', body: { address: github } });
+    expect(looked.data).toMatchObject({ empty: true, there: null, here: { channels: 1, channelsWithClub: 1 } });
+    expect((await api('/api/sync')).data.connected).toBe(false); // looking does not connect
+
+    const connected = await api('/api/sync/connect', { method: 'POST', body: { address: github } });
+    expect(connected.data).toMatchObject({ connected: true, remote: github, state: 'idle' });
+    const onGithub = async (name) => (await run('git', ['-C', github, 'show', `main:${name}`])).stdout;
+    expect(JSON.parse(await onGithub('data/sources.json'))[0].clubs).toEqual(['Barcelona']);
+    expect((await api('/api/sync/look', { method: 'POST', body: { address: github } })).status).toBe(409); // already connected
+
+    // A change here is sent when a sync is asked for, and the page is told.
+    await api('/api/sources/a/clubs', { method: 'PUT', body: { clubs: ['Arsenal'] } });
+    const synced = await api('/api/sync/now', { method: 'POST' });
+    expect(synced.data).toMatchObject({ state: 'idle', result: { sent: true, arrived: [], clashes: [] } });
+    expect(JSON.parse(await onGithub('data/sources.json'))[0].clubs).toEqual(['Arsenal']);
+
+    // Disconnecting leaves the data here and on the repository.
+    expect((await api('/api/sync', { method: 'DELETE' })).data).toMatchObject({ connected: false, state: 'off' });
+    expect((await api('/api/sources')).data.sources[0].clubs).toEqual(['Arsenal']);
+    expect(JSON.parse(await onGithub('data/sources.json'))[0].clubs).toEqual(['Arsenal']);
+    expect((await api('/api/sync/now', { method: 'POST' })).data.state).toBe('off');
+    await api('/api/sources', { method: 'PUT', body: [] });
+  }, 120_000);
+
+  it('refuses a whole-list save from a page that read the list before it changed', async () => {
+    const first = (await api('/api/sources', { method: 'PUT', body: [{ id: 'a', name: 'Agreed Channel', url: 'https://www.youtube.com/@agreed' }] })).data;
+    expect(first.version).toMatch(/^[0-9a-f]{16}$/);
+    // The list changes behind the page's back, as a sync from the other PC would change it.
+    await api('/api/sources/a/clubs', { method: 'PUT', body: { clubs: ['Inter'] } });
+    const stale = await api('/api/sources', { method: 'PUT', body: [{ ...first.sources[0], name: 'Typed on the old page' }], headers: { 'X-List-Version': first.version } });
+    expect([stale.status, stale.data.error]).toEqual([409, expect.stringMatching(/changed since this page read it/)]);
+    expect((await api('/api/sources')).data.sources[0]).toMatchObject({ name: 'Agreed Channel', clubs: ['Inter'] });
+    // With the list's current mark the save goes through.
+    const now = (await api('/api/sources')).data;
+    const saved = await api('/api/sources', { method: 'PUT', body: [{ ...now.sources[0], name: 'Renamed' }], headers: { 'X-List-Version': now.version } });
+    expect([saved.status, saved.data.sources[0]]).toEqual([200, expect.objectContaining({ name: 'Renamed', clubs: ['Inter'] })]);
+    expect(saved.data.version).not.toBe(now.version);
+    await api('/api/sources', { method: 'PUT', body: [] });
   });
 });
 

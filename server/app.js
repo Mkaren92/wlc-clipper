@@ -23,6 +23,7 @@ import { addCompilationRoutes } from './compilations.js';
 import { HttpError } from './http.js';
 import { createJobs } from './jobs.js';
 import { addSourceRoutes } from './sources.js';
+import { addSyncRoutes } from './sync.js';
 import { addTransferRoutes } from './transfer.js';
 
 const VIDEO_TYPES = new Set(['.mp4', '.mov', '.mkv', '.webm', '.m4v', '.avi']);
@@ -119,8 +120,11 @@ const suggestRequest = z.strictObject({
  * @param {import('../src/ai/client.js').Ai} [options.ai]   replaced in tests
  * @param {import('../src/fetch.js').Downloader} [options.downloader]   replaced in tests
  * @param {(address: string) => Promise<Buffer>} [options.pictureDownload]   replaced in tests
+ * @param {number} [options.syncEvery]   how often to look whether the owner's data needs syncing, in
+ *   milliseconds. 0, the default, never looks by itself: the real dashboard passes a minute.
+ * @param {boolean} [options.syncAnyAddress]   for tests, which sync with a folder and not with GitHub
  */
-export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsDir = path.join(dataDir, '..', 'sounds'), overlaysDir = path.join(dataDir, '..', 'overlays'), webDir, toolVersion, transcriber, ai = getAi(), downloader, pictureDownload }) {
+export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsDir = path.join(dataDir, '..', 'sounds'), overlaysDir = path.join(dataDir, '..', 'overlays'), webDir, toolVersion, transcriber, ai = getAi(), downloader, pictureDownload, syncEvery = 0, syncAnyAddress = false }) {
   const app = express();
   const jobs = createJobs();
 
@@ -459,7 +463,12 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
 
   // --- My data: download and load (server/transfer.js) -------------------------
 
-  addTransferRoutes(app, { folders: { data: dataDir, sounds: soundsDir, briefs: briefsDir, overlays: overlaysDir }, jobs });
+  const travelling = { data: dataDir, sounds: soundsDir, briefs: briefsDir, overlays: overlaysDir };
+  addTransferRoutes(app, { folders: travelling, jobs });
+
+  // --- Sync with a private GitHub repository (server/sync.js) ---------------------
+
+  addSyncRoutes(app, { folders: travelling, codeDir: path.join(import.meta.dirname, '..'), jobs, every: syncEvery, anyAddress: syncAnyAddress });
 
   // --- The pages themselves -------------------------------------------------
 
