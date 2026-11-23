@@ -20,7 +20,8 @@ export function openAi(env) {
 
   async function ask({ system, user, schema, schemaName }) {
     if (!isConfigured()) throw new Error(HELP);
-    const client = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: 90_000, maxRetries: 1 });
+    // 3 minutes: a 3-hour video's transcript is about 15,000 words (suggestions take up to 3 hours since 2026-11-23).
+    const client = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: 180_000, maxRetries: 1 });
     let response;
     try {
       response = await client.responses.parse({

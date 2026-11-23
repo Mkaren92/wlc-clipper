@@ -102,7 +102,7 @@ describe('center layout with a wider crop', () => {
     const { graph, cropX, cropWidth } = buildFilter({ layout: 'center', source: landscape, cropWidth: 1000 });
     expect(graph).toBe([
       '[0:v]fps=30,crop=1000:1080:460:0,split=2[a][b]',
-      '[a]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:5[bg]',
+      '[a]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=5:5,scale=1080:1920:flags=bicubic[bg]',
       '[b]scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2[fg]',
       '[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]',
     ].join(';'));
@@ -240,7 +240,7 @@ describe('facecam layout', () => {
     // The same content box in both, cropped as drawn; only the panel's height follows the webcam.
     for (const graph of [one, other]) expect(graph).toContain('[b]crop=1200:700:200:300,split=2[gb][gf]');
     // Not the panel's shape: shown whole over a blurred copy of itself, never cropped.
-    expect(one).toContain('[gb]scale=1080:1314:force_original_aspect_ratio=increase,crop=1080:1314,boxblur=20:5[gbg]');
+    expect(one).toContain('[gb]scale=270:328:force_original_aspect_ratio=increase,crop=270:328,boxblur=5:5,scale=1080:1314:flags=bicubic[gbg]');
     expect(one).toContain('[gf]scale=1080:1314:force_original_aspect_ratio=decrease:force_divisible_by=2[gfg]');
     expect(one).toContain('[gbg][gfg]overlay=(W-w)/2:(H-h)/2[game]');
     expect(gameFit(game, 606)).toEqual({ fills: false, blurred: 'top and bottom' });

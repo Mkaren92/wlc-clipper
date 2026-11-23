@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { prepareTranscript } from '../src/ai/suggest.js';
 import { fetchVideo, filePrefix, ytDlp } from '../src/fetch.js';
 import { checkLive } from '../src/live.js';
 import { fetchPictures, listPictures, listSubscribers, pictureFile, removeOtherPictures, syncSource } from '../src/pictures.js';
@@ -20,7 +21,8 @@ const time = z.union([z.number().nonnegative(), z.string().min(1)]).transform((v
   }
 });
 // A part (start and end), or the whole video.
-const fetchRequest = z.strictObject({ url: z.string().min(1).max(300), start: time.optional(), end: time.optional(), whole: z.boolean().optional() })
+// `transcribe`: make the whole transcript for "Suggest moments" straight after, as a job of its own.
+const fetchRequest = z.strictObject({ url: z.string().min(1).max(300), start: time.optional(), end: time.optional(), whole: z.boolean().optional(), transcribe: z.boolean().optional() })
   .refine((ask) => ask.whole === true || (ask.start !== undefined && ask.end !== undefined), { message: 'Give the start and the end of the part, or ask for the whole video.' });
 
 /**
@@ -31,8 +33,10 @@ const fetchRequest = z.strictObject({ url: z.string().min(1).max(300), start: ti
  * @param {ReturnType<import('./jobs.js').createJobs>} options.jobs
  * @param {import('../src/fetch.js').Downloader} [options.downloader]   replaced in tests
  * @param {(address: string) => Promise<Buffer>} [options.pictureDownload]   replaced in tests
+ * @param {string} [options.cacheDir]   where whole-video transcripts are kept (out/.cache)
+ * @param {() => import('../src/transcribe/index.js').Transcriber} [options.transcriber]   the transcriber, asked for when needed
  */
-export function addSourceRoutes(app, { dataDir, inDir, jobs, downloader = ytDlp(), pictureDownload }) {
+export function addSourceRoutes(app, { dataDir, inDir, jobs, downloader = ytDlp(), pictureDownload, cacheDir, transcriber }) {
   // `prefixes` is what a file fetched from each source is named after, by source id.
   // A mark that changes whenever the saved list does. A page sends it back with a whole-list save,
   // so a page that read the list before a sync (or another tab) changed it cannot write the old list back.
@@ -143,11 +147,16 @@ export function addSourceRoutes(app, { dataDir, inDir, jobs, downloader = ytDlp(
   app.post('/api/fetch', async (req, res) => {
     const parsed = fetchRequest.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
-    const { url, start, end, whole = false } = parsed.data;
+    const { url, start, end, whole = false, transcribe = false } = parsed.data;
     const sources = await readSources(dataDir);
     const job = jobs.add('fetch', whole ? 'the whole of a video' : `${formatClock(start)}–${formatClock(end)} of a video`, async (onStep) => {
       const fetched = await fetchVideo({ url, start, end, whole, sources, outDir: inDir, downloader, onStep });
-      return { name: fetched.name, seconds: fetched.seconds, early: fetched.early, source: fetched.source.name, title: fetched.title, slow: fetched.slow };
+      // The transcript is a job of its own, after this one, so it shows in Activity and can be stopped
+      // without losing the download. "Suggest moments" then finds it made.
+      const transcript = transcribe && cacheDir && transcriber
+        ? jobs.add('transcript', fetched.name, (step) => prepareTranscript({ source: fetched.file, cacheDir, transcriber: transcriber(), onStep: step })).id
+        : null;
+      return { name: fetched.name, seconds: fetched.seconds, early: fetched.early, source: fetched.source.name, title: fetched.title, slow: fetched.slow, transcript };
     });
     res.status(202).json(job);
   });

@@ -50,6 +50,21 @@ const minMessages = ref(Number(kept.minMessages) || SPIKE_DEFAULTS.minMessages);
 const preRoll = ref(Number.isFinite(kept.preRoll) ? kept.preRoll : SPIKE_DEFAULTS.preRollSeconds);
 const postRoll = ref(Number.isFinite(kept.postRoll) ? kept.postRoll : SPIKE_DEFAULTS.postRollSeconds);
 const askAgain = ref(false);
+// Tell the AI where the streamer gets loud (only times and decibels go out). On by default,
+// remembered in this browser only (2026-11-23).
+const useLoudness = ref(true);
+try {
+  useLoudness.value = localStorage.getItem('clipper.useLoudness') !== 'no';
+} catch {
+  // No storage here: on, as by default.
+}
+function rememberLoudness() {
+  try {
+    localStorage.setItem('clipper.useLoudness', useLoudness.value ? 'yes' : 'no');
+  } catch {
+    // Not remembered; it still applies now.
+  }
+}
 watch([source, count, guidance, groups, termMode, aiCheck, spikeRatio, minMessages, preRoll, postRoll], () => {
   try {
     localStorage.setItem(SAVED, JSON.stringify({
@@ -93,12 +108,14 @@ const chatJob = computed(() => jobs.list.find((job) => job.kind === 'chat' && is
 const hasChat = computed(() => Boolean(chatInfo.value?.chat));
 const messages = computed(() => chatInfo.value?.chat?.messages ?? []);
 const duration = computed(() => chatInfo.value?.duration ?? 0);
+// A part downloaded from Twitch: its chat can only be imported as a file (Twitch does not let the tool read it).
+const fromTwitch = computed(() => /^tw\d+$/.test(chatInfo.value?.suggested?.videoId ?? ''));
 
 function showChat(answer) {
   chatInfo.value = { ...chatInfo.value, ...answer };
   const offset = answer.chat?.offset ?? answer.suggested?.offset ?? 0;
   chatOffset.value = String(offset);
-  if (!chatUrl.value) chatUrl.value = answer.chat?.origin?.kind === 'youtube' ? `https://www.youtube.com/watch?v=${answer.chat.origin.videoId}` : answer.suggested?.link ?? '';
+  if (!chatUrl.value && !/^tw\d+$/.test(answer.suggested?.videoId ?? '')) chatUrl.value = answer.chat?.origin?.kind === 'youtube' ? `https://www.youtube.com/watch?v=${answer.chat.origin.videoId}` : answer.suggested?.link ?? '';
 }
 async function loadChat() {
   try {
@@ -208,7 +225,7 @@ async function findMoments() {
   try {
     if (usesTranscript.value) {
       waits.push(track(await api.suggest({
-        video: props.video, count: count.value || 5, brief: props.brief, lang: props.lang, terms: terms.value, guidance: guidance.value, force: askAgain.value,
+        video: props.video, count: count.value || 5, brief: props.brief, lang: props.lang, terms: terms.value, guidance: guidance.value, force: askAgain.value, loud: useLoudness.value,
       })));
     }
     if (usesChat.value && aiCheck.value && chatCandidates.value.length > 0) {
@@ -340,7 +357,11 @@ function seekChart(event) {
         From {{ chatInfo.chat.origin.kind === 'youtube' ? `YouTube's chat replay of ${chatInfo.chat.origin.videoId}` : `the file ${chatInfo.chat.origin.name}` }},
         {{ chatInfo.chat.total }} messages in all. It stays on this computer.
       </p>
-      <div class="row">
+      <p v-if="fromTwitch" class="hint">
+        This part is from Twitch, which does not let this tool read a stream's chat. Save the stream's chat with
+        TwitchDownloader as JSON, then press "Import a chat file" below: the offset is filled in from this part's name.
+      </p>
+      <div v-if="!fromTwitch" class="row">
         <div class="wide">
           <label :for="`chat-url-${video}`">Chat replay of a finished stream</label>
           <input :id="`chat-url-${video}`" v-model="chatUrl" type="text" placeholder="https://www.youtube.com/watch?v=..." spellcheck="false" />
@@ -349,7 +370,7 @@ function seekChart(event) {
           <Icon name="download" /> Fetch the chat
         </button>
       </div>
-      <p class="hint">Only the chat is downloaded, never the video, and only from a channel in your Sources list.</p>
+      <p v-if="!fromTwitch" class="hint">Only the chat is downloaded, never the video, and only from a channel in your Sources list.</p>
       <p v-if="chatJob" class="running" role="status"><span class="spinner" aria-hidden="true" /> {{ describe(chatJob) }}</p>
       <div class="row">
         <div class="narrow">
@@ -363,7 +384,8 @@ function seekChart(event) {
       </div>
       <p class="hint">
         The offset is how far into the stream this video begins. For a part downloaded here it is filled in from its name
-        (the part may begin a few seconds earlier, at a keyframe). A file is JSON or CSV with a time and a text for each message.
+        (the part may begin a few seconds earlier, at a keyframe). A file is JSON or CSV with a time and a text for each message,
+        or a Twitch chat saved as JSON by TwitchDownloader.
       </p>
       <div v-if="confirmRemove" class="confirm" role="alertdialog">
         <span>Remove this video's chat? The video stays. You can fetch or import it again.</span>
@@ -454,10 +476,14 @@ function seekChart(event) {
     <div class="row middle run">
       <div v-if="usesTranscript" class="fixed count">
         <label :for="`count-${video}`">How many</label>
-        <input :id="`count-${video}`" v-model.number="count" type="number" min="1" max="10" />
+        <input :id="`count-${video}`" v-model.number="count" type="number" min="1" max="20" />
       </div>
       <button class="fixed primary" :disabled="!canRun" @click="findMoments"><Icon name="spark" /> {{ usesTranscript ? 'Suggest moments' : 'Check with AI' }}</button>
       <label v-if="usesTranscript" class="check fixed"><input v-model="askAgain" type="checkbox" /> Ask again</label>
+      <label
+        v-if="usesTranscript" class="check fixed"
+        title="Where the streamer shouts, screams or laughs much louder than usual. Measured on this computer; only the times and how many decibels louder are sent, never the sound."
+      ><input v-model="useLoudness" type="checkbox" @change="rememberLoudness" /> Use where the streamer gets loud</label>
       <span v-if="suggestJob" role="status" class="running"><span class="spinner" aria-hidden="true" /> {{ describe(suggestJob) }}</span>
       <span v-if="checkJob" role="status" class="running"><span class="spinner" aria-hidden="true" /> {{ describe(checkJob) }}</span>
     </div>

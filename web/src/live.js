@@ -1,4 +1,4 @@
-// Which channels are live on YouTube, kept in one place so the side column and
+// Which channels are live on YouTube or Twitch, kept in one place so the side column and
 // the Sources page show the same thing.
 //
 // The server holds the last answer. This asks for a new one when the
@@ -11,7 +11,7 @@ import { api } from './api.js';
 const FRESH = 5 * 60 * 1000;
 
 export const live = reactive({
-  /** By source id: { live, videoId, title, viewers, started }. `live` is null when a channel could not be checked. */
+  /** By source id: { live, url, videoId, title, viewers, started }. `live` is null when a channel could not be checked. */
   channels: {},
   /** When YouTube was last asked, as an ISO time, or null. */
   checked: null,

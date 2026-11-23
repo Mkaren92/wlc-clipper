@@ -242,9 +242,28 @@ describe('parts', () => {
     // Parts are kept apart from clips.
     expect((await api('/api/clips')).data).toEqual([]);
 
+    // "Cut clips from this part": the part becomes one of the videos, as the same file, and stays a part.
+    const toVideos = await api('/api/parts/game_0m01s-0m02.5s.mp4/to-videos', { method: 'POST' });
+    expect(toVideos.data).toEqual({ video: 'game_0m01s-0m02.5s.mp4', linked: true, already: false });
+    const [asPart, asVideo] = await Promise.all([stat(path.join(dir, 'parts', 'game_0m01s-0m02.5s.mp4')), stat(path.join(dir, 'in', 'game_0m01s-0m02.5s.mp4'))]);
+    expect(asVideo.ino).toBe(asPart.ino);
+    expect((await api('/api/videos')).data.map((video) => video.name).sort()).toEqual(['game.mp4', 'game_0m01s-0m02.5s.mp4']);
+    // Asked again, it is already there: no second copy.
+    expect((await api('/api/parts/game_0m01s-0m02.5s.mp4/to-videos', { method: 'POST' })).data).toEqual({ video: 'game_0m01s-0m02.5s.mp4', linked: true, already: true });
+    // A video of the same name that is another file is left alone; the part gets a numbered name.
+    await rm(path.join(dir, 'in', 'game_0m01s-0m02.5s.mp4'));
+    await writeFile(path.join(dir, 'in', 'game_0m01s-0m02.5s.mp4'), 'another file');
+    expect((await api('/api/parts/game_0m01s-0m02.5s.mp4/to-videos', { method: 'POST' })).data.video).toBe('game_0m01s-0m02.5s_2.mp4');
+    expect(await readFile(path.join(dir, 'in', 'game_0m01s-0m02.5s.mp4'), 'utf8')).toBe('another file');
+    expect((await api('/api/parts/..%2Fin%2Fgame.mp4/to-videos', { method: 'POST' })).status).toBe(404);
+    expect((await api('/api/parts/game_0m01s-0m02.5s.mp4/to-videos', { method: 'POST', headers: { Origin: 'https://example.com' } })).status).toBe(403);
+    // Deleting the part leaves the video.
+    expect((await api('/api/parts/game_0m01s-0m02.5s.mp4', { method: 'DELETE' })).status).toBe(200);
+    expect((await stat(path.join(dir, 'in', 'game_0m01s-0m02.5s_2.mp4'))).size).toBe(asPart.size);
+    for (const name of ['game_0m01s-0m02.5s.mp4', 'game_0m01s-0m02.5s_2.mp4']) await rm(path.join(dir, 'in', name));
+
     expect((await api('/api/parts/..%2Fin%2Fgame.mp4', { method: 'DELETE' })).status).toBe(404);
     expect((await api('/media/parts/..%2Fsecret.mp4')).status).toBe(404);
-    expect((await api('/api/parts/game_0m01s-0m02.5s.mp4', { method: 'DELETE' })).status).toBe(200);
     expect((await api('/api/parts')).data).toEqual([]);
     expect((await api('/api/videos')).data.map((video) => video.name)).toEqual(['game.mp4']);
   }, 120_000);
@@ -528,11 +547,34 @@ describe('sources and fetching', () => {
     await jobs.idle();
     await rm(path.join(dir, 'in', 'agreed-channel_dQw4w9WgXcQ_1m00s-1m30s.mp4'));
 
+    // "Transcribe it straight after": the transcript is a job of its own, after the download,
+    // and "Suggest moments" then finds it kept. Unticked, no transcript job is made.
+    const plainDownload = fakeDownloader.download;
+    fakeDownloader.download = async (job) => {
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '2', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', path.join(job.dir, `${job.name}.mp4`)]);
+    };
+    try {
+      const withTranscript = await api('/api/fetch', { method: 'POST', body: { url: link, start: '2:00', end: '2:30', transcribe: true } });
+      const fetched = await finished(withTranscript.data.id);
+      expect(fetched.result.transcript).toEqual(expect.any(String));
+      const transcript = await finished(fetched.result.transcript);
+      expect(transcript).toMatchObject({ status: 'done', kind: 'transcript', label: fetched.result.name, result: { made: true, skipped: null } });
+      expect((await readdir(path.join(dir, 'out', '.cache'))).some((name) => name.startsWith(fetched.result.name))).toBe(true);
+      const without = await finished((await api('/api/fetch', { method: 'POST', body: { url: link, start: '3:00', end: '3:30' } })).data.id);
+      expect(without.result.transcript).toBeNull();
+    } finally {
+      fakeDownloader.download = plainDownload;
+      await jobs.idle();
+      for (const name of await readdir(path.join(dir, 'in'))) {
+        if (name.startsWith('agreed-channel_')) await rm(path.join(dir, 'in', name));
+      }
+    }
+
     // Who is live: nothing is known until YouTube is asked, the answer is remembered, and it is for the saved list only.
     expect((await api('/api/sources/live')).data).toEqual({ checked: null, channels: {} });
     expect((await api('/api/sources/live', { method: 'POST', headers: { Origin: 'https://example.com' } })).status).toBe(403);
     const onAir = await api('/api/sources/live', { method: 'POST', body: { channels: ['someone-else'] } });
-    expect(onAir.data.channels).toEqual({ a: { live: true, videoId: 'dQw4w9WgXcQ', title: 'On air', viewers: 77, started: '2026-11-20T11:31:36.000Z' } });
+    expect(onAir.data.channels).toEqual({ a: { live: true, videoId: 'dQw4w9WgXcQ', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', title: 'On air', viewers: 77, started: '2026-11-20T11:31:36.000Z' } });
     expect(Math.abs(Date.now() - Date.parse(onAir.data.checked))).toBeLessThan(60_000);
     expect((await api('/api/sources/live')).data).toEqual(onAir.data);
 
@@ -577,6 +619,9 @@ describe('AI suggestions', () => {
   it('proposes moments as a background job, without cutting anything', async () => {
     const bad = await api('/api/suggest', { method: 'POST', body: { video: 'game.mp4', count: 99 } });
     expect(bad.status).toBe(400);
+    // Up to 20 moments may be asked for, and no more: 20 gets past the check (and then finds no such video).
+    expect((await api('/api/suggest', { method: 'POST', body: { video: 'game.mp4', count: 21 } })).status).toBe(400);
+    expect((await api('/api/suggest', { method: 'POST', body: { video: 'nope.mp4', count: 20 } })).status).toBe(404);
     const { status, data } = await api('/api/suggest', { method: 'POST', body: { video: 'game.mp4', brief: 'demo.json' } });
     expect(status).toBe(202);
     const done = await finished(data.id);

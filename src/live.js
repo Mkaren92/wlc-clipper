@@ -1,7 +1,8 @@
-// Which of the channels in the sources list are live on YouTube right now.
+// Which of the channels in the sources list are live on YouTube or Twitch right now.
 //
 // One question per channel: YouTube's "/live" address of a channel leads to
-// the stream it is broadcasting, or says the channel is not live. Nothing is
+// the stream it is broadcasting, or says the channel is not live; Twitch is
+// asked about the channel by its login (src/twitch.js, since 2026-11-23). Nothing is
 // downloaded, and only channels in the owner's saved list are asked about.
 // What comes back is outside text: it is checked and trimmed here before
 // anything is shown.
@@ -16,7 +17,8 @@ import { agreedSourceOf } from './sources.js';
  *
  * @typedef {object} LiveState
  * @property {boolean | null} live
- * @property {string} [videoId]    the stream's video id, when live
+ * @property {string} [videoId]    the stream's video id, when live on YouTube
+ * @property {string} [url]        where to watch the stream, when live: built here, never taken from the answer
  * @property {string} [title]      the stream's title, when live
  * @property {number | null} [viewers]   people watching, when YouTube says
  * @property {string | null} [started]   when the stream began, as an ISO time, when YouTube says
@@ -52,11 +54,20 @@ async function checkOne(source, downloader) {
   } catch {
     return { live: null };
   }
-  // The stream must be this channel's own, by the same test as a video's channel, and its id a video id.
-  if (!answer.live || !agreedSourceOf([source], answer) || !/^[\w-]{11}$/.test(answer.videoId ?? '')) return { live: false };
+  // The stream must be this channel's own, by the same test as a video's channel.
+  if (!answer.live || !agreedSourceOf([source], answer)) return { live: false };
+  let where;
+  if (answer.site === 'twitch') {
+    // A Twitch stream is watched at its channel's address, rebuilt from the login in the list.
+    where = { url: channelAddress(source) };
+  } else {
+    // A YouTube stream's id must be a video id before a link is built from it.
+    if (!/^[\w-]{11}$/.test(answer.videoId ?? '')) return { live: false };
+    where = { videoId: answer.videoId, url: `https://www.youtube.com/watch?v=${answer.videoId}` };
+  }
   return {
     live: true,
-    videoId: answer.videoId,
+    ...where,
     title: tidy(answer.title),
     viewers: Number.isInteger(answer.viewers) && answer.viewers >= 0 ? answer.viewers : null,
     started: Number.isFinite(answer.started) && answer.started > 0 ? new Date(answer.started * 1000).toISOString() : null,

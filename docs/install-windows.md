@@ -182,8 +182,8 @@ This takes two to three minutes and uses every processor core.
 **It should end with** two lines like these, with no failed count:
 
 ```
- Test Files  23 passed (23)
-      Tests  578 passed (578)
+ Test Files  25 passed (25)
+      Tests  602 passed (602)
 ```
 
 The numbers grow as the project grows. What matters is that everything passed. If a test fails, see [Troubleshooting](#troubleshooting) before going on.
@@ -196,7 +196,7 @@ This step is needed for captions (speech turned into text) and for fetching YouT
 npm run setup
 ```
 
-It creates a folder `.venv` in the project and downloads about 520 MB into it. It takes a few minutes.
+It creates a folder `.venv` in the project and downloads about 520 MB into it. It takes a few minutes. On a PC with an NVIDIA graphics card it also downloads NVIDIA's libraries for it, about 2 GB more, so that a whole video's transcript for "Suggest moments" runs on the card; it says so ("Found ... installing NVIDIA's libraries"). Without a card it prints "No NVIDIA graphics card found" and the transcripts use the processor.
 
 **It should end with:**
 

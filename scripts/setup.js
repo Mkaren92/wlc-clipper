@@ -39,4 +39,19 @@ if (!installed) {
   process.exit(1);
 }
 
+// NVIDIA's libraries let a whole video's transcript (for "Suggested moments") run on the
+// graphics card: on the owner's GTX 1660 Ti, 5 minutes took 6 s instead of 33 s (2026-11-23).
+// About 2 GB, so only on a PC where nvidia-smi finds a card. Pinned to the versions measured,
+// so running this again changes nothing. Captions never use the card. Without the libraries,
+// or if the card fails, the transcript is made on the processor as before.
+const card = spawnSync('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], { encoding: 'utf8' });
+if (card.status === 0 && card.stdout.trim()) {
+  const ok = step(`Found ${card.stdout.trim().split('\n')[0]}: installing NVIDIA's libraries into .venv (about 2 GB)`, python, [
+    '-m', 'pip', 'install', 'nvidia-cublas-cu12==12.9.3.13', 'nvidia-cudnn-cu12==9.28.1.4',
+  ]);
+  if (!ok) console.warn('\nThe graphics card libraries did not install; transcripts will use the processor. Everything else is installed.');
+} else {
+  console.log('\nNo NVIDIA graphics card found: transcripts use the processor.');
+}
+
 console.log('\nDone. The speech model itself is downloaded the first time a clip is transcribed.');

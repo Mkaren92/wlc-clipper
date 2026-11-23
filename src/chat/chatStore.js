@@ -12,7 +12,7 @@
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { videoUrl } from '../fetchLink.js';
+import { videoLink, youtubeVideoUrl as videoUrl } from '../fetchLink.js';
 import { agreedSourceOf } from '../sources.js';
 import { MAX_CHAT_MESSAGES, parseChatFile, parseYouTubeLiveChat } from './importChat.js';
 
@@ -37,6 +37,17 @@ const chatSchema = z.object({
 });
 
 export const chatsDir = (dataDir) => path.join(dataDir, 'chats');
+
+/**
+ * A stream's id as it is written in a fetched file's name and in the records of
+ * suggested parts: YouTube's 11-character id, or "tw" and a Twitch video's number.
+ */
+export const STREAM_ID = /^(?:tw\d{1,15}|[\w-]{11})$/;
+
+/** The address of the stream an id names. */
+export const streamLink = (streamId) => (streamId.startsWith('tw') && /^tw\d+$/.test(streamId)
+  ? `https://www.twitch.tv/videos/${streamId.slice(2)}`
+  : `https://www.youtube.com/watch?v=${streamId}`);
 const chatFile = (dataDir, video) => path.join(chatsDir(dataDir), `${path.basename(video)}.json`);
 
 /** @returns {Promise<Chat | null>} */
@@ -75,7 +86,7 @@ export async function setChatOffset(dataDir, video, offset) {
 
 /**
  * What a video's file name says about where it came from, for a part fetched by
- * this tool: `<channel>_<video id>_<from>-<to>.mp4`. The offset is the part's start
+ * this tool: `<channel>_<video id>_<from>-<to>.mp4`, where a Twitch video's id is "tw" and its number. The offset is the part's start
  * in the stream (the file may begin a few seconds earlier, at a keyframe).
  *
  * @param {string} video
@@ -83,14 +94,14 @@ export async function setChatOffset(dataDir, video, offset) {
  *   `end`: where the part ends in the stream
  */
 export function fetchedOrigin(video) {
-  const match = /_([\w-]{11})_((?:\d+h)?\d+m[\d.]+s)-((?:\d+h)?\d+m[\d.]+s)(?:_\d+)?\.mp4$/.exec(path.basename(video));
+  const match = /_(tw\d{1,15}|[\w-]{11})_((?:\d+h)?\d+m[\d.]+s)-((?:\d+h)?\d+m[\d.]+s)(?:_\d+)?\.mp4$/.exec(path.basename(video));
   if (!match) return null;
   const [, videoId, from, to] = match;
   const seconds = (stamp) => {
     const parts = /^(?:(\d+)h)?(\d+)m([\d.]+)s$/.exec(stamp);
     return Number(parts[1] ?? 0) * 3600 + Number(parts[2]) * 60 + Number(parts[3]);
   };
-  return { videoId, offset: seconds(from), end: seconds(to), link: `https://www.youtube.com/watch?v=${videoId}` };
+  return { videoId, offset: seconds(from), end: seconds(to), link: streamLink(videoId) };
 }
 
 /**
@@ -166,6 +177,37 @@ export async function fetchChatReplay({ dataDir, video, url, offset, sources, do
 }
 
 /**
+ * Keep a Twitch stream's chat that the owner saved with TwitchDownloader, for clips
+ * from that stream's chat. Twitch does not let the tool read a chat replay itself
+ * (measured on 2026-11-23: the second page is refused "failed integrity check"), so
+ * this is the only way a Twitch stream's chat comes in. Kept as
+ * data/chats/twitch-<number>.json, on this machine only, like a YouTube stream's.
+ *
+ * @param {{ dataDir: string, url: string, name: string, text: string }} options
+ * @returns {Promise<{ streamId: string, messages: number }>}
+ */
+export async function importStreamChat({ dataDir, url, name, text }) {
+  const link = videoLink(url);
+  if (link.site !== 'twitch') throw new Error("A YouTube stream's chat is read from YouTube itself; only a Twitch stream's chat is imported as a file.");
+  const messages = parseChatFile(text, name);
+  await saveChat(dataDir, `twitch-${link.id}`, { origin: { kind: 'file', name: path.basename(String(name)).slice(0, 200) }, importedAt: new Date().toISOString(), offset: 0, messages });
+  return { streamId: link.fileId, messages: messages.length };
+}
+
+/**
+ * A Twitch stream's chat imported before, or null.
+ *
+ * @param {string} dataDir
+ * @param {string} twitchId   the video's number
+ * @returns {Promise<import('./importChat.js').ChatMessage[] | null>}
+ */
+export async function keptTwitchChat(dataDir, twitchId) {
+  if (!/^\d{1,15}$/.test(twitchId)) return null;
+  const kept = await readChat(dataDir, `twitch-${twitchId}`).catch(() => null);
+  return kept ? kept.messages : null;
+}
+
+/**
  * A stream's whole chat, on the stream's own clock, kept under its YouTube id
  * (data/chats/youtube-<id>.json) so it is fetched once: the chat of a finished
  * stream does not change. Clips from chat and a part's own chat both use it.
@@ -191,7 +233,7 @@ export async function streamChat({ dataDir, videoId, url, downloader }) {
 
 // The parts of a stream already given to the owner as clips from chat, so that asking
 // again can skip them (asked for on 2026-11-22: "if I don't like either of those and
-// ask again it gives me the same 20"). data/chats/suggested/<YouTube id>.json; it
+// ask again it gives me the same 20"). data/chats/suggested/<stream id>.json; it
 // stays on this machine with the chats.
 const suggestedFile = (dataDir, videoId) => path.join(chatsDir(dataDir), 'suggested', `${videoId}.json`);
 const suggestedSchema = z.object({ parts: z.array(z.object({ start: z.number().finite().min(0), end: z.number().finite().min(0) })) });
@@ -203,7 +245,7 @@ const suggestedSchema = z.object({ parts: z.array(z.object({ start: z.number().f
  * @returns {Promise<Array<{ start: number, end: number }>>}
  */
 export async function readSuggested(dataDir, videoId) {
-  if (!/^[\w-]{11}$/.test(videoId)) return [];
+  if (!STREAM_ID.test(videoId)) return [];
   try {
     const parsed = suggestedSchema.safeParse(JSON.parse(await readFile(suggestedFile(dataDir, videoId), 'utf8')));
     return parsed.success ? parsed.data.parts : [];
@@ -220,7 +262,7 @@ export async function readSuggested(dataDir, videoId) {
  * @param {Array<{ start: number, end: number }>} parts
  */
 export async function addSuggested(dataDir, videoId, parts) {
-  if (!/^[\w-]{11}$/.test(videoId) || parts.length === 0) return;
+  if (!STREAM_ID.test(videoId) || parts.length === 0) return;
   const all = await readSuggested(dataDir, videoId);
   for (const part of parts) {
     if (!all.some((one) => one.start === part.start && one.end === part.end)) all.push({ start: part.start, end: part.end });

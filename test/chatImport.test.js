@@ -157,6 +157,15 @@ describe('keeping and fetching a chat', () => {
       expect(args.slice(-2)).toEqual(['--', 'https://www.youtube.com/watch?v=pkStu8LFpq8']);
       expect((await stat(cookies)).mode & 0o777).toBe(0o600);
       expect(isSignedIn()).toBe(true);
+      // The questions asked about every channel again and again go out without the sign-in,
+      // so the account makes a few requests a day, not hundreds an hour.
+      await ytDlp().live('https://www.youtube.com/@papillon');
+      expect(await readFile(argsFile, 'utf8')).not.toContain('--cookies');
+      await ytDlp().channel('https://www.youtube.com/@papillon');
+      expect(await readFile(argsFile, 'utf8')).not.toContain('--cookies');
+      // Chat and comments do use it.
+      await ytDlp().comments('https://www.youtube.com/watch?v=pkStu8LFpq8');
+      expect(await readFile(argsFile, 'utf8')).toContain('--cookies');
       expect(youtubeRefusal(new Error("Sign in to confirm you're not a bot")).message).toMatch(/even with your YouTube sign-in/);
     } finally {
       if (before.python === undefined) delete process.env.CLIPPER_PYTHON;

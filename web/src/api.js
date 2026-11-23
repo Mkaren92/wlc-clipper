@@ -105,6 +105,8 @@ export const api = {
   partUrl: (name) => `/media/parts/${enc(name)}`,
   savePart: (options) => request('/api/parts', { method: 'POST', body: options }),
   deletePart: (name) => request(`/api/parts/${enc(name)}`, { method: 'DELETE' }),
+  // Puts a part among the videos, so clips can be cut from it. Answers { video, linked, already }.
+  partToVideo: (name) => request(`/api/parts/${enc(name)}/to-videos`, { method: 'POST' }),
   ai: () => request('/api/ai'),
   suggest: (options) => request('/api/suggest', { method: 'POST', body: options }),
   suggestHook: (options) => request('/api/suggest-hook', { method: 'POST', body: options }),
@@ -117,6 +119,13 @@ export const api = {
   // A chat file goes as it is, as text: it can be larger than an ordinary request.
   importChat: async (video, name, text, offset) => {
     const response = await fetch(`/api/chat/${enc(video)}/import?name=${enc(name)}${Number.isFinite(offset) ? `&offset=${offset}` : ''}`, { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: text });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error ?? `The server answered ${response.status}.`);
+    return data;
+  },
+  // A Twitch stream's chat file, for clips from that stream's chat. The file is sent as it is.
+  importStreamChat: async (url, name, file) => {
+    const response = await fetch(`/api/stream-chat?url=${enc(url)}&name=${enc(name)}`, { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: file });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error ?? `The server answered ${response.status}.`);
     return data;

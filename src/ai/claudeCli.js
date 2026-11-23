@@ -43,7 +43,8 @@ export function claudeCli(env, installed) {
     try {
       // Run from the system's temporary folder, so it does not pick up this
       // project's CLAUDE.md. The transcript goes in through standard input.
-      const { stdout } = await run('claude', args, { cwd: os.tmpdir(), input: user, timeout: 180_000 });
+      // 5 minutes: a 3-hour video's transcript is about 15,000 words (suggestions take up to 3 hours since 2026-11-23).
+      const { stdout } = await run('claude', args, { cwd: os.tmpdir(), input: user, timeout: 300_000 });
       answer = JSON.parse(stdout);
     } catch {
       throw new Error(FAILED);

@@ -12,7 +12,7 @@ import { checkLive, live, liveCount } from '../live.js';
 
 const sources = ref([]);
 const pictures = ref({}); // source id -> a number that changes with the picture
-const subscribers = ref({}); // source id -> { count, checked }: as YouTube gave it, and when
+const subscribers = ref({}); // source id -> { count, checked }: as YouTube (or Twitch: followers) gave it, and when
 // Every club once, by name, for marking which clubs a streamer supports. A club that is in two
 // leagues is two entries in the list of clubs; here it is one, with a logo if either has one.
 const clubs = ref([]);
@@ -27,9 +27,28 @@ function takeClubs(library) {
 // 18000 becomes "18K", 1250000 "1.3M". YouTube itself gives the number rounded.
 const short = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 const whole = new Intl.NumberFormat('en');
-// Which channels are live: read from the shared store, which asks YouTube every few minutes.
+// Which channels are live: read from the shared store, which asks YouTube and Twitch every few minutes.
 const isLive = (source) => live.channels[source.id]?.live === true;
-const streamLink = (source) => `https://www.youtube.com/watch?v=${live.channels[source.id].videoId}`;
+// Built by the engine from the saved list, never from the answer; an older answer has only YouTube's id.
+const streamLink = (source) => live.channels[source.id].url ?? `https://www.youtube.com/watch?v=${live.channels[source.id].videoId}`;
+// Which site a row's address is on, read from the typed text only to choose words.
+const onTwitch = (source) => /^https:\/\/(www\.|m\.)?twitch\.tv\//.test((source.url ?? '').trim());
+const siteName = (source) => (onTwitch(source) ? 'Twitch' : 'YouTube');
+const countWord = (source) => (onTwitch(source) ? 'followers' : 'subscribers');
+// The site a row's address is on, for its badge and the filter; null while no address is typed.
+const siteOfRow = (source) => {
+  const url = (source.url ?? '').trim();
+  if (/^https:\/\/(www\.|m\.)?twitch\.tv\//.test(url)) return 'twitch';
+  if (/^https:\/\/(www\.|m\.)?youtube\.com\//.test(url)) return 'youtube';
+  return null;
+};
+const SITE_NAMES = { youtube: 'YouTube', twitch: 'Twitch' };
+// Which site's channels the list shows: 'all', 'youtube' or 'twitch'. Only what is shown changes.
+const siteFilter = ref('all');
+const siteCounts = computed(() => ({
+  youtube: sources.value.filter((source) => siteOfRow(source) === 'youtube').length,
+  twitch: sources.value.filter((source) => siteOfRow(source) === 'twitch').length,
+}));
 const clockTime = (iso) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 function liveTip(source) {
   const stream = live.channels[source.id];
@@ -37,14 +56,17 @@ function liveTip(source) {
   const today = stream.started && Date.now() - Date.parse(stream.started) < 20 * 3600 * 1000;
   const since = stream.started ? `, since ${today ? clockTime(stream.started) : `${day(stream.started)}, ${clockTime(stream.started)}`}` : '';
   const watching = stream.viewers !== null && stream.viewers !== undefined ? `, ${short.format(stream.viewers)} watching` : '';
-  return `Live${since}${watching}: ${stream.title}. Opens the stream on YouTube.`;
+  return `Live${since}${watching}: ${stream.title}. Opens the stream on ${siteName(source)}.`;
 }
 const unchecked = computed(() => sources.value.filter((source) => live.channels[source.id]?.live === null).length);
 
 // The rows are shown with the most subscribers first. A channel with no count yet, such as one
 // just added, goes to the end, and channels with the same count keep the order they were added in.
 // Only the order on the page changes; the saved list keeps its own.
-const ordered = computed(() => [...sources.value].sort((a, b) =>
+const ordered = computed(() => [...sources.value]
+  // A row with no address yet is always shown, so a channel being added never disappears.
+  .filter((source) => siteFilter.value === 'all' || !siteOfRow(source) || siteOfRow(source) === siteFilter.value)
+  .sort((a, b) =>
   // Channels that are live right now come first, then the rest, each group by subscribers.
   Number(isLive(b)) - Number(isLive(a)) || (subscribers.value[b.id]?.count ?? -1) - (subscribers.value[a.id]?.count ?? -1)));
 // The club a streamer supports is saved the moment it is chosen, for a channel that is already saved.
@@ -105,8 +127,8 @@ async function remove(source) {
   confirming.value = '';
 }
 
-// A link is made only from an address that is YouTube's: what is in the box is typed text.
-const channelLink = (url) => (/^https:\/\/(www\.|m\.)?youtube\.com\/(@[\w.-]+|channel\/UC[\w-]+)\/?$/.test((url ?? '').trim()) ? url.trim() : null);
+// A link is made only from an address that is YouTube's or Twitch's: what is in the box is typed text.
+const channelLink = (url) => (/^https:\/\/(www\.|m\.)?(youtube\.com\/(@[\w.-]+|channel\/UC[\w-]+)|twitch\.tv\/\w{1,25})\/?$/.test((url ?? '').trim()) ? url.trim() : null);
 const day = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 const installed = ref(true);
 const loaded = ref(false);
@@ -221,6 +243,16 @@ async function sync(source) {
       <div class="row middle head">
         <h2 class="fixed">Channels</h2>
         <span class="chip mark fixed">{{ sources.length }}</span>
+        <div class="fixed sites" role="group" aria-label="Show the channels of">
+          <button
+            v-for="site in ['all', 'youtube', 'twitch']" :key="site" class="small" :class="{ chosen: siteFilter === site }"
+            :aria-pressed="siteFilter === site" @click="siteFilter = site"
+          >
+            <span v-if="site !== 'all'" class="site-mark" :class="site" aria-hidden="true"><Icon :name="site" /></span>
+            {{ site === 'all' ? 'All' : SITE_NAMES[site] }}
+            <span class="numbers muted">{{ site === 'all' ? sources.length : siteCounts[site] }}</span>
+          </button>
+        </div>
         <span />
         <button class="fixed" :disabled="unsaved || Boolean(gettingPictures) || !installed || allowed.length === 0" :title="unsaved ? 'Save the list first' : ''" @click="getPictures">
           <span v-if="gettingPictures" class="spinner" aria-hidden="true" /><Icon v-else name="download" /> Update pictures and subscribers
@@ -229,12 +261,13 @@ async function sync(source) {
       </div>
       <p class="hint first">
         Add a channel only once it has agreed to let you use its videos. Paste its address and press the round arrows
-        on its row: the name, picture and subscriber count come from YouTube and the channel is saved. Channels that
-        are live are listed first, then the rest by subscribers. Hover over a number or a LIVE mark for the details.
+        on its row: the name, picture and subscriber count come from YouTube (on Twitch, the follower count) and the
+        channel is saved. A streamer's Twitch channel is a row of its own. Channels that are live are listed first, then
+        the rest by subscribers or followers. Hover over a number or a LIVE mark for the details.
         Under “Supports”, choose the club a streamer supports; it is saved as you choose.
       </p>
       <div class="row middle live-line" role="status">
-        <span v-if="live.checking" class="fixed running"><span class="spinner" aria-hidden="true" /> Asking YouTube who is live…</span>
+        <span v-if="live.checking" class="fixed running"><span class="spinner" aria-hidden="true" /> Asking YouTube and Twitch who is live…</span>
         <template v-else-if="live.checked">
           <span v-if="liveCount() > 0" class="chip bad fixed">{{ liveCount() }} live now</span>
           <span v-else class="chip fixed">Nobody is live</span>
@@ -250,9 +283,14 @@ async function sync(source) {
       <p v-if="loaded && sources.length === 0" class="empty">No channels yet. Add the first one that has agreed.</p>
 
       <div v-for="(source, index) in ordered" :key="source.id" class="row source">
-        <span class="face fixed" :class="{ none: !pictures[source.id] }">
-          <img v-if="pictures[source.id]" :src="api.sourcePictureUrl(source.id, pictures[source.id])" :alt="`Picture of ${source.name}`" />
-          <span v-else aria-hidden="true">{{ (source.name || '?').trim().charAt(0).toUpperCase() }}</span>
+        <span class="who fixed">
+          <span class="face" :class="{ none: !pictures[source.id] }">
+            <img v-if="pictures[source.id]" :src="api.sourcePictureUrl(source.id, pictures[source.id])" :alt="`Picture of ${source.name}`" />
+            <span v-else aria-hidden="true">{{ (source.name || '?').trim().charAt(0).toUpperCase() }}</span>
+          </span>
+          <span v-if="siteOfRow(source)" class="site-mark badge" :class="siteOfRow(source)" :title="`A ${SITE_NAMES[siteOfRow(source)]} channel`">
+            <Icon :name="siteOfRow(source)" /><span class="sr">{{ SITE_NAMES[siteOfRow(source)] }}</span>
+          </span>
         </span>
         <div class="name">
           <label :for="`name-${source.id}`" :class="{ sr: index > 0 }">Name</label>
@@ -260,7 +298,10 @@ async function sync(source) {
         </div>
         <div class="wide">
           <label :for="`url-${source.id}`" :class="{ sr: index > 0 }">Channel address</label>
-          <input :id="`url-${source.id}`" v-model="source.url" type="text" placeholder="https://www.youtube.com/@name" />
+          <span class="address" :class="{ marked: siteOfRow(source) }">
+            <span v-if="siteOfRow(source)" class="site-mark inside" :class="siteOfRow(source)" aria-hidden="true"><Icon :name="siteOfRow(source)" /></span>
+            <input :id="`url-${source.id}`" v-model="source.url" type="text" placeholder="https://www.youtube.com/@name or https://www.twitch.tv/name" />
+          </span>
         </div>
         <div class="fixed supports">
           <span class="label" :class="{ sr: index > 0 }">Supports</span>
@@ -269,18 +310,18 @@ async function sync(source) {
         <div class="fixed air">
           <a v-if="isLive(source)" class="chip bad" :href="streamLink(source)" target="_blank" rel="noopener noreferrer" :title="liveTip(source)">LIVE</a>
         </div>
-        <div class="fixed subs" :title="subscribers[source.id] ? `${whole.format(subscribers[source.id].count)} subscribers, checked ${day(subscribers[source.id].checked)}` : 'Not looked up yet. Press sync.'">
+        <div class="fixed subs" :title="subscribers[source.id] ? `${whole.format(subscribers[source.id].count)} ${countWord(source)}, checked ${day(subscribers[source.id].checked)}` : 'Not looked up yet. Press sync.'">
           <span class="label" :class="{ sr: index > 0 }">Subscribers</span>
           <span class="count numbers">{{ subscribers[source.id] ? short.format(subscribers[source.id].count) : '–' }}</span>
         </div>
         <a
           v-if="channelLink(source.url)" class="fixed go" :href="channelLink(source.url)" target="_blank" rel="noopener noreferrer"
-          :aria-label="`Open ${source.name || 'this channel'} on YouTube in a new tab`" title="Open the channel on YouTube"
+          :aria-label="`Open ${source.name || 'this channel'} on ${siteName(source)} in a new tab`" :title="`Open the channel on ${siteName(source)}`"
         ><Icon name="external" /></a>
         <span v-else class="fixed go off" title="Give the channel's address first" aria-hidden="true"><Icon name="external" /></span>
         <button
           class="fixed quiet icon-only sync" :disabled="!source.url.trim() || Boolean(syncing) || Boolean(gettingPictures) || !installed"
-          :aria-label="`Get the name and picture of ${source.name || 'this channel'} from YouTube`" title="Get the name, picture and subscriber count from YouTube" @click="sync(source)"
+          :aria-label="`Get the name and picture of ${source.name || 'this channel'} from ${siteName(source)}`" :title="`Get the name, picture and ${onTwitch(source) ? 'follower' : 'subscriber'} count from ${siteName(source)}`" @click="sync(source)"
         >
           <span v-if="syncing && syncingId === source.id" class="spinner" aria-hidden="true" /><Icon v-else name="sync" />
         </button>
@@ -311,6 +352,20 @@ async function sync(source) {
 /* One line per channel. Only the first row shows the labels; the rest keep them for screen readers. */
 .source { margin-top: 6px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Which site a channel is on: YouTube in the text colour, Twitch in the accent, each with its own shape. */
+.who { position: relative; width: 36px; height: 36px; }
+.site-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; vertical-align: -3px; }
+.site-mark .icon { width: 11px; height: 11px; stroke-width: 2.4; }
+.site-mark.youtube { background: var(--text); color: var(--bg); }
+.site-mark.twitch { background: var(--accent); color: var(--accent-text); }
+.site-mark.badge { position: absolute; right: -4px; bottom: -3px; box-shadow: 0 0 0 2px var(--panel); }
+.site-mark.inside { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; }
+.site-mark.inside .icon { width: 13px; height: 13px; }
+.address { position: relative; display: block; }
+.address.marked input { padding-left: 36px; }
+.sites { display: flex; gap: 4px; }
+.sites button { display: inline-flex; align-items: center; gap: 5px; }
+.sites button.chosen { background: var(--accent-tint); border-color: var(--accent); }
 /* The channel's picture, or its first letter until one has been fetched. */
 .face {
   display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; overflow: hidden;

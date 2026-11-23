@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { getAi } from '../src/ai/client.js';
 import { proposeWordFixes, tidyFixes } from '../src/ai/fixWords.js';
-import { keptTranscript, readKeptResult, suggestMoments, tidyMoments, transcriptLines } from '../src/ai/suggest.js';
+import { keptTranscript, prepareTranscript, readKeptResult, suggestMoments, tidyMoments, transcriptLines } from '../src/ai/suggest.js';
 import { parseBrief } from '../src/brief/schema.js';
 import { suggestHooks, tidyHooks } from '../src/ai/suggestHook.js';
 import { parseTermGroups } from '../src/chat/terms.js';
@@ -132,6 +132,17 @@ describe('suggestMoments', () => {
     expect(request.user + request.system).not.toContain('talk.mp4');
   }, 60_000);
 
+  it('takes videos up to 3 hours, and refuses or skips a longer one before transcribing', async () => {
+    // A tiny picture at 1 frame a second keeps a 3-hour file quick to make.
+    const long = path.join(dir, 'over-three-hours.mp4');
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=16x16:r=1', '-f', 'lavfi', '-i', 'anullsrc=r=8000:cl=mono',
+      '-t', '10805', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-b:a', '8k', long]);
+    const before = transcribed;
+    await expect(suggestMoments({ source: long, cacheDir: path.join(dir, 'long-cache'), transcriber, ai: ai({ moments: [] }) })).rejects.toThrow(/up to 3 hours long; this one is 3:00:0/);
+    expect(await prepareTranscript({ source: long, cacheDir: path.join(dir, 'long-cache'), transcriber })).toMatchObject({ made: false, skipped: expect.stringMatching(/up to 3 hours/) });
+    expect(transcribed).toBe(before);
+  }, 120_000);
+
   it('keeps the whole-video transcript and uses it the next time', async () => {
     const before = transcribed;
     const result = await suggestMoments({ source, cacheDir: path.join(dir, 'cache'), transcriber, ai: ai({ moments: [] }) });
@@ -164,6 +175,29 @@ describe('suggestMoments', () => {
       expect(shape(asked[0])).toEqual(before.plain);
       const { brief, count, ...withBrief } = before.withBrief;
       expect(shape(asked[1])).toEqual(withBrief);
+    }, 60_000);
+
+    it('with the streamer\'s loudness, sends the old request first and then where the voice gets loud', async () => {
+      // Quiet speech-band tone with a shout from 10 to 12 s, 24 dB louder.
+      const shouting = path.join(dir, 'peanut-part.mp4');
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30',
+        '-f', 'lavfi', '-i', 'aevalsrc=0.05*sin(2*PI*800*t)*(1+15*between(t\\,10\\,12)):s=48000',
+        '-t', '20', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', shouting]);
+      asked.length = 0;
+      const cacheDir = path.join(dir, 'steer-cache-loud');
+      await suggestMoments({ source: shouting, cacheDir, transcriber: steeredTranscriber, ai: ai({ moments: [] }), loud: true });
+      const [request] = asked;
+      expect(request.system.startsWith(before.plain.system)).toBe(true);
+      expect(request.system).toContain('much louder than usual');
+      expect(request.user.startsWith(before.plain.user)).toBe(true);
+      expect(request.user).toMatch(/\[10\.0-12\.0\] 1 loud burst, up to \d+ dB louder than usual/);
+      // Only times and decibels: nothing that names the file.
+      expect(request.user + request.system).not.toContain('peanut-part');
+      // Off, the same video gets the old request, and the answer kept for "on" is not used for "off".
+      await suggestMoments({ source: shouting, cacheDir, transcriber: steeredTranscriber, ai: ai({ moments: [] }) });
+      expect(asked).toHaveLength(2);
+      expect(asked[1].user).toBe(before.plain.user);
+      expect(asked[1].system).toBe(before.plain.system);
     }, 60_000);
 
     it('adds the guidance, the labels and the pre-scan hints, and keeps a label the model gives', async () => {

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FONT_FILE } from './captions/ass.js';
 import { CARD_COLOUR, FONTS_LINK, OUT_FPS, OUT_HEIGHT, OUT_WIDTH } from './layout.js';
-import { run } from './run.js';
+import { isStopped, run } from './run.js';
 
 export const CLIP_FILE = 'clip.mp4';
 export const AUDIO_FILE = 'audio.wav';
@@ -13,11 +13,32 @@ const FONTS_DIR = fileURLToPath(new URL('../assets/fonts', import.meta.url));
 
 // Shared by every layout. The frame rate is set inside the filter graph; see
 // layout.js for why `-r` is not used here.
-const ENCODE_SETTINGS = [
-  '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+const SOUND_AND_FILE = [
   '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
   '-movflags', '+faststart',
 ];
+// How the picture is encoded: on the processor, or on an NVIDIA card (asked for on 2026-11-23).
+// Measured on 30 s of a stream on the GTX 1660 Ti, center layout: the processor 15.9 s, the
+// card 6.8 s, at the same likeness to the picture (SSIM 0.985 against 0.984), the file about
+// 1.8 times larger (41 MB against 23 MB). `-cq 19` was chosen to match the processor's quality.
+const PICTURE = {
+  cpu: ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p'],
+  nvenc: ['-c:v', 'h264_nvenc', '-preset', 'p5', '-tune', 'hq', '-rc', 'vbr', '-cq', '19', '-b:v', '0', '-profile:v', 'high', '-pix_fmt', 'yuv420p'],
+};
+
+let cardAnswer = null;
+/**
+ * Which encoder a clip is made with: the card when ffmpeg can encode on it, else the processor.
+ * Asked once (a one-frame test encode, under a second); CLIPPER_ENCODER=cpu keeps the card out.
+ *
+ * @returns {Promise<'cpu' | 'nvenc'>}
+ */
+export function clipEncoder() {
+  if (process.env.CLIPPER_ENCODER === 'cpu') return Promise.resolve('cpu');
+  cardAnswer ??= run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=256x256:r=30', '-frames:v', '1', ...PICTURE.nvenc, '-f', 'null', '-'], { timeout: 20_000 })
+    .then(() => 'nvenc', () => 'cpu');
+  return cardAnswer;
+}
 
 /**
  * Assemble the ffmpeg arguments for one clip.
@@ -40,9 +61,10 @@ const ENCODE_SETTINGS = [
  * @param {{ seconds: number, image?: string } | null} [options.endCard]
  * @param {{ image: string } | null} [options.overlay]   the overlay image, held still for the whole clip
  * @param {string} [options.output]   file to write
+ * @param {'cpu' | 'nvenc'} [options.encoder]   how the picture is encoded; the processor unless the card is asked for
  * @returns {string[]}
  */
-export function renderArgs({ source, start, seconds, graph, audioLabel = null, endCard = null, overlay = null, output = PARTIAL_FILE }) {
+export function renderArgs({ source, start, seconds, graph, audioLabel = null, endCard = null, overlay = null, output = PARTIAL_FILE, encoder = 'cpu' }) {
   const total = seconds + (endCard?.seconds ?? 0);
   // The card's plain background is ffmpeg's second input. Its picture, when
   // there is one, is the third, held still for the whole clip.
@@ -67,7 +89,8 @@ export function renderArgs({ source, start, seconds, graph, audioLabel = null, e
     '-map', '[v]',
     '-map', audioLabel ?? '0:a:0?',
     '-t', toSeconds(total),
-    ...ENCODE_SETTINGS,
+    ...PICTURE[encoder],
+    ...SOUND_AND_FILE,
     output,
   ];
 }
@@ -104,7 +127,16 @@ export async function render({ clipDir, workDir, subtitles = false, ...options }
   }
 
   try {
-    await run('ffmpeg', renderArgs({ ...options, output: partial }), { cwd: workDir });
+    const encoder = await clipEncoder();
+    try {
+      await run('ffmpeg', renderArgs({ ...options, output: partial, encoder }), { cwd: workDir });
+    } catch (error) {
+      // If the card fails partway, the clip is made on the processor instead. A stop is a stop.
+      if (encoder === 'cpu' || isStopped()) throw error;
+      console.warn('The graphics card could not make this clip; making it on the processor.');
+      await rm(partial, { force: true });
+      await run('ffmpeg', renderArgs({ ...options, output: partial, encoder: 'cpu' }), { cwd: workDir });
+    }
     await rename(partial, path.join(clipDir, CLIP_FILE));
   } finally {
     await rm(partial, { force: true });

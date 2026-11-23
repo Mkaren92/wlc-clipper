@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { checkChatMoments } from '../src/ai/chatCheck.js';
 import { keptTranscript, LANG_PATTERN } from '../src/ai/suggest.js';
 import { clipsFromChat } from '../src/chat/chatClips.js';
-import { fetchChatReplay, fetchedOrigin, importChatFile, onVideoClock, readChat, removeChat, setChatOffset } from '../src/chat/chatStore.js';
+import { fetchChatReplay, fetchedOrigin, importChatFile, importStreamChat, onVideoClock, readChat, removeChat, setChatOffset } from '../src/chat/chatStore.js';
 import { parseTermGroups } from '../src/chat/terms.js';
 import { ytDlp } from '../src/fetch.js';
 import { probe } from '../src/probe.js';
@@ -90,7 +90,8 @@ export function addChatRoutes(app, { dataDir, outDir, inDir, jobs, videoPath, ai
   });
 
   // A chat file the owner chose, sent as it is: it may be larger than the JSON limit of other requests.
-  app.put('/api/chat/:video/import', express.text({ type: () => true, limit: '64mb' }), async (req, res) => {
+  // TwitchDownloader's JSON keeps about a kilobyte a message, so a busy 4-hour stream can pass 64 MB.
+  app.put('/api/chat/:video/import', express.text({ type: () => true, limit: '200mb' }), async (req, res) => {
     const file = await videoPath(req.params.video);
     const name = z.string().min(1).max(200).catch('chat').parse(req.query.name);
     const at = req.query.offset === undefined ? undefined : offset.safeParse(Number(req.query.offset)).data;
@@ -101,6 +102,17 @@ export function addChatRoutes(app, { dataDir, outDir, inDir, jobs, videoPath, ai
   });
 
   // Paste a finished stream's link: its chat is read, and only the parts where it exploded are downloaded.
+  // A Twitch stream's chat, saved by the owner with TwitchDownloader, for clips from that stream's chat.
+  // The stream is named by its link in the address; the file is the body, as with a video's chat.
+  app.put('/api/stream-chat', express.text({ type: () => true, limit: '200mb' }), async (req, res) => {
+    const url = z.string().min(1).max(300).safeParse(req.query.url);
+    if (!url.success) throw new HttpError(400, 'Give the stream\'s link.');
+    const name = z.string().min(1).max(200).catch('chat').parse(req.query.name);
+    res.json(await importStreamChat({ dataDir, url: url.data, name, text: String(req.body ?? '') }).catch((error) => {
+      throw new HttpError(400, error.message);
+    }));
+  });
+
   app.post('/api/chat-clips', async (req, res) => {
     const parsed = clipsRequest.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));

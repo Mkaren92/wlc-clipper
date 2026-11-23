@@ -736,7 +736,7 @@ describe('who is live', () => {
     expect(Object.keys(found).sort()).toEqual(['kopend', 'northstand']); // not the two that have not agreed
     expect(found.kopend).toEqual({ live: false });
     // What YouTube said is trimmed to one plain line, and the start time is given as a time.
-    expect(found.northstand).toEqual({ live: true, videoId: 'dQw4w9WgXcQ', title: 'Barca v United LIVE watchalong', viewers: 1234, started: '2026-11-20T11:31:36.000Z' });
+    expect(found.northstand).toEqual({ live: true, videoId: 'dQw4w9WgXcQ', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', title: 'Barca v United LIVE watchalong', viewers: 1234, started: '2026-11-20T11:31:36.000Z' });
   });
 
   it('does not call a channel live on an answer that is another channel\'s, or has no usable video id', async () => {

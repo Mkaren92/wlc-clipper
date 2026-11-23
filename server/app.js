@@ -10,7 +10,7 @@ import { loadBrief } from '../src/brief/schema.js';
 import { checkClip, cut, readClip, recheck, removeClip, rerender, savePostText, saveTranscript } from '../src/cut.js';
 import { describeLayouts, LAYOUTS, overlayKind } from '../src/layout.js';
 import { imageSize } from '../src/overlay.js';
-import { savePart } from '../src/part.js';
+import { partToVideo, savePart } from '../src/part.js';
 import { probe } from '../src/probe.js';
 import { formatClock, parseTime } from '../src/time.js';
 import { getTranscriber } from '../src/transcribe/index.js';
@@ -98,7 +98,8 @@ const hookRequest = z.strictObject({
 
 const suggestRequest = z.strictObject({
   video: z.string().min(1),
-  count: z.number().int().min(1).max(10).default(5),
+  // Up to 20 moments a video since 2026-11-23, at the owner's request (10 before).
+  count: z.number().int().min(1).max(20).default(5),
   brief: optionalText,
   lang: z.string().trim().regex(LANG_PATTERN).default('en'),
   // Optional steering; with neither, the request to the model is what it always was.
@@ -106,6 +107,8 @@ const suggestRequest = z.strictObject({
   guidance: z.string().max(500).default(''),
   // Ask the model again even when an answer for the same inputs is kept.
   force: z.boolean().default(false),
+  // Tell the model where the streamer's voice is much louder than usual (2026-11-23).
+  loud: z.boolean().default(false),
 });
 
 /**
@@ -357,6 +360,14 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
     res.sendFile(req.params.name, { root: partsDir });
   });
 
+  // Puts a part among the videos (a second name for the same file), so clips can be cut from it.
+  app.post('/api/parts/:name/to-videos', async (req, res) => {
+    await partPath(req.params.name);
+    res.json(await partToVideo({ partsDir, inDir, name: req.params.name }).catch((error) => {
+      throw new HttpError(400, error.message);
+    }));
+  });
+
   app.delete('/api/parts/:name', async (req, res) => {
     notWhileBusy();
     await rm(await partPath(req.params.name));
@@ -374,7 +385,7 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
   app.post('/api/suggest', async (req, res) => {
     const parsed = suggestRequest.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
-    const { video, brief, count, lang, guidance, force } = parsed.data;
+    const { video, brief, count, lang, guidance, force, loud } = parsed.data;
     let terms;
     try {
       terms = parseTermGroups(parsed.data.terms);
@@ -386,7 +397,7 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
 
     const job = jobs.add('suggest', video, (onStep) =>
       suggestMoments({
-        source, count, lang, brief: loaded, ai, onStep, terms, guidance, force,
+        source, count, lang, brief: loaded, ai, onStep, terms, guidance, force, loud,
         cacheDir: path.join(outDir, '.cache'),
         transcriber: transcriber ?? getTranscriber(),
       }),
@@ -470,7 +481,7 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
 
   // --- Sources and fetching (server/sources.js) ------------------------------
 
-  addSourceRoutes(app, { dataDir, inDir, jobs, downloader, pictureDownload });
+  addSourceRoutes(app, { dataDir, inDir, jobs, downloader, pictureDownload, cacheDir: path.join(outDir, '.cache'), transcriber: () => transcriber ?? getTranscriber() });
   addChatRoutes(app, { dataDir, outDir, inDir, jobs, videoPath, ai, ...(downloader ? { downloader } : {}) });
 
   // --- My data: download and load (server/transfer.js) -------------------------

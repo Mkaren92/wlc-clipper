@@ -90,7 +90,8 @@ function runsText(runs) {
  * list of messages. CSV: a header row naming a time column (t, time, seconds, offset
  * or timestamp), a text column (text or message) and optionally an author column
  * (author, user, name or username). Times are seconds or mm:ss / hh:mm:ss. A
- * yt-dlp .live_chat.json is recognised too.
+ * yt-dlp .live_chat.json is recognised too, and so is a Twitch chat saved as JSON by
+ * TwitchDownloader (an object with a `comments` list).
  *
  * @param {string} text
  * @param {string} fileName   only its ending is looked at
@@ -109,6 +110,7 @@ export function parseChatFile(text, fileName = '') {
   } catch {
     throw new Error('The chat file is not valid JSON or CSV.');
   }
+  if (Array.isArray(data?.comments)) return fromTwitchDownloader(data.comments);
   const list = Array.isArray(data) ? data : data?.messages;
   if (!Array.isArray(list)) throw new Error('The chat file must hold a list of messages, or { "messages": [...] }.');
   return fromObjects(list);
@@ -117,6 +119,32 @@ export function parseChatFile(text, fileName = '') {
 const TIME_KEYS = ['t', 'time', 'seconds', 'offset', 'timestamp'];
 const TEXT_KEYS = ['text', 'message'];
 const AUTHOR_KEYS = ['author', 'user', 'name', 'username'];
+
+/**
+ * A Twitch chat saved by TwitchDownloader as JSON (added on 2026-11-23, because Twitch
+ * does not let the tool read a chat replay itself). Each of its `comments` has
+ * `content_offset_seconds`, the time into the broadcast, `message.body`, the words,
+ * and `commenter`, who wrote it, of which only a one-way id is kept.
+ *
+ * @param {unknown[]} comments
+ * @returns {ChatMessage[]}
+ */
+function fromTwitchDownloader(comments) {
+  const messages = [];
+  for (const [index, comment] of comments.entries()) {
+    const item = /** @type {any} */ (comment);
+    const text = oneLine(item?.message?.body ?? '');
+    if (!text) continue;
+    const t = Number(item?.content_offset_seconds);
+    if (!Number.isFinite(t)) throw new Error(`Message ${index + 1} in the Twitch chat file has no time I can read.`);
+    if (t < 0) continue;
+    const who = item?.commenter?._id ?? item?.commenter?.name ?? '';
+    messages.push({ t: round(t), author: authorId(String(who) || `line-${index}`), text });
+    if (messages.length > MAX_CHAT_MESSAGES) throw new Error(`The chat has more than ${MAX_CHAT_MESSAGES} messages, which is more than this tool takes.`);
+  }
+  if (messages.length === 0) throw new Error('The Twitch chat file has no messages.');
+  return messages.sort((a, b) => a.t - b.t);
+}
 
 function fromObjects(list) {
   return fromRows([

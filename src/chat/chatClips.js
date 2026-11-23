@@ -1,16 +1,17 @@
 // Clips from a finished stream's chat: the whole request the Download page makes.
 //
-// 1. Look the stream up, by the rules of `fetch`: one YouTube video, from an agreed
-//    channel, finished, with a chat replay.
-// 2. Fetch only its chat (or use the one kept from before).
-// 3. Read the top comments, for the moments viewers point to.
+// 1. Look the stream up, by the rules of `fetch`: one YouTube or Twitch video, from an
+//    agreed channel, finished, with a chat replay.
+// 2. Fetch only its chat (or use the one kept from before). A Twitch stream's chat is
+//    the file the owner imported (importStreamChat): Twitch does not let the tool read it.
+// 3. Read the top comments, for the moments viewers point to (YouTube only: Twitch has none).
 // 4. Choose the moments: chat's reactions and the comments (pick.js).
 // 5. Download only those parts of the video, through the ordinary fetch.
 import { fetchVideo, ytDlp } from '../fetch.js';
-import { videoUrl } from '../fetchLink.js';
+import { videoLink } from '../fetchLink.js';
 import { isStopped } from '../run.js';
 import { agreedSourceOf } from '../sources.js';
-import { addSuggested, partsInFolder, readSuggested, streamChat } from './chatStore.js';
+import { addSuggested, keptTwitchChat, partsInFolder, readSuggested, streamChat } from './chatStore.js';
 import { CLIP_DEFAULTS, expandWords, pickChatMoments } from './pick.js';
 
 /**
@@ -32,7 +33,13 @@ export async function clipsFromChat({ url, words = '', count = CLIP_DEFAULTS.cou
   for (const seconds of [before, after]) {
     if (!Number.isFinite(seconds) || seconds < 1 || seconds > 120) throw new Error('The seconds before and after must each be between 1 and 120.');
   }
-  const link = videoUrl(url);
+  const checked = videoLink(url);
+  const link = checked.url;
+  const twitch = checked.site === 'twitch';
+  const site = twitch ? 'Twitch' : 'YouTube';
+  // A Twitch stream's chat must be imported first; this is said before anything is asked of Twitch.
+  const imported = twitch ? await keptTwitchChat(dataDir, checked.id) : null;
+  if (twitch && !imported) throw new Error("Twitch does not let this tool read a stream's chat. Save the chat with TwitchDownloader (as JSON) and choose the file next to the link.");
   const groups = expandWords(words);
   if (!(await downloader.isInstalled())) throw new Error('The downloader is not installed. Run "npm run setup" to install it.');
 
@@ -44,19 +51,20 @@ export async function clipsFromChat({ url, words = '', count = CLIP_DEFAULTS.cou
   }
   if (info.live === 'is_live') throw new Error('This stream is live right now. Its chat replay is there once it has ended.');
   if (info.live === 'is_upcoming') throw new Error('This stream has not started yet.');
-  if (info.live === 'post_live') throw new Error('This stream has only just ended and YouTube is still preparing it. Try again later.');
-  if (!info.chat) {
+  if (info.live === 'post_live') throw new Error(`This stream has only just ended and ${site} is still preparing it. Try again later.`);
+  if (!twitch && !info.chat) {
     throw new Error('This video has no chat replay, so there is nothing to read explosions from. Only a finished live stream keeps its chat; an uploaded video (an edited reaction, say) has comments but no chat.');
   }
-  if (!(info.duration > 0)) throw new Error('YouTube did not say how long this stream is.');
+  if (!(info.duration > 0)) throw new Error(`${site} did not say how long this stream is.`);
 
   onStep('chat');
-  const videoId = new URL(link).searchParams.get('v');
-  const messages = await streamChat({ dataDir, videoId, url: link, downloader });
+  // The stream's id as it is in file names and the record of suggested parts.
+  const videoId = checked.fileId;
+  const messages = imported ?? await streamChat({ dataDir, videoId, url: link, downloader });
 
   // Viewers' own pointers to moments. Without them the clips come from the chat alone.
   onStep('comments');
-  const comments = downloader.comments
+  const comments = !twitch && downloader.comments
     ? await downloader.comments(link).catch((error) => {
       if (isStopped()) throw error;
       return [];

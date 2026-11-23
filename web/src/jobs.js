@@ -13,11 +13,12 @@ const STEP_NAMES = {
   finding: 'finding the best moments',
   comments: 'reading the comments',
   'fetching-slow': 'downloading the part the slow way',
-  pictures: 'asking YouTube',
+  pictures: 'asking YouTube and Twitch',
   tidying: 'preparing the video',
   joining: 'joining them',
   checking: 'checking the result',
   thinking: 'waiting for the AI service',
+  listening: 'measuring where the voice gets loud',
 };
 
 export const jobs = reactive({
@@ -102,6 +103,7 @@ export function describe(job) {
     channel: `Looking up ${job.label}`,
     render: `Rendering ${job.label} again`,
     suggest: `Finding moments in ${job.label}`,
+    transcript: `Transcribing ${job.label} for suggestions`,
     hook: `Writing hooks for ${job.label}`,
     chat: `Fetching the chat of ${job.label}`,
     'chat-check': `Checking the chat moments of ${job.label}`,
@@ -126,6 +128,7 @@ export function describe(job) {
     fetch: `${job.result?.name} is in your videos.${job.result?.early > 0.05 ? ` It starts ${job.result.early.toFixed(1)} s before the time you asked.` : ''}`,
     render: `${job.label} was rendered again.`,
     suggest: `Suggestions for ${job.label} are ready.`,
+    transcript: job.result?.skipped ? `${job.label} was not transcribed: ${job.result.skipped}` : `${job.label} is transcribed: "Suggest moments" will start at once.`,
     hook: `Hooks for ${job.label} are ready.`,
     chat: `The chat of ${job.label} is in: ${job.result?.messages ?? 0} messages.`,
     'chat-clips': `${job.result?.clips?.filter((clip) => clip.name).length ?? 0} clips are in your videos${job.result?.words?.length ? `, ${job.result.matched} with your words` : ''}.`,

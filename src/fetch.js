@@ -1,8 +1,10 @@
-// Brings part of a video, or a whole one, into the videos folder from a YouTube link.
+// Brings part of a video, or a whole one, into the videos folder from a YouTube
+// or Twitch link (Twitch since 2026-11-23).
 //
 // This is the one way video comes in from outside, and it is narrow on purpose:
-// YouTube links to one video only, a range or the whole video of at most 3 hours,
-// and only from a channel the owner has marked as agreed in the sources list.
+// links to one video only (on Twitch a past broadcast), a range or the whole video
+// of at most 3 hours, and only from a channel the owner has marked as agreed in
+// the sources list.
 import { lstatSync } from 'node:fs';
 import { access, chmod, mkdir, readdir, rename, rm, statfs } from 'node:fs/promises';
 import path from 'node:path';
@@ -12,28 +14,29 @@ import { rangeStamp } from './part.js';
 import { probe } from './probe.js';
 import { startRangeRelay } from './rangeRelay.js';
 import { isStopped, run } from './run.js';
-import { agreedSourceOf } from './sources.js';
-import { checkFetchRange, checkWholeLength, MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoUrl } from './fetchLink.js';
+import { agreedSourceOf, channelKey } from './sources.js';
+import { checkFetchRange, checkWholeLength, MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoLink, videoUrl } from './fetchLink.js';
+import { twitchChannel } from './twitch.js';
 import { formatClock } from './time.js';
 
 /** @typedef {import('./sources.js').Source} Source */
 
 /**
- * The program that talks to YouTube. Tests pass a stand-in.
+ * The program that talks to YouTube and Twitch. Tests pass a stand-in.
  *
  * @typedef {object} Downloader
  * @property {() => Promise<boolean>} isInstalled
- * @property {(url: string) => Promise<{ id: string, title: string, channel: string, channelId: string, handle: string, duration: number, live?: string, chat?: boolean }>} info
- *   `live` is YouTube's word for a stream's state: "is_live" while it is going on
+ * @property {(url: string) => Promise<{ site?: 'youtube' | 'twitch', id: string, title: string, channel: string, channelId: string, handle: string, login?: string, duration: number, live?: string, chat?: boolean }>} info
+ *   `live` is the stream's state: "is_live" while it is going on. `login` is a Twitch video's channel
  * @property {(job: { url: string, start: number, end: number, whole?: boolean, dir: string, name: string, onStep?: (step: string) => void }) => Promise<{ slow?: string } | void>} download
  *   writes `<dir>/<name>.mp4`; `slow` says why the fast way was not used, when it was not
  * @property {(job: { url: string, dir: string, name: string }) => Promise<string>} [chat]
  *   fetches only a video's chat replay into `<dir>/<name>.live_chat.json` and returns that path
  * @property {(url: string) => Promise<Array<{ text: string, likes: number }>>} [comments]
  *   a video's top comments: only their words and like counts, never who wrote them
- * @property {(url: string) => Promise<{ name: string, channelId: string, handle: string, pictureUrl: string, subscribers?: number | null }>} channel
- *   what YouTube says about a channel, for its profile picture and subscriber count (see pictures.js)
- * @property {(url: string) => Promise<{ live: boolean, videoId?: string, title?: string, channelId?: string, handle?: string, viewers?: number, started?: number }>} live
+ * @property {(url: string) => Promise<{ site?: 'youtube' | 'twitch', name: string, channelId: string, handle: string, login?: string, pictureUrl: string, subscribers?: number | null }>} channel
+ *   what the site says about a channel, for its profile picture and subscriber (on Twitch, follower) count (see pictures.js)
+ * @property {(url: string) => Promise<{ site?: 'youtube' | 'twitch', live: boolean, videoId?: string, title?: string, channelId?: string, handle?: string, login?: string, viewers?: number, started?: number }>} live
  *   whether a channel is broadcasting right now, and which stream (see live.js)
  */
 
@@ -79,7 +82,9 @@ const diskFree = (dir) => statfs(dir).then((disk) => disk.bavail * disk.bsize, (
  *   `early` is how many seconds before the asked start the file begins; `slow` says why it came the slow way, if it did
  */
 export async function fetchVideo({ url, start, end, whole = false, sources, outDir, downloader = ytDlp(), onStep = () => {}, freeSpace = diskFree }) {
-  const link = videoUrl(url);
+  const checked = videoLink(url);
+  const link = checked.url;
+  const site = checked.site === 'twitch' ? 'Twitch' : 'YouTube';
   if (!whole) checkFetchRange(start, end);
   if (!(await downloader.isInstalled())) {
     throw new Error('The downloader is not installed. Run "npm run setup" to install it.');
@@ -96,14 +101,14 @@ export async function fetchVideo({ url, start, end, whole = false, sources, outD
   // The downloader can only record it as it happens, at the speed it plays,
   // and it ignores both the start and the end: it would run until the disk is full.
   if (video.live === 'is_live') {
-    throw new Error('This video is live right now, so a part of it cannot be fetched. Wait until the stream has ended and YouTube shows it as an ordinary video, then fetch the part.');
+    throw new Error(`This video is live right now, so a part of it cannot be fetched. Wait until the stream has ended and ${site} shows it as an ordinary video, then fetch the part.`);
   }
   if (video.live === 'is_upcoming') throw new Error('This stream has not started yet, so there is nothing to fetch.');
   if (video.live === 'post_live') {
-    throw new Error('This stream has only just ended and YouTube is still preparing it. Try again later, once it plays as an ordinary video.');
+    throw new Error(`This stream has only just ended and ${site} is still preparing it. Try again later, once it plays as an ordinary video.`);
   }
   if (whole) {
-    // The range is the video's own length, as YouTube gives it. ffmpeg is not told to stop,
+    // The range is the video's own length, as the site gives it. ffmpeg is not told to stop,
     // so a part of a second that the length leaves off is not lost.
     start = 0;
     end = checkWholeLength(video.duration);
@@ -121,8 +126,7 @@ export async function fetchVideo({ url, start, end, whole = false, sources, outD
 
   // Named by the tool from the channel, the video's id and the range. The id
   // is the one checked in the link, not the one the downloader reports.
-  const id = new URL(link).searchParams.get('v');
-  const base = `${filePrefix(source.name)}_${id}_${rangeStamp(start)}-${rangeStamp(end)}`;
+  const base = `${filePrefix(source.name)}_${checked.fileId}_${rangeStamp(start)}-${rangeStamp(end)}`;
   const taken = await readdir(dir);
   let name = base;
   for (let n = 2; taken.includes(`${name}.mp4`); n++) name = `${base}_${n}`;
@@ -275,6 +279,85 @@ export async function relayDownload({ call, url, start, end, whole = false, file
   }
 }
 
+/** Whether an address the tool built is on Twitch. */
+const isTwitch = (url) => {
+  try {
+    return ['www.twitch.tv', 'twitch.tv', 'm.twitch.tv'].includes(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
+/** The login in a Twitch channel's address, or undefined. */
+const twitchLogin = (url) => {
+  const key = channelKey(url);
+  return key && 'twitch' in key ? key.twitch : undefined;
+};
+
+// A Twitch past broadcast comes as one stream with picture and sound together, at most 1080p.
+const TWITCH_FORMAT = 'b[height<=1080]/b';
+// Where Twitch serves past broadcasts from (seen on 2026-11-23: a CloudFront host). Anywhere else is refused.
+const TWITCH_STREAM_HOSTS = /^([a-z0-9-]+\.)+(cloudfront\.net|ttvnw\.net)$/;
+
+/**
+ * Check a Twitch stream's address before ffmpeg is given it: it comes from outside.
+ *
+ * @param {string} address
+ * @returns {string}
+ */
+export function checkTwitchStream(address) {
+  let url;
+  try {
+    url = new URL(String(address));
+  } catch {
+    throw new Error('Twitch gave no stream for this video.');
+  }
+  if (url.protocol !== 'https:' || !TWITCH_STREAM_HOSTS.test(url.hostname) || url.username || url.port) {
+    throw new Error('Twitch gave a stream at an address this tool does not take video from.');
+  }
+  return url.href;
+}
+
+/**
+ * Fetch a range of a Twitch past broadcast, or the whole of it. Twitch keeps a
+ * broadcast as small pieces of a few seconds listed in a playlist, so ffmpeg
+ * reads only the pieces the range needs, and no relay is used.
+ *
+ * Measured on 2026-11-23 on a 4-hour broadcast: with `-t` before `-i` (as the
+ * downloader itself does it) both ffmpeg and the downloader gave 122 s for a
+ * 60 s range, because the playlist reader does not stop where the input is
+ * told to. With `-t` on the output it gave 60.0 s, from the same first frame
+ * as the downloader's file, in 3 s (the downloader's own way took 9 s).
+ * A whole broadcast is also given its length, so a broadcast still being
+ * recorded is not read on as it grows.
+ *
+ * @param {{ call: (args: string[], options?: object) => Promise<{ stdout: string }>, url: string, start: number, end: number, whole?: boolean, file: string }} job
+ */
+export async function twitchDownload({ call, url, start, end, whole = false, file }) {
+  const { stdout } = await call(['--skip-download', '--dump-single-json', '-f', TWITCH_FORMAT, '--', url], { timeout: 60_000 });
+  const data = JSON.parse(stdout);
+  if (data.requested_formats) throw new Error('Unexpected streams.');
+  const stream = checkTwitchStream(data.url);
+  const headers = data.http_headers ?? {};
+  const agent = typeof headers['User-Agent'] === 'string' ? ['-user_agent', headers['User-Agent']] : [];
+  const partial = `${file}.part`;
+  try {
+    await run('ffmpeg', [
+      '-y', '-hide_banner', '-loglevel', 'error',
+      // Only https, so a playlist cannot point ffmpeg at a file on this computer.
+      '-protocol_whitelist', 'https,tls,tcp,crypto',
+      ...agent,
+      ...(whole ? [] : ['-ss', String(start)]),
+      '-i', stream,
+      '-t', String(whole ? end + 1 : end - start),
+      '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-f', 'mp4', partial,
+    ], { timeout: downloadTimeout(end - start) });
+    await rename(partial, file);
+  } catch (error) {
+    await rm(partial, { force: true });
+    throw error;
+  }
+}
+
 /**
  * Where the owner's YouTube sign-in is kept: a cookies file in the Netscape format
  * that browsers' "cookies.txt" exporters write. Asked for by the owner on
@@ -361,12 +444,18 @@ export function ytDlp() {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const python = process.env.CLIPPER_PYTHON ?? path.join(root, '.venv', 'bin', 'python');
   const cookies = youtubeCookiesFile(root);
-  const call = async (args, options) => {
+  // `signedIn: false` for the questions asked about every channel again and again (the live
+  // check, pictures and subscriber counts): asked for on 2026-11-23, so the account in the
+  // cookies file makes a handful of requests a day, for downloads, chat and comments, and not
+  // hundreds an hour, which is what gets an account flagged.
+  const call = async (args, options, { signedIn = true } = {}) => {
     // Signed in when the owner has saved a cookies file; looked for on every call, so adding
     // or removing it needs no restart. Only its path is passed, never its contents.
-    const signIn = await cookiesArgs(cookies);
+    const signIn = signedIn ? await cookiesArgs(cookies) : [];
     return run(python, ['-m', 'yt_dlp', '--no-playlist', '--no-warnings', ...signIn, ...args], options);
   };
+  // Twitch's answers about a channel (twitch.js); tests replace the whole downloader instead.
+  const twitch = (login) => twitchChannel(login);
   // A stream's addresses, kept for half an hour: YouTube's stay valid for hours, and asking takes about 4 s.
   const streams = new Map();
   const lookup = async (url) => {
@@ -388,6 +477,16 @@ export function ytDlp() {
         throw youtubeRefusal(error) ?? new Error('The video could not be looked up. Check the link, and that it is public.');
       });
       const data = JSON.parse(stdout);
+      if (isTwitch(url)) {
+        // A Twitch past broadcast names its channel only by login (seen on 2026-11-23: uploader_id
+        // "darealboeshi", no channel id). It has no chat the tool can read.
+        const login = String(data.uploader_id ?? '').toLowerCase();
+        return {
+          site: 'twitch', id: String(data.id ?? ''), title: data.title ?? '', channel: data.uploader ?? (login || 'Unknown channel'),
+          channelId: '', handle: '', login, duration: Number(data.duration) || 0,
+          live: typeof data.live_status === 'string' ? data.live_status : '', chat: false,
+        };
+      }
       return {
         id: data.id, title: data.title ?? '', channel: data.channel ?? data.uploader ?? 'Unknown channel',
         channelId: data.channel_id ?? '', handle: data.uploader_id ?? '', duration: Number(data.duration) || 0,
@@ -421,8 +520,13 @@ export function ytDlp() {
       return (Array.isArray(data.comments) ? data.comments : []).map((comment) => ({ text: String(comment?.text ?? '').slice(0, 500), likes: Number(comment?.like_count) || 0 }));
     },
     async channel(url) {
+      const login = twitchLogin(url);
+      if (login) {
+        const channel = await twitch(login);
+        return { site: 'twitch', name: channel.name, channelId: '', handle: '', login: channel.login, pictureUrl: channel.pictureUrl, subscribers: channel.followers };
+      }
       // Only the channel's own details: no videos are listed, and nothing is downloaded.
-      const { stdout } = await call(['--skip-download', '--flat-playlist', '--playlist-items', '0', '--dump-single-json', '--', url]).catch((error) => {
+      const { stdout } = await call(['--skip-download', '--flat-playlist', '--playlist-items', '0', '--dump-single-json', '--', url], undefined, { signedIn: false }).catch((error) => {
         throw youtubeRefusal(error) ?? new Error('The channel could not be looked up. Check its address.');
       });
       const data = JSON.parse(stdout);
@@ -435,10 +539,20 @@ export function ytDlp() {
       };
     },
     async live(url) {
+      const login = twitchLogin(url);
+      if (login) {
+        const channel = await twitch(login).catch(() => {
+          throw new Error('The channel could not be checked.');
+        });
+        const stream = channel.stream;
+        return stream
+          ? { site: 'twitch', live: true, login: channel.login, title: stream.title, viewers: stream.viewers ?? undefined, started: stream.started ?? undefined }
+          : { site: 'twitch', live: false, login: channel.login };
+      }
       // A channel's "/live" address leads to the stream it is broadcasting. Nothing is downloaded.
       let stdout;
       try {
-        ({ stdout } = await call(['--skip-download', '--dump-single-json', '--', `${url}/live`], { timeout: 45_000 }));
+        ({ stdout } = await call(['--skip-download', '--dump-single-json', '--', `${url}/live`], { timeout: 45_000 }, { signedIn: false }));
       } catch (error) {
         // "Not live" is an answer, not a failure; so is a stream that is only announced.
         if (/not currently live|will begin in|live event will begin|Premieres in/i.test(error.message)) return { live: false };
@@ -453,6 +567,18 @@ export function ytDlp() {
     },
     async download({ url, start, end, whole = false, dir, name, onStep = () => {} }) {
       const failed = () => new Error('The download failed. Try again; if it keeps failing, the downloader may need updating with "npm run setup".');
+      if (isTwitch(url)) {
+        // Twitch is read the one way, tried twice. The downloader's own way is no fallback here:
+        // it gave twice the asked length (see twitchDownload).
+        for (let attempt = 1; ; attempt++) {
+          try {
+            await twitchDownload({ call, url, start, end, whole, file: path.join(dir, `${name}.mp4`) });
+            return {};
+          } catch (error) {
+            if (isStopped() || attempt === 2) throw isStopped() ? error : failed();
+          }
+        }
+      }
       // The fast way first: ffmpeg reads the streams through the relay, which asks YouTube for
       // fixed slices (see rangeRelay.js). It is tried twice, with fresh addresses the second
       // time. If both fail for any reason other than a stop, the downloader's own way is used,

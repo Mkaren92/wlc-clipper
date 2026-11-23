@@ -12,6 +12,7 @@ import { formatClock } from '../time.js';
 import { probe } from '../probe.js';
 import { extractAudio } from '../render.js';
 import { checkTranscript } from '../transcribe/index.js';
+import { findLoudness, loudMomentLines, loudMoments, loudParts, MAX_LOUD_MOMENTS } from './mood.js';
 
 /** @typedef {import('../types.js').Word} Word */
 /** @typedef {import('../brief/schema.js').Brief} Brief */
@@ -36,9 +37,10 @@ import { checkTranscript } from '../transcribe/index.js';
 
 /** @typedef {import('../chat/terms.js').TermGroup} TermGroup */
 
-// A whole-video transcript of a longer source would take very long to make
-// on a CPU, so longer videos are refused with a message.
-const MAX_SOURCE_MINUTES = 60;
+// The longest video suggestions take: 3 hours since 2026-11-23, the same as the longest download
+// (60 minutes before). A 3-hour transcript takes about 4 minutes on the home PC's graphics card and
+// about 18 on a processor, and is about 15,000 words, which the AI services take in one request.
+export const MAX_SOURCE_MINUTES = 180;
 // A fetched hour is a few hundredths over 3600 s (the owner's "0m00s-1h00m00s" was 3600.001 s and was
 // refused on 2026-11-21), so a second over the limit is let through.
 const LENGTH_SLACK_SECONDS = 1;
@@ -89,12 +91,17 @@ const MAX_HINTS = 80;
 // Change this when the prompt or the tidying changes, so results kept from before are asked again.
 const RESULT_VERSION = 1;
 
+// Told to the model only when the owner asks for the streamer's loudness to be used (asked for on
+// 2026-11-23). Without it, the request is exactly what it was before (test/fixtures/suggest-prompt-before.json).
+const LOUD_INSTRUCTION = 'After the transcript there is a list of stretches where the streamer\'s voice is much louder than usual: shouting, screaming or laughing. Such a stretch is often the best moment of a stream even when its words alone look ordinary, so consider each one, and choose the strong ones; the moment should cover the loud stretch and what leads up to it.';
+
 /**
  * Propose moments of a video worth clipping.
  *
  * The whole video is transcribed on this machine (and the transcript kept
  * for next time). Only the transcript text and the brief's rules are sent to
- * the AI service: no audio, no video, no file names.
+ * the AI service, and, with `loud`, the times and decibels of loud stretches:
+ * no audio, no video, no file names.
  *
  * @param {object} options
  * @param {string} options.source
@@ -107,18 +114,20 @@ const RESULT_VERSION = 1;
  * @param {TermGroup[]} [options.terms]   event terms that steer the model, already checked (parseTermGroups)
  * @param {string} [options.guidance]     the owner's own words on what a good moment is
  * @param {boolean} [options.force]       ask the model again even when a kept result exists
+ * @param {boolean} [options.loud]   also tell the model where the streamer's voice is much louder than usual
+ *   (times and decibels, measured here); off, the request is what it always was
  * @param {(step: string) => void} [options.onStep]
  * @returns {Promise<{ moments: Moment[], model: string, usage: { input: number, output: number }, fromCache: boolean, resultFromCache: boolean }>}
  *   `fromCache`: the transcript was kept from before; `resultFromCache`: so was the model's answer
  */
-export async function suggestMoments({ source, count = 5, brief = null, lang = 'en', cacheDir, transcriber, ai, terms = [], guidance = '', force = false, onStep = () => {} }) {
+export async function suggestMoments({ source, count = 5, brief = null, lang = 'en', cacheDir, transcriber, ai, terms = [], guidance = '', force = false, loud = false, onStep = () => {} }) {
   if (!ai.isConfigured()) throw new Error(ai.help);
   const steer = { terms, guidance: String(guidance ?? '').trim() };
   const steered = steer.terms.length > 0 || steer.guidance !== '';
   const info = await probe(path.resolve(source));
   if (info.audioStreams === 0) throw new Error('This video has no sound, so there is no speech to choose moments from.');
   if (info.duration > MAX_SOURCE_MINUTES * 60 + LENGTH_SLACK_SECONDS) {
-    throw new Error(`Suggestions work on videos up to ${MAX_SOURCE_MINUTES} minutes long; this one is ${formatClock(info.duration)}.`);
+    throw new Error(`Suggestions work on videos up to ${MAX_SOURCE_MINUTES / 60} hours long; this one is ${formatClock(info.duration)}.`);
   }
 
   const { words, fromCache } = await sourceTranscript({ info, lang, cacheDir, transcriber, onStep });
@@ -133,7 +142,7 @@ export async function suggestMoments({ source, count = 5, brief = null, lang = '
 
   // The model's answer is kept per video and per set of inputs, so asking again with the same
   // terms and guidance costs nothing, and changing them asks the model but does not transcribe.
-  const resultFile = path.join(cacheDir, `moments-${resultKey({ info, lang, count, brief, steer, model: ai.model })}.json`);
+  const resultFile = path.join(cacheDir, `moments-${resultKey({ info, lang, count, brief, steer, model: ai.model, loud })}.json`);
   if (!force) {
     const kept = await readKeptResult(resultFile);
     if (kept) {
@@ -141,11 +150,18 @@ export async function suggestMoments({ source, count = 5, brief = null, lang = '
     }
   }
 
+  // Where the voice is much louder than usual: measured here, only when asked, and only times and decibels go out.
+  // A long video gets more of its loud moments told: the usual number for each hour, at least.
+  const top = Math.max(MAX_LOUD_MOMENTS, Math.ceil((info.duration / 3600) * MAX_LOUD_MOMENTS));
+  const sound = loud ? loudMomentLines(loudMoments(await videoLoudness(info, cacheDir, onStep), { top })) : [];
+  const withSound = (text) => (sound.length > 0 ? `${text}\n${sound.join('\n')}` : text);
+  const soundRule = sound.length > 0 ? `\n${LOUD_INSTRUCTION}` : '';
+
   onStep('thinking');
   const compiled = steered ? compileTerms(steer.terms) : null;
   const { data, usage } = await ai.ask(steered
-    ? { system: `${instructions({ count, limits, brief })}\n${steeringLines(steer)}`, user: withHints(words, compiled), schema: steeredSchema, schemaName: 'moments' }
-    : { system: instructions({ count, limits, brief }), user: transcriptLines(words), schema: answerSchema, schemaName: 'moments' });
+    ? { system: `${instructions({ count, limits, brief })}\n${steeringLines(steer)}${soundRule}`, user: withSound(withHints(words, compiled)), schema: steeredSchema, schemaName: 'moments' }
+    : { system: `${instructions({ count, limits, brief })}${soundRule}`, user: withSound(transcriptLines(words)), schema: answerSchema, schemaName: 'moments' });
 
   const tidied = tidyMoments(data.moments, { words, duration: info.duration, limits, count, labels: steer.terms.map((group) => group.label), compiled });
   // An answer with nothing usable in it is not kept, so "try again" really asks again.
@@ -155,6 +171,25 @@ export async function suggestMoments({ source, count = 5, brief = null, lang = '
     problems: brief ? briefProblems(moment, brief) : [],
   }));
   return { moments, model: ai.model, usage, fromCache, resultFromCache: false };
+}
+
+/**
+ * Make a video's whole transcript now and keep it, so "Suggest moments" finds it ready.
+ * Asked for on 2026-11-23: run straight after a download, while the owner does
+ * something else. Nothing is sent anywhere; a video suggestions would refuse is skipped.
+ *
+ * @param {{ source: string, lang?: string, cacheDir: string, transcriber: import('../transcribe/index.js').Transcriber, onStep?: (step: string) => void }} options
+ * @returns {Promise<{ made: boolean, kept: boolean, words: number, skipped: string | null }>}
+ *   `kept`: it was already there; `skipped`: why none was made
+ */
+export async function prepareTranscript({ source, lang = 'en', cacheDir, transcriber, onStep = () => {} }) {
+  const info = await probe(path.resolve(source));
+  const skip = (why) => ({ made: false, kept: false, words: 0, skipped: why });
+  if (info.audioStreams === 0) return skip('This video has no sound.');
+  if (info.duration > MAX_SOURCE_MINUTES * 60 + LENGTH_SLACK_SECONDS) return skip(`Suggestions work on videos up to ${MAX_SOURCE_MINUTES / 60} hours; this one is ${formatClock(info.duration)}.`);
+  if (!(await transcriber.isInstalled())) return skip('The transcriber is not installed. Run "npm run setup".');
+  const { words, fromCache } = await sourceTranscript({ info, lang, cacheDir, transcriber, onStep });
+  return { made: !fromCache, kept: fromCache, words: words.length, skipped: null };
 }
 
 /**
@@ -184,8 +219,9 @@ function transcriptKey(file, info, lang) {
 }
 
 /** A name for one set of inputs: the video as it is now, and everything that changes the answer. */
-function resultKey({ info, lang, count, brief, steer, model }) {
-  const what = JSON.stringify({ v: RESULT_VERSION, video: path.basename(info.path), size: info.size, duration: info.duration, lang, count, brief, terms: steer.terms, guidance: steer.guidance, model });
+function resultKey({ info, lang, count, brief, steer, model, loud = false }) {
+  // `loud` is named only when on, so the answers kept before it existed are still found.
+  const what = JSON.stringify({ v: RESULT_VERSION, video: path.basename(info.path), size: info.size, duration: info.duration, lang, count, brief, terms: steer.terms, guidance: steer.guidance, model, ...(loud ? { loud: 1 } : {}) });
   return createHash('sha256').update(what).digest('hex').slice(0, 24);
 }
 
@@ -212,6 +248,24 @@ async function keepResult(file, result) {
   const partial = `${file}.partial`;
   await writeFile(partial, JSON.stringify(result));
   await rename(partial, file);
+}
+
+/**
+ * Where a whole video's voice is much louder than usual (mood.js). Its sound is read again:
+ * 4.5 s for 38 minutes on the owner's PC (2026-11-23), so nothing is kept.
+ *
+ * @returns {Promise<{ start: number, end: number, louder: number }[]>}
+ */
+async function videoLoudness(info, cacheDir, onStep) {
+  onStep('listening');
+  await mkdir(cacheDir, { recursive: true });
+  const workDir = await mkdtemp(path.join(cacheDir, 'audio-'));
+  try {
+    const audioFile = await extractAudio({ source: info.path, start: 0, seconds: info.duration, workDir });
+    return loudParts(await findLoudness(audioFile));
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
+  }
 }
 
 /**

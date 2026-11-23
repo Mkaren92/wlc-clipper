@@ -125,6 +125,20 @@ async function deletePart(name) {
   }
 }
 
+// A part opened on the cutting screen: it is put among the videos (the same file, not a copy) first.
+const openingPart = ref(false);
+async function cutFromPart(name) {
+  openingPart.value = true;
+  try {
+    const { video } = await api.partToVideo(name);
+    await openVideo(video);
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    openingPart.value = false;
+  }
+}
+
 // A video just downloaded, opened on the Clips page to cut.
 async function openVideo(name) {
   go('clips');
@@ -326,7 +340,16 @@ onMounted(async () => {
           </header>
           <div class="panel">
             <video :src="api.partUrl(view.name)" controls playsinline />
-            <p class="hint"><a :href="api.partUrl(view.name)" :download="view.name">Download this part</a></p>
+            <p class="row middle part-actions">
+              <button class="fixed primary" :disabled="openingPart" @click="cutFromPart(view.name)">
+                <Icon name="scissors" /> Cut clips from this part
+              </button>
+              <a class="fixed" :href="api.partUrl(view.name)" :download="view.name">Download this part</a>
+            </p>
+            <p class="hint">
+              “Cut clips from this part” puts it under Videos and opens it there, with captions, suggestions and everything else.
+              It is the same file under two names, so it takes no more room, and it stays here too. Deleting one leaves the other.
+            </p>
           </div>
         </section>
         <section v-else-if="loaded && !error" class="panel welcome">
@@ -410,6 +433,7 @@ main.sources { max-width: 1250px; }
 main.download { max-width: 1100px; }
 main.clips { max-width: 1500px; }
 .part video { width: 100%; max-height: 70vh; background: black; border-radius: var(--radius); display: block; }
+.part-actions { gap: 12px; margin: 10px 0 0; }
 .welcome { max-width: 560px; margin: 8vh auto 0; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .welcome h2 { font-size: 20px; margin: 0; }
 

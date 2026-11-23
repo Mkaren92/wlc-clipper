@@ -11,13 +11,13 @@ Optionally, an AI service can suggest which moments to clip and fix caption mist
 
 The dashboard also has pages for building a longer video out of several pieces: [match cards and compilations](#match-cards-and-compilations), and [Combine](#combine-two-videos), which puts two videos side by side. A [My data](#my-data-moving-to-another-computer) page carries your channels, clubs, logos, sounds and briefs to another computer.
 
-It works on files on your disk and it does not post anything. The one way video comes in from outside is [`fetch`](#sources-and-fetching), which takes part of a YouTube video, or a whole one up to 3 hours, from a channel in your sources list, where you add only channels that have agreed. The Sources page also looks up those channels' profile pictures and subscriber counts, and shows which of them are live.
+It works on files on your disk and it does not post anything. The one way video comes in from outside is [`fetch`](#sources-and-fetching), which takes part of a YouTube video or a Twitch past broadcast, or a whole one up to 3 hours, from a channel in your sources list, where you add only channels that have agreed. The Sources page also looks up those channels' profile pictures and subscriber (on Twitch, follower) counts, and shows which of them are live.
 
 ## Requirements
 
 - Node.js 22.12 or later
 - `ffmpeg` and `ffprobe` on the PATH, built with libass (check: `ffmpeg -filters | grep subtitles`)
-- Python 3 with the venv module, only for captions and for fetching from YouTube (on Ubuntu: `sudo apt install python3-venv`)
+- Python 3 with the venv module, only for captions and for fetching from YouTube or Twitch (on Ubuntu: `sudo apt install python3-venv`)
 
 It has only been run on Linux. **On Windows**, it runs inside WSL: follow [docs/install-windows.md](docs/install-windows.md), a step-by-step guide from an empty computer to a first clip.
 
@@ -30,7 +30,9 @@ npm run setup
 
 `npm run setup` creates a `.venv` folder in the project and installs two things into it: faster-whisper, which turns speech into text for captions, and yt-dlp, the downloader behind [`fetch`](#sources-and-fetching). The speech model (about 460 MB) is downloaded to `~/.cache/huggingface` the first time a clip is transcribed.
 
-Running it again leaves faster-whisper as it is and brings yt-dlp up to date.
+On a PC with an NVIDIA graphics card (one that `nvidia-smi` finds), it also installs NVIDIA's libraries for it (about 2 GB). A whole video's transcript for "Suggest moments" then runs on the card: on a GTX 1660 Ti, a 38-minute video took 52 seconds instead of about 4 minutes. Without a card, or if the card fails, it runs on the processor as before. Captions always use the processor. To keep the card out of it, set `CLIPPER_TRANSCRIBE_DEVICE=cpu`.
+
+Running it again leaves faster-whisper and the NVIDIA libraries as they are and brings yt-dlp up to date.
 
 Without the setup step the tool still works: clips are made without captions and a warning says why, and fetching is switched off.
 
@@ -67,7 +69,7 @@ Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 - **Deleting a video:** each video in the left column has a trash icon. It asks once, then deletes the file from `in/`. Clips already cut from it stay, but can no longer be rendered again, because rendering reads the source. A compilation that uses the video will not build until the item is taken out. It is not possible while a clip is being made.
 - **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
 - **Clip:** watch the result, download it, see each brief rule as passed or failed, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
-- **Download:** paste a YouTube link from one of your channels and bring a part of the video, or the whole of it, into `in/`; or paste a finished live stream and get the moments its chat exploded as clips (see [Sources and fetching](#sources-and-fetching)).
+- **Download:** paste a YouTube or Twitch link from one of your channels and bring a part of the video, or the whole of it, into `in/`; or paste a finished live stream and get the moments its chat exploded as clips (see [Sources and fetching](#sources-and-fetching)).
 - **My data:** keeps what you chose to carry the same on every computer through a private GitHub repository of yours, by itself; and, as a fallback, one file to download and load on another computer (see [My data](#my-data-moving-to-another-computer)).
 - **Unsaved changes:** the card, combine, compilation and sources pages show "Changes not saved" until you save, and their Save button stays in view.
 
@@ -194,7 +196,7 @@ Each combination is kept in `data/combinations/<name>` with its settings and `co
 
 The Sources page keeps the list of channels you take clips from: a name and the channel's address for each. Add a channel only once it has agreed to let you use its videos; being in the list is what allows fetching from it.
 
-"Update pictures and subscribers" fetches the profile picture of every channel in the saved list from YouTube and keeps each as a small round picture in `data/source-pictures/`. It also reads each channel's subscriber count, shown at the end of its row (hover over it for the full number and the day it was read). YouTube gives that number rounded, and not at all for a channel that hides it. The page shows them next to the names, and a compilation draws a channel's picture beside its name wherever it is credited. Press it again after adding a channel, or when a channel changes its picture; a compilation generated afterwards uses the new one. `description.txt` is plain text, so it has no pictures. The trash icon on a row asks once and then removes the channel at once, with its picture and subscriber count; videos already fetched from it stay.
+"Update pictures and subscribers" fetches the profile picture of every channel in the saved list from YouTube or Twitch and keeps each as a small round picture in `data/source-pictures/`. It also reads each channel's subscriber count, shown at the end of its row (hover over it for the full number and the day it was read). YouTube gives that number rounded, and not at all for a channel that hides it. The page shows them next to the names, and a compilation draws a channel's picture beside its name wherever it is credited. Press it again after adding a channel, or when a channel changes its picture; a compilation generated afterwards uses the new one. `description.txt` is plain text, so it has no pictures. The trash icon on a row asks once and then removes the channel at once, with its picture and subscriber count; videos already fetched from it stay.
 
 The list is shown with the most subscribers first, and each row has a small arrow icon that opens the channel on YouTube in a new tab.
 
@@ -202,15 +204,15 @@ The page also shows **who is live**. A channel that is broadcasting on YouTube i
 
 Under **"Supports"** on a channel's row you can mark the club the streamer supports, chosen from your own [leagues and clubs](#leagues-and-clubs). Click the cell, type to find a club, and click it: it is saved at once and shows as a small logo on the row. Choosing another club changes it, and choosing the same one again takes it off. A club that is in two leagues is listed once.
 
-To add a channel quickly, press "Add a channel", paste only its address, and press the round arrows on its row. The channel's name, picture and subscriber count are filled in from YouTube and the channel is saved to the list. A name you typed yourself is kept, so on a channel you already have the button only refreshes the picture and the count. Change the name afterwards if you want another spelling, and press "Save the list".
+To add a channel quickly, press "Add a channel", paste only its address, and press the round arrows on its row. The channel's name, picture and subscriber count (on Twitch, followers) are filled in from YouTube or Twitch and the channel is saved to the list. A name you typed yourself is kept, so on a channel you already have the button only refreshes the picture and the count. Change the name afterwards if you want another spelling, and press "Save the list".
 
-The **Download** page (its own button in the left column) brings a part of a YouTube video, or the whole of one, into `in/`. Paste the link, give "From" and "To" or tick "Whole video", and press Download. The page checks the link and the length while you type, says so if the link is a stream one of your channels is broadcasting right now, and shows the progress with a Stop button. When it is done it names the file and offers "Open it to cut". Under "You can download from" it lists the channels in your list. The rules:
+The **Download** page (its own button in the left column) brings a part of a YouTube video, or the whole of one, into `in/`. Paste the link, give "From" and "To" or tick "Whole video", and press Download. With **"Transcribe it for “Suggest moments” straight after"** ticked (the default, remembered in your browser), the video's transcript is made right after the download, as its own job in Activity that can be stopped, so "Suggest moments" starts at once when you open the video. Videos over 3 hours are skipped, since suggestions do not take them. The page checks the link and the length while you type, says so if the link is a stream one of your channels is broadcasting right now, and shows the progress with a Stop button. When it is done it names the file and offers "Open it to cut". Under "You can download from" it lists the channels in your list. The rules:
 
 - **Only from a channel in your list.** The channel is read from the video itself, so a link to anyone else's video is refused.
-- **A part of up to 3 hours (20 minutes until 2026-11-21), or the whole video of up to 3 hours.** For a part you give a start and an end. For a whole video the length is read from YouTube, and a video over 3 hours, or one whose length YouTube does not give, is refused before anything is downloaded. A whole video is large (a 19½-minute one was 280 MB; a three-hour watchalong may be 2 to 3 GB), so delete it once it is clipped. "Suggest moments" works on videos up to 60 minutes.
+- **A part of up to 3 hours (20 minutes until 2026-11-21), or the whole video of up to 3 hours.** For a part you give a start and an end. For a whole video the length is read from YouTube or Twitch, and a video over 3 hours, or one whose length the site does not give, is refused before anything is downloaded. A whole video is large (a 19½-minute one was 280 MB; a three-hour watchalong may be 2 to 3 GB), so delete it once it is clipped. "Suggest moments" works on videos up to 3 hours (60 minutes until 2026-11-23).
 - **Quick.** 20 minutes came down in about 16 seconds on a 100 Mbit/s line, and a whole video of about an hour and a half in about 20 seconds. The tool asks YouTube for the video in small slices, a few at a time, which YouTube sends at full speed; asked for in one go, YouTube sends it at little more than playback speed. If that ever stops working, the tool falls back to the slow way by itself, and says so: the progress line reads "the slow way", and the page shows why when it is done.
 - **Up to 1080p, with the picture exactly as YouTube sends it.** A video can only be cut without loss at certain frames, so the part starts up to a few seconds before the time you gave; the tool says by how much. Set the exact start when you cut.
-- **YouTube links to one video only.** Playlists and channel links are refused.
+- **Links to one video only**: a YouTube video, or a Twitch past broadcast (`https://www.twitch.tv/videos/...`). Playlists, channel links and Twitch clips are refused.
 - **Not from a stream that is still live.** A live stream can only be recorded as it happens; a part cannot be cut out of it. Wait until the stream has ended and plays as an ordinary video. A stream that has only just ended is refused too, until YouTube has finished preparing it.
 
 The file is named after the channel, the video and the range, such as `channel-name_<video id>_1h02m00s-1h05m00s.mp4`; a whole video is named from 0 to its length, such as `channel-name_<video id>_0m00s-1h31m10s.mp4`. It then works like any other video in `in/`. When you add it to a compilation, its credit is filled in with the channel's name, and `description.txt` lists that channel's link next to the credit.
@@ -232,11 +234,25 @@ A best moment is found two ways:
 
 On a 2 h 14 min watchalong, six clips took 2 minutes: 21 s to read 1,421 chat messages, then 15 to 22 s a clip. Reading the comments takes a few seconds. A busy chat takes longer to read: an 11-hour stream with 54,000 messages took tens of minutes, because the downloader reads the chat replay in order, piece by piece.
 
+### Twitch
+
+Twitch works beside YouTube (since 2026-11-23), with the same rules:
+
+- **A Twitch channel is a row of its own** on the Sources page, with its address `https://www.twitch.tv/name`. Each row shows its site on the picture and at the start of the address (a play button for YouTube, a speech bubble for Twitch), and "All", "YouTube" and "Twitch" above the list show only that site's channels, with how many there are. Add it only once that channel has agreed; a streamer's YouTube channel and Twitch channel are two rows. The round arrows fill in its name, picture and **follower** count (Twitch shows followers, not subscribers), and it is marked LIVE like a YouTube channel.
+- **Download** takes a past broadcast's link, `https://www.twitch.tv/videos/<number>`, a part or the whole of it up to 3 hours. A one-minute part took about 10 seconds. A broadcast that is still going is refused. The file is named with `tw` and the number, such as `boeshi_tw2938193982_1h00m00s-1h01m00s.mp4`. Twitch deletes past broadcasts after some weeks, and some are for subscribers only; those cannot be fetched.
+- **Chat comes from a file you save.** Twitch does not let this tool read a past broadcast's chat (it refuses after the first page), so save it with [TwitchDownloader](https://github.com/lay295/TwitchDownloader) as **JSON** (without embedded images, which make the file much larger). Then:
+  - on the cutting screen, for a part of that broadcast, press "Import a chat file" under "Suggested moments" → Chat: the offset is filled in from the part's name;
+  - on the Download page, under "Clips from a stream's chat", paste the broadcast's link and choose the file next to it. It is kept (`data/chats/twitch-<number>.json`, on this computer only), so asking again needs no file. Twitch has no comments, so the moments come from chat alone.
+- **Pull the new code on every PC before adding the first Twitch channel.** The channels list syncs between your PCs, and a PC with older code cannot read a list that has a Twitch address in it: its sync stops with a message until it has the new code. Nothing is lost.
+
+The facts about a Twitch channel (name, picture, followers, live or not) come from Twitch's own web interface, the one its site uses, with no account or key; only channels in your list are asked about.
+
 From the command line:
 
 ```bash
 node src/cli.js fetch "https://www.youtube.com/watch?v=..." --start 1:02:00 --end 1:05:00
 node src/cli.js fetch "https://www.youtube.com/watch?v=..." --whole
+node src/cli.js fetch "https://www.twitch.tv/videos/..." --start 1:00:00 --end 1:01:00
 ```
 
 It needs the downloader program `yt-dlp`, which `npm run setup` installs into `.venv` next to the transcriber. YouTube changes often; when fetching stops working, run `npm run setup` again to update it.
@@ -259,7 +275,7 @@ After many lookups from one connection, YouTube may answer every request with "S
    mv /mnt/c/Users/<you>/Downloads/www.youtube.com_cookies.txt data/youtube-cookies.txt
    ```
 
-From then on the downloader uses it for every YouTube request: video downloads, chat replays, channel pictures and the live check. No restart is needed. The tool makes the file readable by you only, never prints it, and leaves it out of "My data"; `data/` is not in the repository. To sign out, delete `data/youtube-cookies.txt`. If YouTube refuses again even so, save the file again: sign-ins expire.
+From then on the downloader uses it for video downloads, chat replays and comments. The live check and channel pictures go out without it: they ask about every channel again and again, and that many signed-in requests from one account is what gets it flagged. While YouTube is refusing your connection, the LIVE marks may say "could not be checked" until it clears; downloads keep working. No restart is needed. The tool makes the file readable by you only, never prints it, and leaves it out of "My data"; `data/` is not in the repository. To sign out, delete `data/youtube-cookies.txt`. If YouTube refuses again even so, save the file again: sign-ins expire.
 
 **What is saved when.** The club a streamer supports and the removal of a channel are saved the moment you make them. A name or an address you type is saved with "Save the list" or with the row's sync arrows, and the browser asks before a reload would lose one.
 
@@ -359,13 +375,13 @@ or `CLIPPER_AI=claude`. Restart the dashboard after changing `.env`.
 
 ### What is sent
 
-Only text: the video's transcript, or a clip's caption words, plus the brief's rules and your event words and guidance. With the AI check of chat moments ticked, also the chat messages' words and times. For hook suggestions, also the streamer's name, the times and loudness (in decibels) of stretches where the voice is much louder than usual, and, if ticked, how many chat messages of each kind reacted. Never who wrote a chat message. The video, the audio and file names stay on your computer. Speech is still turned into text locally by Whisper.
+Only text: the video's transcript, or a clip's caption words, plus the brief's rules and your event words and guidance. With the AI check of chat moments ticked, also the chat messages' words and times. For suggested moments with "Use where the streamer gets loud" ticked, also the times of the video's loudest stretches, how many loud bursts each has and how many decibels louder than usual. For hook suggestions, also the streamer's name, the times and loudness (in decibels) of stretches where the voice is much louder than usual, and, if ticked, how many chat messages of each kind reacted. Never who wrote a chat message. The video, the audio and file names stay on your computer. Speech is still turned into text locally by Whisper.
 
 In testing, suggestions for a 10-minute video took about 6 seconds either way once the transcript existed. With OpenAI it used about 5,300 tokens in and 550 out, around two cents.
 
 ### Using it
 
-In the dashboard, "Suggested moments" is on the cutting screen. Choose where the moments come from: **Transcript** (as before), **Chat** or **Both**. With Transcript, press "Suggest moments": the first time on a video it transcribes the whole video, which takes a few minutes; the transcript is kept in `out/.cache` for next time. The AI's answer is kept too, per video and per set of inputs, so the same inputs give the same list at once; tick "Ask again" for a new answer. Changing the event words or the guidance asks the AI again without transcribing again.
+In the dashboard, "Suggested moments" is on the cutting screen. Choose where the moments come from: **Transcript** (as before), **Chat** or **Both**. With Transcript, press "Suggest moments": the first time on a video it transcribes the whole video, which takes about 80 seconds an hour on an NVIDIA card and about 6 minutes on the processor; the transcript is kept in `out/.cache` for next time. The AI's answer is kept too, per video and per set of inputs, so the same inputs give the same list at once; tick "Ask again" for a new answer. "How many" asks for up to 20 moments (up to 10 before 2026-11-23). **"Use where the streamer gets loud"** (on by default, remembered in your browser) also tells the AI where the streamer shouts, screams or laughs much louder than usual, so a funny moment whose words look ordinary is not missed. The loudness is measured on your computer (about 5 seconds for 40 minutes); only the times and decibels are sent. From the command line, add `--loud`. Changing the event words or the guidance asks the AI again without transcribing again.
 
 Moments appear as one list and as marks above the timeline. Each shows its time, which can be edited, its score, where it was found (transcript, chat or both) and its label. "Send to cut" fills in the range, hook, title and description for you to check before cutting. Clicking a moment's number jumps the video there. The moment you are working on is highlighted, and one you have sent for cutting is marked "Already cut". Filters show only the moments from one source, or with one label.
 
@@ -401,7 +417,7 @@ node src/cli.js suggest in/video.mp4 --preset football --guidance "big reactions
 node src/cli.js suggest in/video.mp4 --terms my-terms.json --again
 ```
 
-It prints each moment with a `cut` command for its range, and its event when there is one. Videos longer than 60 minutes are refused. `--terms` reads a JSON file such as `[{ "label": "Goal", "terms": ["goal", "gol"] }]`, `--preset` is `football` or `gaming`, and `--again` asks the AI again instead of showing the answer kept for the same inputs. Moments from the chat are in the dashboard only.
+It prints each moment with a `cut` command for its range, and its event when there is one. Videos longer than 3 hours are refused (60 minutes until 2026-11-23). `--terms` reads a JSON file such as `[{ "label": "Goal", "terms": ["goal", "gol"] }]`, `--preset` is `football` or `gaming`, and `--again` asks the AI again instead of showing the answer kept for the same inputs. Moments from the chat are in the dashboard only.
 
 ## Commands
 
@@ -413,7 +429,7 @@ It prints each moment with a `cut` command for its range, and its event when the
 | `check <clip-folder>` | Checks an existing clip and its `post.txt` against a brief |
 | `suggest <file>` | Asks an AI service for moments worth clipping (see [AI help](#ai-help)) |
 | `extract <file>` | Saves a part of a video as it is, at the original size (see [Plain parts](#plain-parts)) |
-| `fetch <link>` | Brings part of a YouTube video (`--start`, `--end`), or a whole one up to 3 hours (`--whole`), into `in/`, from a channel in your sources list (see [Sources and fetching](#sources-and-fetching)) |
+| `fetch <link>` | Brings part of a YouTube video or a Twitch past broadcast (`--start`, `--end`), or a whole one up to 3 hours (`--whole`), into `in/`, from a channel in your sources list (see [Sources and fetching](#sources-and-fetching)) |
 
 Every command has built-in help: `node src/cli.js cut --help`.
 
@@ -500,7 +516,7 @@ node src/cli.js extract in/video.mp4 --start 1:00 --end 1:30
 
 In the dashboard, set the start and end on the cutting screen and press "Save this part as it is". The layout, hook and brief settings are ignored for it.
 
-Parts are kept apart from clips: all of them go into one folder, `parts/`, as single files named after the source and the range, such as `video_1m00s-1m30s.mp4`. The dashboard lists them under "Parts" in the left column, where you can play or delete them. To save somewhere else from the command line, add `--out <folder>`.
+Parts are kept apart from clips: all of them go into one folder, `parts/`, as single files named after the source and the range, such as `video_1m00s-1m30s.mp4`. The dashboard lists them under "Parts" in the left column, where you can play or delete them. To cut clips from a part, open it and press **"Cut clips from this part"**: it is put under Videos and opened on the cutting screen, with captions, suggestions and everything else. It is the same file under two names (a link), so it takes no more room and stays under Parts too; deleting one leaves the other. To save somewhere else from the command line, add `--out <folder>`.
 
 A part keeps the original size, frame rate and every audio track. It starts and ends exactly where you asked, because the picture is encoded again and not just copied; a 30-second part of a 720p video took about 17 seconds to make.
 
@@ -608,7 +624,9 @@ node src/cli.js check out/barca-wants-who --brief briefs/other.json
 - The font is Liberation Sans Bold, bundled in `assets/fonts` so clips look the same on every machine.
 - Line widths are known for the letters A to Z, digits and a few signs. Other letters are treated as very wide, so captions in another alphabet come out smaller than they need to be.
 
-Transcription uses the Whisper `small` model on the CPU. On the machine this was built on, a 30-second clip takes about 5 seconds to transcribe and about a minute in total.
+A clip's picture is made on an NVIDIA graphics card when ffmpeg can use one (checked once, by itself), which makes it about twice as fast for the center and facecam layouts; the file is about 1.8 times larger at the same quality. Without a card, or if it fails, the processor makes it as before; `CLIPPER_ENCODER=cpu` keeps the card out. On the home PC a 30-second blur clip with captions took 32 s on the card and 41 s on the processor (over a minute before the blurred background was made faster on 2026-11-23).
+
+Transcription uses the Whisper `small` model. A clip's captions are always transcribed on the processor: about 5 seconds for a 30-second clip. A whole video's transcript for suggestions uses an NVIDIA card when there is one (see the setup section). A 30-second clip takes about 30 to 40 seconds in all on the home PC.
 
 To use a different Python than `.venv/bin/python`, set the `CLIPPER_PYTHON` environment variable to its path.
 
@@ -618,7 +636,7 @@ To use a different Python than `.venv/bin/python`, set the `CLIPPER_PYTHON` envi
 npm test
 ```
 
-Some tests run the real `ffmpeg` on a small generated video, so `ffmpeg` and `ffprobe` must be installed, built with the `libx264`, `aac` and `libopus` encoders (check: `ffmpeg -encoders | grep -E "libx264|libopus"`). They do not need the transcriber or the downloader, and they never reach YouTube or an AI service.
+Some tests run the real `ffmpeg` on a small generated video, so `ffmpeg` and `ffprobe` must be installed, built with the `libx264`, `aac` and `libopus` encoders (check: `ffmpeg -encoders | grep -E "libx264|libopus"`). They do not need the transcriber or the downloader, and they never reach YouTube, Twitch or an AI service.
 
 The tests cover the engine and the dashboard's server. They do not cover the dashboard's pages; check those by opening them in a browser.
 

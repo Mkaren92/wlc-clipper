@@ -1,4 +1,4 @@
-import { mkdir, readdir, rename, rm } from 'node:fs/promises';
+import { copyFile, link, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { checkRange, clipSlug } from './cut.js';
 import { probe } from './probe.js';
@@ -96,4 +96,53 @@ function freeName(taken, name) {
   let free = name;
   for (let n = 2; taken.includes(free); n++) free = `${stem}_${n}${ext}`;
   return free;
+}
+
+/**
+ * Make a part one of the videos, so clips can be cut from it like from any video
+ * (asked for on 2026-11-23). The part stays where it is: the video is a second name
+ * for the same file (a hard link), so it takes no more room and a compilation that
+ * uses the part keeps working; deleting either leaves the other. Where a link
+ * cannot be made (another disk), it is copied.
+ *
+ * @param {{ partsDir: string, inDir: string, name: string }} options   `name`: a part's plain file name
+ * @returns {Promise<{ video: string, linked: boolean, already: boolean }>}
+ *   `video`: its name among the videos; `already`: it was there before
+ */
+export async function partToVideo({ partsDir, inDir, name }) {
+  if (typeof name !== 'string' || name !== path.basename(name) || name.startsWith('.') || path.extname(name).toLowerCase() !== '.mp4') {
+    throw new Error('No such part.');
+  }
+  const part = path.join(partsDir, name);
+  const partInfo = await stat(part).catch(() => null);
+  if (!partInfo?.isFile()) throw new Error('No such part.');
+  await mkdir(inDir, { recursive: true });
+
+  // The same name if it is free, or if it is already this very file; else a number is added.
+  const base = name.slice(0, -4);
+  for (let n = 1; ; n++) {
+    const video = n === 1 ? name : `${base}_${n}.mp4`;
+    const target = path.join(inDir, video);
+    const there = await stat(target).catch(() => null);
+    if (there) {
+      if (there.ino === partInfo.ino && there.dev === partInfo.dev) return { video, linked: true, already: true };
+      continue;
+    }
+    try {
+      await link(part, target);
+      return { video, linked: true, already: false };
+    } catch (error) {
+      if (error.code === 'EEXIST') continue;
+      // Another disk, or a file system without links: a copy, written under a hidden name first.
+      const partial = path.join(inDir, `.${video}.partial`);
+      try {
+        await copyFile(part, partial);
+        await rename(partial, target);
+      } catch (copyError) {
+        await rm(partial, { force: true });
+        throw copyError;
+      }
+      return { video, linked: false, already: false };
+    }
+  }
 }

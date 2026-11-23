@@ -61,6 +61,58 @@ export function loudParts(levels) {
   return parts.map((part) => ({ start: round(part.start), end: round(part.end), louder: Math.round(part.louder) }));
 }
 
+// Loud stretches this close together are one loud moment of a whole video.
+export const LOUD_GAP = 5;
+// How many loud moments of an hour of video are told to the model: the busiest, by loud seconds
+// times dB. A longer video gets this many for each hour (suggest.js).
+export const MAX_LOUD_MOMENTS = 25;
+
+/**
+ * The loudest moments of a whole video, for "Suggest moments" (asked for on 2026-11-23: a
+ * stretch where the streamer shouted and laughed for 20 s was never suggested, because its
+ * words looked ordinary). Loud stretches with gaps of at most LOUD_GAP seconds are one moment;
+ * the busiest MAX_LOUD_MOMENTS are kept, in time order.
+ *
+ * @param {{ start: number, end: number, louder: number }[]} parts   from loudParts
+ * @returns {{ start: number, end: number, peak: number, bursts: number }[]}
+ *   `peak`: dB above usual at the loudest; `bursts`: how many loud stretches it holds
+ */
+export function loudMoments(parts, { gap = LOUD_GAP, top = MAX_LOUD_MOMENTS } = {}) {
+  const groups = [];
+  for (const part of parts) {
+    const last = groups.at(-1);
+    const weight = (part.end - part.start) * part.louder;
+    if (last && part.start - last.end <= gap) {
+      last.end = part.end;
+      last.peak = Math.max(last.peak, part.louder);
+      last.bursts += 1;
+      last.score += weight;
+    } else {
+      groups.push({ start: part.start, end: part.end, peak: part.louder, bursts: 1, score: weight });
+    }
+  }
+  return groups
+    .sort((a, b) => b.score - a.score || a.start - b.start)
+    .slice(0, top)
+    .sort((a, b) => a.start - b.start)
+    .map((group) => ({ start: round(group.start), end: round(group.end), peak: group.peak, bursts: group.bursts }));
+}
+
+/**
+ * The lines about a whole video's loud moments that go after its transcript, or none.
+ *
+ * @param {ReturnType<typeof loudMoments>} moments
+ * @returns {string[]}
+ */
+export function loudMomentLines(moments) {
+  if (moments.length === 0) return [];
+  return [
+    '',
+    'Sound: where the streamer\'s voice is much louder than usual (shouting, screaming, laughing), times in seconds:',
+    ...moments.map((moment) => `[${moment.start.toFixed(1)}-${moment.end.toFixed(1)}] ${moment.bursts} loud ${moment.bursts === 1 ? 'burst' : 'bursts'}, up to ${moment.peak} dB louder than usual`),
+  ];
+}
+
 /**
  * How chat reacted to the clip: counts of each kind of reaction, and where most of
  * them came, on the clip's clock. Commands, poll votes and plain chatter are left

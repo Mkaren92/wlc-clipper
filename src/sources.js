@@ -13,13 +13,16 @@ import { keepCopy } from './backup.js';
  */
 export const SOURCE_STATUSES = ['asked', 'agreed', 'declined'];
 
+/** The addresses a channel can have, for messages. */
+export const ADDRESS_FORMS = 'https://www.youtube.com/@name, https://www.youtube.com/channel/UC... or https://www.twitch.tv/name';
+
 /** How many clubs a streamer can be marked as supporting. */
 export const MAX_CLUBS = 3;
 
 const sourceSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/),
   name: z.string().trim().min(1).max(80),
-  url: z.string().trim().max(200).refine((url) => channelKey(url) !== null, 'give the channel address: https://www.youtube.com/@name or https://www.youtube.com/channel/UC...'),
+  url: z.string().trim().max(200).refine((url) => channelKey(url) !== null, `give the channel address: ${ADDRESS_FORMS}`),
   status: z.enum(SOURCE_STATUSES).default('agreed'),
   // Where and when they answered, in the owner's words. Kept from earlier lists; the page no longer asks for it.
   note: z.string().trim().max(300).default(''),
@@ -33,11 +36,15 @@ const sourcesSchema = z.array(sourceSchema).max(200);
 
 /** @typedef {z.infer<typeof sourceSchema>} Source */
 
+// Twitch's own pages, which look like a channel's address but are not one.
+const TWITCH_PAGES = new Set(['videos', 'directory', 'settings', 'search', 'downloads', 'jobs', 'turbo', 'subscriptions', 'inventory', 'wallet', 'friends', 'messages', 'drops', 'p', 'u', 'login', 'signup', 'store', 'prime', 'clips']);
+
 /**
- * What identifies a channel in its address: its handle or its channel id.
+ * What identifies a channel in its address: a YouTube handle or channel id,
+ * or a Twitch login (added on 2026-11-23; a Twitch channel is its own entry).
  *
  * @param {string} url
- * @returns {{ handle: string } | { channelId: string } | null}
+ * @returns {{ handle: string } | { channelId: string } | { twitch: string } | null}
  */
 export function channelKey(url) {
   let parsed;
@@ -46,28 +53,45 @@ export function channelKey(url) {
   } catch {
     return null;
   }
-  if (parsed.protocol !== 'https:' || !['www.youtube.com', 'youtube.com', 'm.youtube.com'].includes(parsed.hostname)) return null;
+  if (parsed.protocol !== 'https:') return null;
+  if (['www.twitch.tv', 'twitch.tv', 'm.twitch.tv'].includes(parsed.hostname)) {
+    if (parsed.username || parsed.port) return null;
+    const login = /^\/([A-Za-z0-9_]{1,25})\/?$/.exec(parsed.pathname)?.[1].toLowerCase();
+    return login && !TWITCH_PAGES.has(login) ? { twitch: login } : null;
+  }
+  if (!['www.youtube.com', 'youtube.com', 'm.youtube.com'].includes(parsed.hostname)) return null;
   const handle = /^\/(@[\w.-]{1,60})\/?$/.exec(parsed.pathname);
   if (handle) return { handle: handle[1].toLowerCase() };
   const channel = /^\/channel\/(UC[\w-]{22})\/?$/.exec(parsed.pathname);
   return channel ? { channelId: channel[1] } : null;
 }
 
+/** Which site a channel address is on, or null. */
+export function siteOf(url) {
+  const key = channelKey(url);
+  if (!key) return null;
+  return 'twitch' in key ? 'twitch' : 'youtube';
+}
+
 /**
  * The agreed source a video belongs to, or null. The video is matched by its
- * channel's id or handle, which come from the video itself, not from
- * anything typed by a person.
+ * channel's id or handle on YouTube, or its channel's login on Twitch, which
+ * come from the video itself, not from anything typed by a person. A Twitch
+ * channel never matches a YouTube video, nor the other way round.
  *
  * @param {Source[]} sources
- * @param {{ channelId?: string, handle?: string }} video
+ * @param {{ site?: string, channelId?: string, handle?: string, login?: string }} video
  * @returns {Source | null}
  */
 export function agreedSourceOf(sources, video) {
   return sources.find((source) => {
     if (source.status !== 'agreed') return false;
     const key = channelKey(source.url);
-    if (key?.channelId) return key.channelId === video.channelId;
-    return Boolean(key?.handle) && key.handle === (video.handle ?? '').toLowerCase();
+    if (!key) return false;
+    if ('twitch' in key) return video.site === 'twitch' && key.twitch === String(video.login ?? '').toLowerCase();
+    if (video.site === 'twitch') return false;
+    if ('channelId' in key) return key.channelId === video.channelId;
+    return key.handle === (video.handle ?? '').toLowerCase();
   }) ?? null;
 }
 

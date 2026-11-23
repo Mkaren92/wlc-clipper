@@ -1,10 +1,10 @@
 <script setup>
-// Bringing part of a YouTube video, or a whole one up to three hours, into the videos
+// Bringing part of a YouTube or Twitch video, or a whole one up to three hours, into the videos
 // folder (`in/`), from a channel in the sources list. The engine does every check that counts (src/fetch.js);
 // this page runs the same link and range checks first (src/fetchLink.js), so a
 // mistake shows while typing instead of after the job starts.
 import { computed, onMounted, ref } from 'vue';
-import { checkFetchRange, MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoUrl } from '../../../src/fetchLink.js';
+import { checkFetchRange, MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoLink } from '../../../src/fetchLink.js';
 import { formatClock, parseTime } from '../../../src/time.js';
 import { api } from '../api.js';
 import Icon from '../components/Icon.vue';
@@ -20,10 +20,25 @@ const channels = ref([]); // the saved channels that may be fetched from
 const link = ref('');
 const start = ref('');
 const end = ref('');
-// The whole video instead of a part. Its length is known only once YouTube is asked, so the engine checks it.
+// The whole video instead of a part. Its length is known only once the site is asked, so the engine checks it.
 const whole = ref(false);
 const startError = ref('');
 const stopping = ref(false);
+// Transcribe the video for "Suggest moments" straight after downloading it. Remembered in this
+// browser only, as a convenience; on by default.
+const transcribeAfter = ref(true);
+try {
+  transcribeAfter.value = localStorage.getItem('clipper.transcribeAfter') !== 'no';
+} catch {
+  // No storage here: on, as by default.
+}
+function rememberTranscribe() {
+  try {
+    localStorage.setItem('clipper.transcribeAfter', transcribeAfter.value ? 'yes' : 'no');
+  } catch {
+    // Not remembered; it still applies to this download.
+  }
+}
 
 onMounted(async () => {
   try {
@@ -40,7 +55,8 @@ onMounted(async () => {
 const checkedLink = computed(() => {
   if (!link.value.trim()) return { url: null, error: '' };
   try {
-    return { url: videoUrl(link.value), error: '' };
+    const checked = videoLink(link.value);
+    return { url: checked.url, site: checked.site, id: checked.id, error: '' };
   } catch (e) {
     return { url: null, error: e.message };
   }
@@ -49,8 +65,9 @@ const checkedLink = computed(() => {
 // A link to a stream that a channel in the list is broadcasting right now: the engine refuses it,
 // so the page says so before anything is asked. Only what the live store already knows is used.
 const liveChannel = computed(() => {
-  if (!checkedLink.value.url) return null;
-  const id = new URL(checkedLink.value.url).searchParams.get('v');
+  // Only a YouTube stream is known by its video's id; a Twitch broadcast still going is refused by the engine.
+  if (!checkedLink.value.url || checkedLink.value.site !== 'youtube') return null;
+  const id = checkedLink.value.id;
   const entry = Object.entries(live.channels).find(([, stream]) => stream?.live && stream.videoId === id);
   return entry ? (channels.value.find((source) => source.id === entry[0])?.name ?? 'This channel') : null;
 });
@@ -87,7 +104,8 @@ const ready = computed(() => installed.value && channels.value.length > 0 && che
 async function download() {
   startError.value = '';
   try {
-    const job = await api.fetchVideo(whole.value ? { url: checkedLink.value.url, whole: true } : { url: checkedLink.value.url, start: range.value.from, end: range.value.to });
+    const where = whole.value ? { whole: true } : { start: range.value.from, end: range.value.to };
+    const job = await api.fetchVideo({ url: checkedLink.value.url, ...where, transcribe: transcribeAfter.value });
     link.value = '';
     // The side column announces it too, so it is not missed after moving to another page.
     // How it ended is shown below from the job itself, so the promise's own error is not needed here.
@@ -120,10 +138,15 @@ const after = ref(30);
 // counts parts of it already in the videos folder).
 const skipSuggested = ref(false);
 const clipsError = ref('');
+// A Twitch stream's chat, saved by the owner with TwitchDownloader: Twitch does not let the tool read it.
+const chatFile = ref(null);
+const chatFileInput = ref(null);
+const sendingChat = ref(false);
 const checkedStream = computed(() => {
   if (!streamLink.value.trim()) return { url: null, error: '' };
   try {
-    return { url: videoUrl(streamLink.value), error: '' };
+    const checked = videoLink(streamLink.value);
+    return { url: checked.url, site: checked.site, error: '' };
   } catch (e) {
     return { url: null, error: e.message };
   }
@@ -133,11 +156,26 @@ const clipsRunning = computed(() => clipJobs.value.find(isActive));
 const lastClips = computed(() => clipsRunning.value ?? clipJobs.value.at(-1));
 const countOk = computed(() => Number.isInteger(clipCount.value) && clipCount.value >= 1 && clipCount.value <= 20);
 const secondsOk = computed(() => [before.value, after.value].every((n) => Number.isFinite(n) && n >= 1 && n <= 120));
-const clipsReady = computed(() => installed.value && channels.value.length > 0 && checkedStream.value.url && countOk.value && secondsOk.value && !clipsRunning.value);
+const clipsReady = computed(() => installed.value && channels.value.length > 0 && checkedStream.value.url && countOk.value && secondsOk.value && !clipsRunning.value && !sendingChat.value);
+
+function chooseChatFile(event) {
+  chatFile.value = event.target.files?.[0] ?? null;
+  event.target.value = '';
+}
 
 async function getClips() {
   clipsError.value = '';
   try {
+    // A Twitch stream's chat file goes first; without one, a chat imported for this stream before is used.
+    if (checkedStream.value.site === 'twitch' && chatFile.value) {
+      sendingChat.value = true;
+      try {
+        await api.importStreamChat(checkedStream.value.url, chatFile.value.name, chatFile.value);
+      } finally {
+        sendingChat.value = false;
+      }
+      chatFile.value = null;
+    }
     const job = await api.clipsFromChat({ url: checkedStream.value.url, words: words.value, count: clipCount.value, before: before.value, after: after.value, skipSuggested: skipSuggested.value });
     await track(job).catch(() => {});
   } catch (e) {
@@ -161,10 +199,11 @@ async function stopClips() {
     <section class="panel">
       <h2><Icon name="download" /> Download a video</h2>
       <p class="hint first">
-        Paste the link to a YouTube video from one of your channels, and give the part you want, up to
+        Paste the link to a YouTube video, or a Twitch past broadcast (<code>twitch.tv/videos/…</code>), from one of your
+        channels, and give the part you want, up to
         {{ MAX_FETCH_SECONDS / 3600 }} hours, or tick "Whole video" for all of it, up to {{ MAX_WHOLE_SECONDS / 3600 }} hours.
         It is saved in your videos (the <code>in</code> folder), named after the channel, ready to cut. The picture is kept
-        exactly as YouTube sends it, so a part may start a few seconds before the time you give; set the exact start when you cut.
+        exactly as the site sends it, so a part may start a few seconds before the time you give; set the exact start when you cut.
       </p>
 
       <p v-if="loadError" class="error" role="alert">{{ loadError }}</p>
@@ -178,7 +217,7 @@ async function stopClips() {
       <div class="row">
         <div class="wide">
           <label for="dl-link">Link to the video</label>
-          <input id="dl-link" v-model="link" type="text" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" spellcheck="false" />
+          <input id="dl-link" v-model="link" type="text" placeholder="https://www.youtube.com/watch?v=... or https://www.twitch.tv/videos/..." autocomplete="off" spellcheck="false" />
         </div>
         <template v-if="!whole">
           <div class="narrow">
@@ -203,12 +242,20 @@ async function stopClips() {
       </p>
       <p v-if="whole" class="muted length">
         All of it, up to {{ MAX_WHOLE_SECONDS / 3600 }} hours; a longer video is refused before anything is downloaded.
-        Suggestions work on videos up to 60 minutes, so a long one is cut by hand.
+        Suggestions work on videos up to 3 hours.
       </p>
       <template v-else>
         <p v-if="range.error" class="error" role="alert">{{ range.error }}</p>
         <p v-else-if="range.length" class="muted length">{{ formatClock(range.length) }} long</p>
       </template>
+      <label class="check after">
+        <input v-model="transcribeAfter" type="checkbox" @change="rememberTranscribe" />
+        Transcribe it for “Suggest moments” straight after
+      </label>
+      <p class="hint">
+        So the suggestions start at once when you open the video. It runs after the download, in Activity, and can be stopped there;
+        other work waits for it. Videos over 3 hours are skipped, since suggestions do not take them.
+      </p>
       <p v-if="busy && !running" class="muted">Another job is running; this download will wait for it.</p>
       <p v-if="startError" class="error" role="alert">{{ startError }}</p>
     </section>
@@ -244,11 +291,18 @@ async function stopClips() {
         after each one. A moment is where chat <em>reacted</em> (laughing, “W”, “L”, “no way”, “clip it”; commands, poll votes and
         pasted messages do not count) or where viewers pointed in the comments (“3:45:40 the jump scare”). With words, moments
         where they were written come first. An uploaded video has comments but no chat, so it cannot be used here.
+        For a <strong>Twitch</strong> past broadcast, Twitch does not let this tool read the chat: save it with TwitchDownloader as
+        JSON and choose the file here. Twitch has no comments, so the moments come from chat alone.
       </p>
       <div class="row">
         <div class="wide">
           <label for="cc-link">Link to the finished stream</label>
-          <input id="cc-link" v-model="streamLink" type="text" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off" spellcheck="false" />
+          <input id="cc-link" v-model="streamLink" type="text" placeholder="https://www.youtube.com/watch?v=... or https://www.twitch.tv/videos/..." autocomplete="off" spellcheck="false" />
+        </div>
+        <div v-if="checkedStream.site === 'twitch'" class="fixed chat-file">
+          <span class="label-like">Chat file</span>
+          <button type="button" @click="chatFileInput.click()"><Icon name="plus" /> {{ chatFile ? chatFile.name : 'Choose…' }}</button>
+          <input ref="chatFileInput" type="file" accept=".json,application/json" hidden @change="chooseChatFile" />
         </div>
         <div class="wide">
           <label for="cc-words">Words (optional)</label>
@@ -270,6 +324,10 @@ async function stopClips() {
         </div>
       </details>
       <p class="hint">A word from the Football or Gaming words brings its whole group: “goal” also counts gol, golazo and GOOOOL. Separate words with commas.</p>
+      <p v-if="checkedStream.site === 'twitch' && !chatFile" class="hint">
+        No file chosen: a chat imported for this stream before is used, if there is one.
+      </p>
+      <p v-if="sendingChat" class="running" role="status"><span class="spinner" aria-hidden="true" /> Reading the chat file…</p>
       <p v-if="checkedStream.error" class="error" role="alert">{{ checkedStream.error }}</p>
       <p v-if="!countOk" class="error" role="alert">Ask for 1 to 20 clips.</p>
       <p v-if="!secondsOk" class="error" role="alert">The seconds before and after must each be between 1 and 120.</p>
@@ -286,7 +344,7 @@ async function stopClips() {
             <Icon name="check" class="fixed" />
             <span>
               {{ lastClips.result.clips.filter((clip) => clip.name).length }} clips from <strong>{{ lastClips.result.title }}</strong>
-              ({{ lastClips.result.messages }} chat messages and {{ lastClips.result.comments ?? 0 }} comments read)<template v-if="lastClips.result.words.length">;
+              ({{ lastClips.result.messages }} chat messages<template v-if="!/^tw\d+$/.test(lastClips.result.videoId ?? '')"> and {{ lastClips.result.comments ?? 0 }} comments</template> read)<template v-if="lastClips.result.words.length">;
                 {{ lastClips.result.matched }} of them with {{ lastClips.result.words.join(' or ') }}</template>.
               <template v-if="lastClips.result.skipped">{{ lastClips.result.skipped }} {{ lastClips.result.skipped === 1 ? 'part' : 'parts' }} suggested before {{ lastClips.result.skipped === 1 ? 'was' : 'were' }} left out.</template>
             </span>
@@ -349,11 +407,14 @@ async function stopClips() {
 .go { align-self: flex-end; }
 .whole { align-self: flex-end; min-height: 36px; }
 .length { margin: 8px 0 0; }
+.after { margin-top: 10px; }
 .error, .notice { margin-top: 10px; }
 .running { display: inline-flex; align-items: center; gap: 8px; }
 .result.done { border-color: var(--good); }
 .panel .result { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); }
 .tiny { flex: 0 1 90px; }
+.chat-file { display: flex; flex-direction: column; gap: 4px; align-self: flex-end; }
+.label-like { font-size: 13px; font-weight: 550; color: var(--muted); }
 .more { margin-top: 8px; }
 .more summary { cursor: pointer; font-size: 13px; color: var(--muted); }
 .clips { list-style: none; padding: 0; margin: 8px 0 0; }

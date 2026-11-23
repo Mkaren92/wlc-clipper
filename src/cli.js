@@ -164,8 +164,8 @@ program
 
 program
   .command('fetch')
-  .description('Bring part of a YouTube video, or a whole one up to 3 hours, into the videos folder. Only from a channel marked as agreed in the sources list')
-  .argument('<link>', 'link to one YouTube video')
+  .description('Bring part of a YouTube video or Twitch past broadcast, or a whole one up to 3 hours, into the videos folder. Only from a channel marked as agreed in the sources list')
+  .argument('<link>', 'link to one YouTube video, or a Twitch video (https://www.twitch.tv/videos/...)')
   .option('--start <time>', 'start of the part: seconds, mm:ss or hh:mm:ss', timeOption)
   .option('--end <time>', 'end of the part, same formats', timeOption)
   .option('--whole', 'the whole video instead of a part, up to 3 hours')
@@ -219,13 +219,14 @@ program
   .option('--preset <name>', 'event terms from a preset: football or gaming')
   .option('--guidance <text>', 'what a good moment is for this video, in your own words')
   .option('--again', 'ask the AI again even when an answer for the same inputs is kept')
+  .option('--loud', 'also tell it where the streamer\'s voice is much louder than usual (times and decibels only)')
   .action(async (file, options) => {
     const ai = getAi();
     const brief = options.brief ? (await loadBrief(options.brief)).brief : null;
     if (options.terms && options.preset) throw new Error('Give either --terms or --preset, not both.');
     if (options.preset && !Object.hasOwn(PRESETS, options.preset)) throw new Error(`There is no preset named "${options.preset}". Choose ${Object.keys(PRESETS).join(' or ')}.`);
     const terms = options.preset ? PRESETS[options.preset].groups : parseTermGroups(options.terms ? JSON.parse(await readFile(options.terms, 'utf8')) : []);
-    const steps = { transcribing: 'Transcribing the whole video (kept for next time)...', thinking: `Asking ${ai.service} (${ai.model})...` };
+    const steps = { transcribing: 'Transcribing the whole video (kept for next time)...', listening: 'Measuring where the voice gets loud...', thinking: `Asking ${ai.service} (${ai.model})...` };
     const { moments, usage, fromCache, resultFromCache } = await suggestMoments({
       source: file,
       count: options.count,
@@ -237,6 +238,7 @@ program
       terms,
       guidance: options.guidance ?? '',
       force: Boolean(options.again),
+      loud: Boolean(options.loud),
       onStep: (step) => console.log(steps[step] ?? step),
     });
     if (resultFromCache) console.log('Showing the answer kept from an earlier run with the same inputs. Add --again to ask again.');

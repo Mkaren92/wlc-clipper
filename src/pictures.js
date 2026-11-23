@@ -5,41 +5,47 @@
 //
 // This is the second and last thing the tool takes from outside (the first is
 // `fetch`, in fetch.js), and it is as narrow: only the picture of a channel
-// that is in the owner's saved list, and only after the channel YouTube
-// reports for that address is checked to be the one in the list. Whatever
+// that is in the owner's saved list, and only after the channel YouTube (or,
+// since 2026-11-23, Twitch) reports for that address is checked to be the one
+// in the list. Whatever
 // comes back is decoded and drawn again, so nothing but a plain round PNG the
 // tool made itself is ever kept.
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { run } from './run.js';
-import { agreedSourceOf, channelKey, readSources, saveSources } from './sources.js';
+import { ADDRESS_FORMS, agreedSourceOf, channelKey, readSources, saveSources } from './sources.js';
 
 /** @typedef {import('./sources.js').Source} Source */
 
 /** Side of the stored picture in pixels. It is drawn much smaller. */
 export const PICTURE_PIXELS = 256;
-// Where YouTube serves channel pictures from. An address anywhere else is refused.
-const PICTURE_HOSTS = new Set(['yt3.googleusercontent.com', 'yt3.ggpht.com']);
+// Where YouTube and Twitch serve channel pictures from. An address anywhere else is refused.
+// Twitch's was seen on 2026-11-23.
+const PICTURE_HOSTS = new Set(['yt3.googleusercontent.com', 'yt3.ggpht.com', 'static-cdn.jtvnw.net']);
 const MAX_BYTES = 5_000_000;
 
 const pictureDir = (dataDir) => path.join(path.resolve(dataDir), 'source-pictures');
 /** Where a channel's picture is kept. */
 export const pictureFile = (dataDir, sourceId) => path.join(pictureDir(dataDir), `${sourceId}.png`);
 
-/** The plain address of the channel a source names, rebuilt from its handle or id. */
+/** The plain address of the channel a source names, rebuilt from its handle, id or Twitch login. */
 export function channelAddress(source) {
   const key = channelKey(source.url);
   if (!key) throw new Error(`"${source.name}" has no channel address that can be used.`);
-  return `https://www.youtube.com/${key.handle ?? `channel/${key.channelId}`}`;
+  if ('twitch' in key) return `https://www.twitch.tv/${key.twitch}`;
+  return `https://www.youtube.com/${'handle' in key ? key.handle : `channel/${key.channelId}`}`;
 }
 
+/** The site a channel is on, by name, for messages. */
+const siteName = (channel) => (channel?.site === 'twitch' ? 'Twitch' : 'YouTube');
+
 /** Check a picture's address before anything is asked of it. It comes from outside, so it is not trusted. */
-export function checkPictureUrl(address) {
+export function checkPictureUrl(address, site = 'YouTube') {
   let url;
   try {
     url = new URL(String(address));
   } catch {
-    throw new Error('YouTube gave no picture for this channel.');
+    throw new Error(`${site} gave no picture for this channel.`);
   }
   if (url.protocol !== 'https:' || !PICTURE_HOSTS.has(url.hostname) || url.username || url.port) {
     throw new Error('The picture is not at an address this tool takes pictures from.');
@@ -84,7 +90,7 @@ export async function fetchPicture({ source, dataDir, downloader, download = dow
   if (!agreedSourceOf([source], channel)) throw new Error(`The address of "${source.name}" leads to another channel, "${channel.name}". Check it.`);
   // The same answer says how many subscribers the channel has; that is kept even if the picture cannot be had.
   await saveSubscribers(dataDir, source.id, channel.subscribers);
-  const bytes = await download(checkPictureUrl(channel.pictureUrl));
+  const bytes = await download(checkPictureUrl(channel.pictureUrl, siteName(channel)));
 
   const dir = pictureDir(dataDir);
   await mkdir(dir, { recursive: true });
@@ -102,7 +108,7 @@ export async function fetchPicture({ source, dataDir, downloader, download = dow
       '-vf', `scale=${size}:${size}:force_original_aspect_ratio=increase,crop=${size}:${size},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':${disc}`,
       '-f', 'image2', '-c:v', 'png', partial,
     ]).catch(() => {
-      throw new Error(`What YouTube sent for "${source.name}" is not a picture that can be read.`);
+      throw new Error(`What ${siteName(channel)} sent for "${source.name}" is not a picture that can be read.`);
     });
     await rename(partial, pictureFile(dataDir, source.id));
   } finally {
@@ -134,7 +140,7 @@ export async function syncSource({ source, dataDir, downloader, download }) {
   const typed = { id: String(source?.id ?? ''), url: String(source?.url ?? '').trim(), name: String(source?.name ?? '').trim() };
   // The clubs chosen on the row come along, so syncing a row does not lose them. Without any, the saved ones stay.
   const clubs = Array.isArray(source?.clubs) ? source.clubs : null;
-  if (!channelKey(typed.url)) throw new Error('Give the channel address first: https://www.youtube.com/@name or https://www.youtube.com/channel/UC...');
+  if (!channelKey(typed.url)) throw new Error(`Give the channel address first: ${ADDRESS_FORMS}`);
   const saved = await readSources(dataDir);
   const twin = saved.find((other) => other.id !== typed.id && sameChannel(other.url, typed.url));
   if (twin) throw new Error(`This channel is already in your list, as "${twin.name}".`);
@@ -144,7 +150,7 @@ export async function syncSource({ source, dataDir, downloader, download }) {
     throw new Error(`That address leads to another channel, "${tidyName(channel.name)}". Check it.`);
   }
   const name = typed.name || tidyName(channel.name);
-  if (!name) throw new Error('YouTube gave no name for this channel. Type one.');
+  if (!name) throw new Error(`${siteName(channel)} gave no name for this channel. Type one.`);
 
   const at = saved.findIndex((other) => other.id === typed.id);
   const entry = { id: typed.id, name, url: typed.url, status: 'agreed', note: at < 0 ? '' : saved[at].note, clubs: clubs ?? (at < 0 ? [] : saved[at].clubs) };

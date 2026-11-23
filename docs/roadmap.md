@@ -31,17 +31,22 @@ Version 1 of the spec is complete: all three "evenings".
 - A Download page for `fetch`: paste a link and a range or tick "Whole video", with the checks shown while typing, progress, Stop, "Open it to cut", and the reason shown when a fetch had to go the slow way (the form used to be on the Sources page)
 - Channel pictures: the profile picture of each channel in the list, fetched on request and drawn beside its name where it is credited in a compilation; a sync button on a row fills a new channel's name and picture from its address, and each row shows the channel's subscriber count from the last lookup
 - Clips from a stream's chat on the Download page: a finished live stream's link, optional words and a number; the best moments, from where chat reacted (laughing, W, L, "clip it"; not commands, polls or pasted messages) and where viewers pointed in the comments, are downloaded as parts
+- Twitch beside YouTube (2026-11-23): a Twitch channel as its own row in the sources list, with its picture, follower count and LIVE mark; past broadcasts downloaded on the Download page (a part or the whole, up to 3 hours); and chat moments and clips from a broadcast's chat imported as a TwitchDownloader file, since Twitch does not let the tool read a chat itself
 - Suggested moments from the transcript, the chat of a finished stream, or both merged: event terms (with Football and Gaming presets) and guidance that steer both, a chart of the chat, edits, filters, and an optional AI check of chat moments
 - Blur boxes: a part of the frame blurred or blacked out for some seconds, drawn on the cutting screen or with `--blur`
 - A logo overlay for the whole clip: a logo in a corner or a full-frame picture, chosen on the cutting screen, with `--overlay`, or set by a brief (checked)
 - Swear words covered in the captions and the hook (`F*CK`, `SH*T`), and the voice muffled for the length of each such word; two boxes on the cutting screen, both on unless unticked (2026-11-23); the muffle covers the middle 60% of the word
 - Captions where the recogniser first heard nothing: a second pass with its voice filter fills long silences with the words it is sure of (2026-11-23)
+- Faster "Suggest moments" (2026-11-23): a whole video's transcript runs on an NVIDIA card where there is one (a 38-minute video in 52 s instead of about 4 minutes on the home PC's GTX 1660 Ti), and can be made straight after a download so it is ready when the video is opened
+- Suggested moments hear the streamer: "Use where the streamer gets loud" tells the AI where the voice is much louder than usual (2026-11-23), up to 20 moments can be asked for, and videos up to 3 hours (60 minutes before)
+- Clips from a part: "Cut clips from this part" puts a part under Videos (the same file, linked) and opens it on the cutting screen (2026-11-23)
+- Faster clips (2026-11-23): the picture made on an NVIDIA card where there is one, and the blurred background made about 6 times faster on every PC; a 30-second blur clip in about 32 s on the home PC, over a minute before
 - Hook suggestions: "Suggest" beside the hook box proposes three hooks for the clip being set up, about the moment and the feeling rather than the words (2026-11-22): it is given the streamer's name, where the voice is loud, and, when ticked, counts of chat's reactions
 - A channel tag: the streamer's channel (`@theburntpeanut`) drawn at the top for all the footage, with the hook just under it; `--tag`, or the box on the cutting screen, which offers the handle of a fetched video's channel (2026-11-22)
 - Clips from a stream's chat are 1 minute (30 s before and after) since 2026-11-22, and "Skip parts already suggested" gives new parts when asking a stream again
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-578 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube.
+602 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
 
 ## Waiting on the owner
 
@@ -51,6 +56,9 @@ Version 1 of the spec is complete: all three "evenings".
 - **A verdict on caption timing** in continuous speech, judged by eye on real clips. Word starts after pauses were measured, and since 2026-11-22 starts under game sound (the clip "what-just-happened-here", rendered again with the fix): watch it and say whether the captions now land with the shouts.
 - **Whether the `small` speech model is accurate enough.** A larger model needs about 1.5 GB more disk and is slower.
 - **How to keep two downloader runs from rewriting the YouTube sign-in at once.** yt-dlp writes the cookies file back when it ends, and the live check runs beside a fetch or a chat download, so two can write it at the same moment and spoil it. Ways out: run downloader calls one at a time (the live check would then wait behind a long fetch), or hand each call a copy of the file (the rules say never to copy it). Found in review on 2026-11-22; not yet seen to happen.
+
+- **Pull the new code on every PC before adding the first Twitch channel.** A PC with older code cannot read a channels list that has a Twitch address, so its sync would stop with a message until it is updated.
+- **TwitchDownloader**, if Twitch chat is wanted: a free program to save a past broadcast's chat as JSON. It is the owner's to install.
 
 - **Disk space on the first machine.** On 2026-11-23 it was 99% full (2.7 GB free); a long fetch is refused when there is too little room.
 
@@ -82,6 +90,9 @@ Found in a review on 2026-11-22. They are in the pages, which need driving in a 
 - Suggested moments on a real football watchalong with a busy chat (the brief's acceptance check). It was run on a made-up match chat and on the real, quiet chat of one stream; the real service was not used, only a stand-in, so neither the steered prompt nor the AI check of chat moments has been answered by Claude or OpenAI.
 - The blur boxes on the cutting screen, driven in a browser (drawn, moved, resized, timed); the render was measured by tests and a frame of real footage.
 - The overlay controls on the cutting screen, driven in a browser, and a real cut with a brief that sets an overlay. The render was measured by tests and frames; the page only built.
+- Twitch on the pages: the Download page (a Twitch link, the chat file beside "Clips from a stream's chat"), the Sources page (a Twitch row, its sync button, "followers") and the import note on the cutting screen were built, not driven in a browser.
+- Twitch for real beyond one past broadcast: a 1-minute part, the live check, the picture and the follower count were run through the engine on 2026-11-23. A whole broadcast, a broadcast still being recorded, a subscriber-only one, a real TwitchDownloader file and clips from a real Twitch chat were not tried.
+- How long Twitch's web interface keeps answering without a sign-in. If it stops, the LIVE mark, pictures and follower counts for Twitch rows say they could not be had; downloads also depend on it, through the downloader.
 - How YouTube treats a muffled swear word. Its guidelines name only bleeping and muting as obscured. The owner listened to a muffled "What the fuck" on 2026-11-23 and liked it; the rest was measured (see `docs/decisions.md`).
 - The second recogniser pass, beyond the one clip it was built on: whether it ever fills a real silence with words that were not said, and how much longer cuts take.
 - The word list for covering and muffling, in long use: which words it misses, and whether it ever covers a name.
