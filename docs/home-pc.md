@@ -4,6 +4,20 @@ What to do on the home PC so it has the same channels, clubs, logos, sounds and 
 
 The data lives in the private repository https://github.com/Mkaren92/wlc-clipper-data. The code lives in the public one, https://github.com/Mkaren92/wlc-clipper.
 
+## 0. First save the work that is only on the home PC
+
+Work was done at home that was never pushed (among it: text on a clip, such as an @name). It is only on the home PC. Save it before getting the new code:
+
+```bash
+cd ~/wlc-clipper
+git status
+```
+
+- It lists changed files, or says `Your branch is ahead of 'origin/main'`: there is unpushed work. Open Claude Code in that folder and write: **"I have work here that was never pushed. Get the latest main from GitHub, put it together with my work here, run the tests, and commit-push."** Then go on from step 2.
+- It says `nothing to commit, working tree clean` and `Your branch is up to date`: nothing is waiting. Go to step 1.
+
+Do not delete the folder or clone it again before this is done: that would lose the unpushed work.
+
 ## 1. Get the new code
 
 In the terminal (on Windows: the Ubuntu terminal), in the project folder:
