@@ -17,6 +17,7 @@ const props = defineProps({
 const emit = defineEmits(['done']);
 
 const HOOK_LIMIT = 60;
+const TAG_LIMIT = 40;
 const LAYOUTS = [
   { id: 'center', name: 'Center', about: 'Crop a column. Fills the screen.' },
   { id: 'blur', name: 'Blur', about: 'The whole frame, over a blurred copy.' },
@@ -94,6 +95,20 @@ const camPanel = computed(() => {
 const trim = ref(0);
 const hook = ref('');
 const hookSeconds = ref(2.5); // 0 keeps the hook for the whole clip
+// The channel tag, such as "@theburntpeanut", drawn in capitals at the top for the whole clip.
+const tag = ref('');
+// A fetched video's name starts with its channel's file prefix, so the sources list
+// can offer that channel's handle. Only a suggestion: nothing is filled in by itself.
+const tagIdea = ref('');
+// The channel's name from the sources list, which suggested hooks use to say who.
+const sourceName = ref('');
+api.sources().then(({ sources, prefixes }) => {
+  const source = sources.find((one) => prefixes[one.id] && props.video.startsWith(`${prefixes[one.id]}_`));
+  if (!source) return;
+  sourceName.value = source.name;
+  const handle = /\/(@[\w.-]+)\/?$/.exec(source.url)?.[1];
+  tagIdea.value = (handle ?? `@${source.name.replace(/\s+/g, '')}`).slice(0, TAG_LIMIT);
+}, () => {});
 const captions = ref(true);
 const lang = ref('en');
 const brief = ref('');
@@ -154,15 +169,26 @@ const sketch = (top, height) => ({ top: `${(top / OUT_HEIGHT) * 100}%`, height: 
 // --- Hooks from the AI: proposals for the clip being set up, clicked into the hook box ---
 const hookIdeas = ref([]);
 const hookError = ref('');
+const hookUsed = ref(null); // { loud, chat }: what the last request carried besides the words
+// Off unless ticked: counts of chat's reactions in the range are sent, never its messages.
+const hookChat = ref(false);
+// Who the hooks are about: the sources list's name, else the channel tag without its "@".
+const streamerName = computed(() => sourceName.value || tag.value.trim().replace(/^@+/, ''));
 const hookJob = computed(() => jobs.list.find((job) => job.kind === 'hook' && isActive(job) && job.label === props.video));
 async function suggestHook() {
   hookError.value = '';
   hookIdeas.value = [];
+  hookUsed.value = null;
   try {
-    const started = await api.suggestHook({ video: props.video, start: start.value, end: end.value, brief: brief.value, lang: lang.value });
+    const started = await api.suggestHook({
+      video: props.video, start: start.value, end: end.value, brief: brief.value, lang: lang.value,
+      streamer: streamerName.value || undefined, chat: hookChat.value,
+    });
     // The answer is shown here, beside the box; the side column need not announce it as well.
     jobs.dismissed.push(started.id);
-    hookIdeas.value = (await track(started)).hooks;
+    const result = await track(started);
+    hookIdeas.value = result.hooks;
+    hookUsed.value = result.used ?? null;
     if (hookIdeas.value.length === 0) hookError.value = 'No usable hook came back. Try again.';
   } catch (error) {
     hookError.value = error.message;
@@ -260,6 +286,7 @@ const problem = computed(() => {
   if (info.value && endSeconds.value > info.value.duration + 0.05) return 'The end is past the end of the video.';
   if (hook.value.length > HOOK_LIMIT) return `The hook is longer than ${HOOK_LIMIT} characters.`;
   if (typeof hookSeconds.value !== 'number' || hookSeconds.value < 0) return 'The hook time must be 0 or more seconds.';
+  if ([...tag.value.trim()].length > TAG_LIMIT) return `The channel tag is longer than ${TAG_LIMIT} characters.`;
   if (chosenBrief.value && !title.value.trim() && !hook.value.trim()) return 'With a brief, enter a title or a hook.';
   return '';
 });
@@ -273,6 +300,7 @@ const summary = computed(() => {
       LAYOUTS.find((known) => known.id === layout.value).name,
       captions.value ? 'captions' : 'no captions',
       hook.value.trim() ? 'hook' : 'no hook',
+      ...(tag.value.trim() ? ['channel tag'] : []),
       chosenBrief.value ? `brief “${chosenBrief.value.id}”` : 'no brief',
     ].join(' · '),
   };
@@ -373,6 +401,7 @@ async function cut() {
       trim: trim.value || 0,
       hook: hook.value,
       hookSeconds: hookSeconds.value,
+      tag: tag.value,
       captions: captions.value,
       lang: lang.value,
       brief: brief.value,
@@ -656,7 +685,26 @@ async function cut() {
           </div>
           <p v-for="problem in [...new Set(hookIdeas.flatMap((idea) => idea.problems))]" :key="problem" class="fail small-print">Brief: {{ problem }}</p>
           <p v-if="hookError" class="error" role="alert">{{ hookError }}</p>
-          <p class="hint">A hook time of 0 keeps the hook for the whole clip. “Suggest” sends only the words spoken in this range to {{ ai?.service ?? 'the AI' }}; click a hook to use it.</p>
+          <label class="check"><input v-model="hookChat" type="checkbox" /> Let “Suggest” use chat's reactions to this range</label>
+          <p v-if="hookUsed" class="hint" role="status">
+            Based on the words<template v-if="hookUsed.loud">, {{ hookUsed.loud }} loud {{ hookUsed.loud === 1 ? 'moment' : 'moments' }} in the voice</template><template v-if="hookUsed.chat">, {{ hookUsed.chat }} chat {{ hookUsed.chat === 1 ? 'reaction' : 'reactions' }}</template><template v-else-if="hookChat"> (no chat reactions: this video has no chat kept, or none in this range)</template><template v-if="streamerName"> · about {{ streamerName }}</template>.
+          </p>
+          <p class="hint">
+            A hook time of 0 keeps the hook for the whole clip. “Suggest” sends to {{ ai?.service ?? 'the AI' }} the words spoken in this range,
+            <template v-if="streamerName">the streamer's name ({{ streamerName }}), </template>where the voice is much louder than usual (times and decibels, not the sound)<template v-if="hookChat">, and how many chat messages of each kind reacted (not the messages or who wrote them)</template>. Click a hook to use it.
+          </p>
+
+          <div class="option">
+            <label for="tag">
+              Channel tag: the streamer's channel, shown at the top for the whole clip
+              <span class="chip" :class="{ bad: [...tag.trim()].length > TAG_LIMIT }">{{ [...tag.trim()].length }}/{{ TAG_LIMIT }}</span>
+            </label>
+            <div class="joined">
+              <input id="tag" v-model="tag" type="text" placeholder="@channel" :aria-invalid="[...tag.trim()].length > TAG_LIMIT" />
+              <button v-if="tagIdea && tag !== tagIdea" :title="'This video came from ' + tagIdea + ' in the sources list'" @click="tag = tagIdea">Use {{ tagIdea }}</button>
+            </div>
+            <p class="hint">Drawn in capitals, white with a black edge, where the hook would be; the hook then sits just under it. Not shown on the end card.</p>
+          </div>
 
           <div class="row option">
             <label class="check fixed"><input v-model="captions" type="checkbox" /> Burn in captions</label>

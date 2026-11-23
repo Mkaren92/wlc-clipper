@@ -16,6 +16,7 @@ import { formatClock, parseTime } from '../src/time.js';
 import { getTranscriber } from '../src/transcribe/index.js';
 import { combinedFile, readCombination } from '../src/combine/combination.js';
 import { parseTermGroups } from '../src/chat/terms.js';
+import { onVideoClock, readChat } from '../src/chat/chatStore.js';
 import { addCardRoutes } from './cards.js';
 import { addChatRoutes } from './chat.js';
 import { addCombinationRoutes } from './combinations.js';
@@ -69,6 +70,8 @@ const cutRequest = z.strictObject({
   trim: pixels.default(0),
   hook: optionalText,
   hookSeconds: z.number().min(0).default(2.5),
+  // The channel tag; the engine checks its length.
+  tag: optionalText,
   captions: z.boolean().default(true),
   lang: z.string().trim().regex(LANG_PATTERN).default('en'),
   brief: optionalText,
@@ -84,6 +87,10 @@ const hookRequest = z.strictObject({
   end: time,
   brief: optionalText,
   lang: z.string().trim().regex(LANG_PATTERN).default('en'),
+  // The streamer's name, so a hook can say who; typed by the owner or taken from the sources list.
+  streamer: z.string().trim().max(80).optional().transform((text) => text || undefined),
+  // Whether to send counts of chat's reactions in the range (never its messages).
+  chat: z.boolean().default(false),
 });
 
 const suggestRequest = z.strictObject({
@@ -386,11 +393,14 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
   app.post('/api/suggest-hook', async (req, res) => {
     const parsed = hookRequest.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
-    const { video, start, end, brief, lang } = parsed.data;
+    const { video, start, end, brief, lang, streamer, chat: withChat } = parsed.data;
     const source = await videoPath(video);
     const loaded = brief ? (await loadBrief(briefPath(brief))).brief : null;
+    // The chat kept for this video, on its clock. Only counts of its reactions leave the machine.
+    const saved = withChat ? await readChat(dataDir, video) : null;
+    const chat = saved ? onVideoClock(saved) : null;
     const job = jobs.add('hook', video, (onStep) =>
-      suggestHooks({ source, start, end, lang, brief: loaded, ai, onStep, cacheDir: path.join(outDir, '.cache'), transcriber: transcriber ?? getTranscriber() }));
+      suggestHooks({ source, start, end, lang, brief: loaded, streamer, chat, ai, onStep, cacheDir: path.join(outDir, '.cache'), transcriber: transcriber ?? getTranscriber() }));
     res.status(202).json(job);
   });
 

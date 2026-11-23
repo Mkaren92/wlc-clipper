@@ -3,7 +3,7 @@ import { run } from '../run.js';
 /** @typedef {import('../types.js').Word} Word */
 
 // The voice's own band, so game sound and music under it count for less.
-const VOICE_BAND = 'highpass=f=300,lowpass=f=3000';
+export const VOICE_BAND = 'highpass=f=300,lowpass=f=3000';
 // Levels are read in steps of this many seconds.
 export const LEVEL_STEP = 0.05;
 // Only a word longer than this is looked at. A spoken word is rarely longer, and the

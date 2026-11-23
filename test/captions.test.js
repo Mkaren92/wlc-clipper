@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildAss, checkHook, cleanOverlayText } from '../src/captions/ass.js';
+import { buildAss, checkHook, checkTag, cleanOverlayText, tagText } from '../src/captions/ass.js';
 import { displayText, groupWords } from '../src/captions/group.js';
 import { findVoiceLevels, LEVEL_STEP, readVoiceLevels, snapToVoice } from '../src/captions/onsets.js';
 import { findPauses, readPauses, snapToSpeech } from '../src/captions/pauses.js';
@@ -304,6 +304,48 @@ describe('buildAss', () => {
 
   it('has no events without captions or a hook', () => {
     expect(buildAss({ layout: 'center', clipSeconds: 30 })).not.toContain('Dialogue:');
+  });
+
+  it('writes no tag style when there is no tag, so the file is as it was', () => {
+    const ass = buildAss({ hook: 'Look', layout: 'center', clipSeconds: 30 });
+    expect(ass).not.toContain('Style: Tag,');
+    expect(ass).toContain(',8,80,80,240,1\n\n[Events]\n');
+  });
+
+  it('draws the channel tag in capitals for all the footage, with the hook under it', () => {
+    const ass = buildAss({ hook: 'Look', tag: '@theburntpeanut', endCard: { text: 'Bye', seconds: 3 }, layout: 'center', clipSeconds: 30 });
+    const lines = ass.split('\n');
+    const fields = lines.find((line) => line.startsWith('Format: Name')).split(',').length;
+    expect(lines.find((line) => line.startsWith('Style: Tag,')).split(',')).toHaveLength(fields);
+    expect(ass).toContain('Dialogue: 1,0:00:00.00,0:00:30.00,Tag,,0,0,0,,@THEBURNTPEANUT');
+    expect(ass).toContain(',Hook,,0,0,340,,{\\q0}Look');
+    // The end card's text keeps its place at the bottom.
+    expect(ass).toContain('0:00:30.00,0:00:33.00,Hook,,0,0,540,,{\\an2\\q0}Bye');
+  });
+
+  it('puts the tag under the webcam panel in the facecam layout, and the hook under the tag', () => {
+    const ass = buildAss({ hook: 'Look', tag: '@x', layout: 'facecam', clipSeconds: 30, camHeight: 606 });
+    expect(ass).toContain(',Tag,,0,0,636,,@X');
+    expect(ass).toContain(',Hook,,0,0,736,,{\\q0}Look');
+  });
+
+  it('shrinks a long tag so it stays on one line inside the frame', () => {
+    const ass = buildAss({ tag: '@' + 'W'.repeat(39), layout: 'center', clipSeconds: 30 });
+    expect(ass).toMatch(/,Tag,,0,0,0,,\{\\fscx\d+\\fscy\d+\}@W{39}/);
+    expect(buildAss({ tag: '@theburntpeanut', layout: 'center', clipSeconds: 30 })).not.toContain('fscx');
+  });
+});
+
+describe('channel tag text', () => {
+  it('cleans the tag and keeps it as typed', () => {
+    expect(checkTag('  @the{burnt}peanut ')).toBe('@theburntpeanut');
+    expect(tagText('@the_burnt.peanut')).toBe('@THE_BURNT.PEANUT');
+  });
+
+  it('accepts 40 characters and rejects 41, and rejects an empty tag', () => {
+    expect(checkTag('x'.repeat(40))).toHaveLength(40);
+    expect(() => checkTag('x'.repeat(41))).toThrow(/limit is 40/);
+    expect(() => checkTag(' {} ')).toThrow(/empty/);
   });
 });
 

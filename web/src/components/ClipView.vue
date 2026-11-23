@@ -141,6 +141,7 @@ async function render() {
         <span v-else-if="brief" class="chip bad"><Icon name="alert" /> {{ failed }} of {{ checks.length }} checks failed</span>
       </p>
       <p v-if="meta.hook">Hook: “{{ meta.hook }}”</p>
+      <p v-if="meta.tag">Channel tag: {{ meta.tag.toUpperCase() }}</p>
     </header>
 
     <div class="clip">

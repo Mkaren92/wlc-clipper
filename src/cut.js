@@ -4,7 +4,7 @@ import { runChecks } from './brief/check.js';
 import { buildHashtags, buildPostText, parsePostText } from './brief/postText.js';
 import { applyReplacements } from './brief/replacements.js';
 import { loadBrief } from './brief/schema.js';
-import { buildAss, checkHook, cleanOverlayText, HOOK_SECONDS } from './captions/ass.js';
+import { buildAss, checkHook, checkTag, cleanOverlayText, HOOK_SECONDS, tagText } from './captions/ass.js';
 import { groupWords } from './captions/group.js';
 import { findVoiceLevels, snapToVoice } from './captions/onsets.js';
 import { findPauses, snapToSpeech } from './captions/pauses.js';
@@ -61,6 +61,7 @@ const LENGTH_TOLERANCE = 0.1;
  * @param {{ x: number, y: number, width: number, height: number }} [options.cam]
  * @param {string} [options.hook]
  * @param {number} [options.hookSeconds]   how long the hook stays; 0 means the whole clip
+ * @param {string} [options.tag]   the channel tag, such as "@theburntpeanut", shown at the top for the whole clip
  * @param {boolean} [options.captions]
  * @param {string} [options.lang]
  * @param {string} [options.briefFile]
@@ -87,6 +88,7 @@ export async function cut({
   blurs = [],
   hook,
   hookSeconds = HOOK_SECONDS,
+  tag,
   captions = true,
   lang = 'en',
   briefFile,
@@ -101,6 +103,7 @@ export async function cut({
   const info = await probe(sourcePath);
   checkRange(start, end, info.duration);
   const hookText = hook === undefined ? null : checkHook(hook);
+  const tagLine = tag === undefined ? null : checkTag(tag);
   if (!Number.isFinite(hookSeconds) || hookSeconds < 0) {
     throw new Error('The hook time must be 0 or more seconds. 0 keeps the hook for the whole clip.');
   }
@@ -131,7 +134,7 @@ export async function cut({
       seconds: end - start + (brief.endCard?.seconds ?? 0),
       layout,
       ...post,
-      onScreen: onScreenTexts(hookText, brief),
+      onScreen: onScreenTexts(hookText, brief, tagLine),
     }).filter((check) => !check.pass);
     if (failed.length > 0) {
       const lines = failed.map((check) => `  ${check.rule}: ${check.detail}`);
@@ -179,6 +182,7 @@ export async function cut({
     blurs: blurBoxes,
     hook: hookText,
     hookSeconds,
+    tag: tagLine,
     captions: wantCaptions,
     lang,
     briefPath,
@@ -361,8 +365,8 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
     if (groups.length === 0) warnings.push('No speech was found in this range, so the clip has no captions.');
   }
 
-  const shown = onScreenTexts(meta.hook, meta.brief);
-  const subtitles = groups.length > 0 || Boolean(shown.hook || shown.disclosure || shown.endCard);
+  const shown = onScreenTexts(meta.hook, meta.brief, meta.tag);
+  const subtitles = groups.length > 0 || Boolean(shown.hook || shown.disclosure || shown.tag || shown.endCard);
   const subtitlePath = path.join(workDir, SUBTITLE_FILE);
   if (subtitles) {
     const ass = buildAss({
@@ -370,6 +374,7 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
       hook: shown.hook,
       hookSeconds: meta.hookSeconds,
       disclosure: shown.disclosure,
+      tag: shown.tag,
       endCard: shown.endCard ? { text: shown.endCard, seconds: card.seconds } : null,
       layout: meta.layout,
       clipSeconds: seconds,
@@ -464,7 +469,7 @@ async function checkAgainst(clipDir, workDir, meta, brief, clip) {
     ...post,
     // What is drawn comes from the brief the clip was rendered with, even
     // when it is being checked against a different one.
-    onScreen: onScreenTexts(meta.hook, meta.brief),
+    onScreen: onScreenTexts(meta.hook, meta.brief, meta.tag),
     overlay: meta.overlay ?? null,
     words,
     subtitleFile: await readIfExists(path.join(workDir, SUBTITLE_FILE)),
@@ -477,11 +482,13 @@ async function checkAgainst(clipDir, workDir, meta, brief, clip) {
  *
  * @param {string | null} hook
  * @param {Brief | null} brief
+ * @param {string | null} [tag]   the channel tag, checked as it is drawn (in capitals)
  */
-export function onScreenTexts(hook, brief) {
+export function onScreenTexts(hook, brief, tag = null) {
   return {
     hook,
     disclosure: brief?.disclosure.mode === 'onscreen' ? brief.disclosure.text : null,
+    tag: tag ? tagText(tag) : null,
     endCard: brief?.endCard?.text ?? null,
   };
 }
@@ -523,6 +530,8 @@ async function readMeta(workDir) {
     blurs: [],
     hook: null,
     hookSeconds: HOOK_SECONDS,
+    // Nor a channel tag.
+    tag: null,
     captions: false,
     lang: 'en',
     briefPath: null,

@@ -337,7 +337,7 @@ The owner supplied a brief on 2026-11-21: a second source of moments from a fini
 
 The owner explained on 2026-11-21 that the chat feature above was not what they meant: they wanted to paste a finished live stream, give a few words and a number of clips, and get that many short parts of the video around the moments the chat exploded, without downloading the rest. Built as a second section of the Download page; the cutting-screen feature stays.
 
-- **Chosen with the owner:** with words, matches come first and the rest is filled up with the biggest other explosions; the window is measured from 5 s before the chat explodes (chat reacts after the moment), 15 s either side; both kept. On 2026-11-22 the owner asked for 40-second clips instead of 30, so the default is 20 s either side; the 5 s lag is unchanged.
+- **Chosen with the owner:** with words, matches come first and the rest is filled up with the biggest other explosions; the window is measured from 5 s before the chat explodes (chat reacts after the moment), 15 s either side; both kept. On 2026-11-22 the owner asked for 40-second clips instead of 30, so the default became 20 s either side, and the same day for 1-minute clips, so it is now 30 s either side; the 5 s lag is unchanged. Longer clips leave fewer moments that do not overlap, so a stream with explosions close together can give fewer clips than before.
 - **Thresholds that adapt.** The brief's spike thresholds suit a busy chat. Here the moments are "the N biggest", so the thresholds are loosened in four steps until N are found.
 - **Measured on a real stream:** Czechia v Spain watchalong, 2 h 14 min, an agreed channel. Lookup 2.5 s, chat 21 s (1,421 messages, about 10 a minute), choice under 0.1 s, six 30-second parts at 15 to 22 s each: 2 minutes in all.
 - **What that chat said in the chosen windows was read**, and the first version was poor: one or two of six were real moments. A burst of 4 to 6 messages with one "who scored for Belgium??" or "if that goal didn't go in" counted as a goal and went first. A burst now matches only when at least two of its messages hold the words. Replayed on the kept chat: the false matches went, the real goal celebration at 2:09 ("goal", "yesssss", "2+0", "Get innnnn") stayed. Most of that chat's explosions are greetings and side talk, so on such a quiet community chat the method finds few match moments whatever its settings; a busy watchalong was not available to measure.
@@ -392,6 +392,39 @@ From a brief the owner supplied on 2026-11-21: a campaign's logo visible for the
 - **The warnings use the caption area and the bottom 15%** from `src/layout.js`; a test holds the caption area to the subtitle file's margin. A full-frame picture is meant to cover everything and gets no warning.
 - **A brief's overlay is checked by its file's name**, so the same logo found at another path on another machine still passes.
 - **Not verified:** the overlay controls driven in a browser (the page was built; a scratch-dashboard run was stopped by the owner), and a brief with an overlay used for a real cut.
+
+## Channel tag
+
+Asked for on 2026-11-22, with a screenshot of a clip showing "@THEBURNTPEANUT" near the top: text that names the streamer's channel, next to the logo overlay.
+
+- **It is a line in the subtitle file, not a picture**, in its own `Tag` style: the bundled font at 60, white with a 5 px black outline and a soft shadow, so it reads on any footage. Like every drawn text it goes through `cleanOverlayText`. It is drawn in capitals, like the captions, so `src/captions/width.js` can estimate its width; on one line, shrunk to fit a long tag inside the 60 px side margins. Estimated 566 px for `@THEBURNTPEANUT`, drawn 570 px (ffmpeg 4.4.2).
+- **It takes the hook's place at the top** (240 px down, or 30 px under the facecam's webcam panel), and the hook and the disclosure move down by `TAG_STEP` (100 px) while a clip has a tag. Looked at on frames of both layouts: about 20 px between the tag and the hook's box, and the tag stays where it is after the hook ends. A fixed step, not the renderer's stacking, so the tag never moves.
+- **Only for the footage.** The end card has its own text at the bottom; the tag is not drawn on it.
+- **A clip without a tag has the same subtitle file, byte for byte**, as before (compared against the old code): the `Tag` style is written only when there is a tag. Saved as `tag` in `meta.json` (`null` for older clips).
+- **The brief's on-screen rules read it**: a required on-screen term can be in the tag, and a forbidden one is found there.
+- **The page's suggestion comes from the sources list**: a fetched video's name starts with its channel's file prefix, and the channel's address gives its handle. Nothing is looked up, and nothing is filled in without a click.
+- **Not verified:** the tag box driven on the cutting screen in a browser (the page was built only).
+
+## Skipping parts already suggested
+
+On 2026-11-22 the owner found that asking a stream's chat for clips again gave the same parts: "if I don't like either of those and ask again it gives me the same 20". The choice is worked out from the same chat every time, so it repeats by design.
+
+- **A record per stream** of the parts given, in `data/chats/suggested/<YouTube id>.json`. A part is recorded once it has downloaded; one that failed was never seen and can be offered again. It stays on this machine with the chats, which do not travel in "My data".
+- **Parts already in `in/` count too**, read from the tool's own file names (`<channel>_<id>_<from>-<to>.mp4`), so the parts fetched before the record existed are skipped as well.
+- **"Skip" leaves out any moment whose clip would share a second with one of those parts**, before the tiers decide whether there are enough, so the loosening goes on until there are enough new ones. More spike candidates are read when there are parts to skip (60 plus three per part). With the box unticked the choice is what it was (a test compares).
+- **When nothing new is left**, the error says so and how to see the old ones again, rather than "the chat never exploded".
+- **Not verified:** the checkbox on the Download page in a browser (the page was built only), and a real stream asked three times.
+
+## Hooks about the feeling
+
+On 2026-11-22 the owner found the suggested hooks only repeated what the streamer said, and asked for hooks about the feeling ("Keerk loses his mind after completing the mission", "This is the end for Keerk, he will never try it again"). The model had been given the words alone and told to stay "true to what is said".
+
+- **The prompt asks for the moment and the feeling, not a quote**: the reaction, the stakes or a tease, and a question. It may read a feeling, but must not invent events, names or numbers.
+- **The streamer's name** is sent so a hook can say who. It comes from the sources list when the video was fetched from a listed channel, else from the channel tag without its "@". The model is told to use the name rather than he or she.
+- **Where the voice is much louder than usual** is measured here (`src/ai/mood.js`): the voice band (300–3000 Hz, as for caption timing), every 0.5 s, and a stretch counts when it is at least 8 dB over the clip's median, with silence left out of the median. The transcriber drops screams and laughter, so these are often the reactions themselves. Only times and decibels are sent. Loud game sound in the voice band counts too, and the model is told it may be either. On the first 3 minutes of three of the owner's videos it found 4 to 6 stretches each, 8 to 13 dB over. Nobody listened to them to check they are reactions.
+- **Chat's reactions are sent only when ticked**, as counts by kind (laughing, shock, hype, fail, clip it) from `readMessage`, read up to 5 s after the clip for chat's delay, with the busiest 5 s. Never a message's words or its author, which keeps the owner's rule that chat words go out only with the AI check of chat moments.
+- **With no loud stretch and no chat, the request's user text is the transcript alone**, as before. A clip with no words but a loud stretch or chat reactions now gets hooks instead of an error.
+- **Not verified:** hooks from a real model with these inputs (the tests use a stand-in), and the checkbox and its note driven in a browser (the page was built only).
 
 ## Clip folder
 

@@ -150,6 +150,13 @@ describe('runChecks', () => {
   it('needs every on-screen term in the hook, disclosure or end-card text', () => {
     const noCard = { onScreen: { hook: 'He did NOT expect that', disclosure: null, endCard: null } };
     expect(check(noCard)['On-screen text']).toMatchObject({ pass: false, detail: expect.stringContaining('ForgeGUI') });
+    // The channel tag is on-screen text too.
+    expect(check({ onScreen: { ...noCard.onScreen, tag: '@FORGEGUI' } })['On-screen text'].pass).toBe(true);
+  });
+
+  it('finds a forbidden term in the channel tag', () => {
+    const brief = withBrief({ forbiddenTerms: ['scam'] });
+    expect(check({ ...brief, onScreen: { ...base.onScreen, tag: '@THE SCAM' } })['Forbidden terms'].detail).toBe('"scam" is in the channel tag');
   });
 
   it('finds forbidden terms in the post text, the on-screen text and the captions', () => {

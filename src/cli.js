@@ -108,6 +108,7 @@ program
   .option('--trim <pixels>', 'cut this many pixels off every edge of the source first, to remove a frame baked into the recording', pixelOption, 0)
   .option('--hook <text>', 'line shown at the top at the start of the clip')
   .option('--hook-seconds <seconds>', 'how long the hook stays on screen; 0 keeps it for the whole clip', secondsOption, 2.5)
+  .option('--tag <text>', 'the streamer\'s channel, such as @theburntpeanut, shown at the top for the whole clip')
   .option('--no-captions', 'skip transcription and captions')
   .option('--lang <code>', 'language spoken in the video, passed to the transcriber', 'en')
   .option('--brief <file>', 'campaign brief to follow and check the clip against')
@@ -132,6 +133,7 @@ program
         trim: options.trim,
         hook: options.hook,
         hookSeconds: options.hookSeconds,
+        tag: options.tag,
         captions: options.captions,
         lang: options.lang,
         briefFile: options.brief,

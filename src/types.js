@@ -59,6 +59,7 @@
  *   the webcam panel's height in the clip; null for clips made before it followed the box (640)
  * @property {string | null} hook
  * @property {number} hookSeconds   how long the hook stays on screen; 0 means the whole clip
+ * @property {string | null} tag   the channel tag shown at the top for all the footage, as typed; null for none
  * @property {boolean} captions   whether the clip has a transcript to caption from
  * @property {string} lang
  * @property {string | null} briefPath   the brief file the clip was made with

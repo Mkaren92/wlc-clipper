@@ -23,7 +23,7 @@ import { reactionStream, reactionSummary } from './reactions.js';
 import { detectSpikes } from './spikes.js';
 import { compileTerms, matchedLabels, matchTerms, normalizeText, parseTermGroups } from './terms.js';
 
-export const CLIP_DEFAULTS = { count: 6, before: 20, after: 20, lag: 5, maxCount: 20 };
+export const CLIP_DEFAULTS = { count: 6, before: 30, after: 30, lag: 5, maxCount: 20 };
 
 // A chat moment counts as matching the words only when this many of its messages hold
 // them. One mention is chatter: on a real 2-hour watchalong (2026-11-21), bursts of 4 to 6
@@ -84,20 +84,27 @@ function ranks(items, score) {
  * @param {number} [options.before]   seconds before the moment
  * @param {number} [options.after]    seconds after it
  * @param {number} [options.lag]      how much earlier than the chat a chat moment is taken to be
+ * @param {Array<{ start: number, end: number }>} [options.skip]
+ *   parts already suggested (in the stream's seconds): no moment that would share a second with one is chosen
  */
-export function pickChatMoments(messages, { duration, groups = [], comments = [], count = CLIP_DEFAULTS.count, before = CLIP_DEFAULTS.before, after = CLIP_DEFAULTS.after, lag = CLIP_DEFAULTS.lag }) {
+export function pickChatMoments(messages, { duration, groups = [], comments = [], count = CLIP_DEFAULTS.count, before = CLIP_DEFAULTS.before, after = CLIP_DEFAULTS.after, lag = CLIP_DEFAULTS.lag, skip = [] }) {
   const want = Math.max(1, Math.min(CLIP_DEFAULTS.maxCount, Math.floor(count)));
   const words = groups.length > 0 ? compileTerms(groups) : null;
   const wordMatch = (text) => Boolean(words && matchedLabels(text, words).length > 0);
   const stream = reactionStream(messages, { wordMatch });
-  const fromComments = commentMoments(commentMarks(comments, duration));
+  // A moment's clip runs from `before` ahead of its first second to `after` past its last.
+  const taken = (from, until) => skip.some((part) => from - before < part.end && part.start < until + after);
+  const fromComments = commentMoments(commentMarks(comments, duration)).filter((moment) => !taken(moment.at, moment.until));
 
   // Chat moments: bursts of reactions. A label comes only from enough messages with the words.
+  // With parts to skip, more candidates are read, so that as many new ones can be found.
+  const maxCandidates = 60 + 3 * skip.length;
   const chat = [];
   for (const tier of TIERS) {
-    const candidates = detectSpikes(stream, { duration, terms: groups, termMode: groups.length > 0 ? 'boost' : 'off', maxCandidates: 60, ...tier });
+    const candidates = detectSpikes(stream, { duration, terms: groups, termMode: groups.length > 0 ? 'boost' : 'off', maxCandidates, ...tier });
     for (const candidate of candidates) {
       const at = Math.max(0, candidate.eventStart - lag);
+      if (taken(at, at)) continue;
       if (chat.some((one) => Math.abs(one.at - at) < before + after)) continue;
       const label = candidate.label && (candidate.termCounts?.[candidate.label] ?? 0) >= MIN_MATCHING_MESSAGES ? candidate.label : null;
       chat.push({ at, score: candidate.score, peakRatio: candidate.peakRatio, label });
@@ -144,6 +151,8 @@ export function pickChatMoments(messages, { duration, groups = [], comments = []
   const chosen = [];
   for (const item of ranked) {
     if (chosen.length >= want) break;
+    // A chat moment moved onto a comment's time may now reach a part already suggested.
+    if (taken(item.at, item.until)) continue;
     // Never two clips that share a second.
     if (chosen.some((other) => item.at - before < other.until + after && other.at - before < item.until + after)) continue;
     chosen.push(item);

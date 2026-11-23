@@ -22,6 +22,31 @@ export const CAPTION_SIZE = 76;
 const EM_PIXELS = 66.5;
 const OUTLINE_PIXELS = 12;
 
+// The channel tag: smaller than the captions, with a thinner outline.
+export const TAG_SIZE = 60;
+export const TAG_OUTLINE = 5;
+
+/**
+ * Estimated width of a channel tag (in capitals) on the 1080 px wide frame.
+ * One em scales with the size from the caption's measured 66.5 px at 76.
+ *
+ * @param {string} text   upper-case tag text
+ * @returns {number} pixels
+ */
+export function tagWidth(text) {
+  return Math.round((units(text) * EM_PIXELS * TAG_SIZE) / CAPTION_SIZE / 1000) + 2 * TAG_OUTLINE;
+}
+
+// Handles often hold a dot or an underscore. Only the tag counts them at their real
+// width, so a caption is shrunk exactly as it was before the tag existed.
+const TAG_ADVANCE = { ...ADVANCE, '.': 278, _: 556 };
+
+function units(text) {
+  let total = 0;
+  for (const char of text) total += TAG_ADVANCE[char] ?? (char >= '0' && char <= '9' ? DIGIT : WIDEST);
+  return total;
+}
+
 /**
  * Estimated width of a caption line on the 1080 px wide frame.
  *

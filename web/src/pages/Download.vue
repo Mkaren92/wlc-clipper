@@ -114,8 +114,11 @@ async function stop() {
 const streamLink = ref('');
 const words = ref('');
 const clipCount = ref(6);
-const before = ref(20);
-const after = ref(20);
+const before = ref(30);
+const after = ref(30);
+// Leave out the parts of this stream given before (the engine keeps the list, and
+// counts parts of it already in the videos folder).
+const skipSuggested = ref(false);
 const clipsError = ref('');
 const checkedStream = computed(() => {
   if (!streamLink.value.trim()) return { url: null, error: '' };
@@ -135,7 +138,7 @@ const clipsReady = computed(() => installed.value && channels.value.length > 0 &
 async function getClips() {
   clipsError.value = '';
   try {
-    const job = await api.clipsFromChat({ url: checkedStream.value.url, words: words.value, count: clipCount.value, before: before.value, after: after.value });
+    const job = await api.clipsFromChat({ url: checkedStream.value.url, words: words.value, count: clipCount.value, before: before.value, after: after.value, skipSuggested: skipSuggested.value });
     await track(job).catch(() => {});
   } catch (e) {
     clipsError.value = e.message;
@@ -257,6 +260,8 @@ async function stopClips() {
         </div>
         <button class="fixed primary go" :disabled="!clipsReady" @click="getClips"><Icon name="download" /> Get the clips</button>
       </div>
+      <label class="check"><input v-model="skipSuggested" type="checkbox" /> Skip parts already suggested for this stream</label>
+      <p class="hint">For new moments when you did not like the last ones: every part of this stream given to you before, and every part of it already in your videos, is left out.</p>
       <details class="more">
         <summary>Seconds before and after</summary>
         <div class="row">
@@ -283,12 +288,17 @@ async function stopClips() {
               {{ lastClips.result.clips.filter((clip) => clip.name).length }} clips from <strong>{{ lastClips.result.title }}</strong>
               ({{ lastClips.result.messages }} chat messages and {{ lastClips.result.comments ?? 0 }} comments read)<template v-if="lastClips.result.words.length">;
                 {{ lastClips.result.matched }} of them with {{ lastClips.result.words.join(' or ') }}</template>.
+              <template v-if="lastClips.result.skipped">{{ lastClips.result.skipped }} {{ lastClips.result.skipped === 1 ? 'part' : 'parts' }} suggested before {{ lastClips.result.skipped === 1 ? 'was' : 'were' }} left out.</template>
             </span>
           </p>
           <p v-if="lastClips.result.words.length && lastClips.result.matched < lastClips.result.asked" class="muted">
             Only {{ lastClips.result.matched }} {{ lastClips.result.matched === 1 ? 'explosion was' : 'explosions were' }} with your words, so the rest are the biggest other explosions.
           </p>
-          <p v-if="lastClips.result.clips.length < lastClips.result.asked" class="notice">
+          <p v-if="lastClips.result.clips.length < lastClips.result.asked && lastClips.result.skipped" class="notice">
+            You asked for {{ lastClips.result.asked }}, but only {{ lastClips.result.clips.length }} new
+            {{ lastClips.result.clips.length === 1 ? 'moment is' : 'moments are' }} left once the {{ lastClips.result.skipped }} parts suggested before are left out.
+          </p>
+          <p v-else-if="lastClips.result.clips.length < lastClips.result.asked" class="notice">
             You asked for {{ lastClips.result.asked }}, but only {{ lastClips.result.clips.length }}
             {{ lastClips.result.clips.length === 1 ? 'moment stood' : 'moments stood' }} out. Even with the loosest settings, a moment needs
             at least two people reacting at once, and this stream's chat has only {{ lastClips.result.messages }} messages<template v-if="(lastClips.result.comments ?? 0) < 10">

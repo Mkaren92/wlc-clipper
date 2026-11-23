@@ -24,8 +24,9 @@ const clipsRequest = z.strictObject({
   url: z.string().min(1).max(300),
   words: z.string().max(300).default(''),
   count: z.number().int().min(1).max(20).default(6),
-  before: z.number().min(1).max(120).default(20),
-  after: z.number().min(1).max(120).default(20),
+  before: z.number().min(1).max(120).default(30),
+  after: z.number().min(1).max(120).default(30),
+  skipSuggested: z.boolean().default(false),
 });
 const checkRequest = z.strictObject({
   candidates: z.array(z.strictObject({ start: z.number().finite().min(0), end: z.number().finite().min(0), label: z.string().max(40).nullable(), needsReview: z.boolean().optional() })).max(20),

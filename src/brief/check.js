@@ -16,7 +16,7 @@ import { formatClock } from '../time.js';
  * @property {string} title
  * @property {string} description
  * @property {string[]} hashtags     as they stand in post.txt
- * @property {{ hook?: string | null, disclosure?: string | null, endCard?: string | null }} onScreen
+ * @property {{ hook?: string | null, disclosure?: string | null, tag?: string | null, endCard?: string | null }} onScreen
  *   text drawn over the picture
  * @property {Word[] | null} [words]            the transcript, once there is one
  * @property {string | null} [subtitleFile]     contents of captions.ass, once written
@@ -86,12 +86,12 @@ const RULES = [
   function onScreenText({ brief, onScreen }) {
     const terms = brief.onScreenTextMustInclude;
     if (terms.length === 0) return null;
-    const shown = [onScreen.hook, onScreen.disclosure, onScreen.endCard].filter(Boolean).join('\n');
+    const shown = [onScreen.hook, onScreen.disclosure, onScreen.tag, onScreen.endCard].filter(Boolean).join('\n');
     const missing = terms.filter((term) => !containsTerm(shown, term));
     return result(
       'On-screen text',
       missing.length === 0,
-      `not found in the hook, disclosure or end-card text: ${missing.join(', ')}`,
+      `not found in the hook, disclosure, channel tag or end-card text: ${missing.join(', ')}`,
     );
   },
 
@@ -103,6 +103,7 @@ const RULES = [
       ['the description', description],
       ['the hook', onScreen.hook],
       ['the on-screen disclosure', onScreen.disclosure],
+      ['the channel tag', onScreen.tag],
       ['the end-card text', onScreen.endCard],
     ];
     const found = [];

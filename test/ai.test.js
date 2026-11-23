@@ -119,7 +119,7 @@ describe('suggestMoments', () => {
     expect(result.moments).toHaveLength(1);
     expect(result.moments[0]).toMatchObject({ start: 0, end: 5.75, hook: 'Not a scam' });
     expect(result.moments[0].problems).toEqual([
-      'On-screen text: not found in the hook, disclosure or end-card text: ForgeGUI',
+      'On-screen text: not found in the hook, disclosure, channel tag or end-card text: ForgeGUI',
       'Forbidden terms: "scam" is in the hook',
     ]);
 
@@ -315,12 +315,35 @@ describe('hook suggestions', () => {
     const hooks = tidyHooks([`"${long}"`, 'Not a {\\b1}scam', 'not a scam', '', 42, 'ForgeGUI did it'], brief);
     expect(hooks[0].text.length).toBeLessThanOrEqual(60);
     expect(hooks[0].text.startsWith('This is a very long hook')).toBe(true);
-    expect(hooks[1]).toEqual({ text: 'Not a b1scam', problems: ['On-screen text: not found in the hook, disclosure or end-card text: ForgeGUI'] });
+    expect(hooks[1]).toEqual({ text: 'Not a b1scam', problems: ['On-screen text: not found in the hook, disclosure, channel tag or end-card text: ForgeGUI'] });
     // The third proposal repeats nothing new, so at most three distinct hooks are kept.
     expect(hooks.map((hook) => hook.text)).toEqual([hooks[0].text, 'Not a b1scam', 'not a scam']);
     expect(hooks[2].problems.some((problem) => problem.startsWith('Forbidden terms: "scam"'))).toBe(true);
     expect(tidyHooks('nonsense')).toEqual([]);
   });
+
+  it('tells the model who the streamer is, where the voice is loud and how chat reacted, never the messages', async () => {
+    // Quiet talk at a steady level, then a shout from 2 to 3 s.
+    const loudSource = path.join(dir, 'loud.mp4');
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30',
+      '-f', 'lavfi', '-i', "aevalsrc='if(between(t,2,3),0.9,0.03)*sin(2*PI*800*t)':s=48000", '-t', '6',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', loudSource]);
+    asked.length = 0;
+    const chat = [
+      { t: 3.5, author: 'a', text: 'LMAOOO' }, { t: 4, author: 'b', text: 'no way' }, { t: 4.2, author: 'c', text: 'KEKW' },
+      { t: 4.4, author: 'd', text: '!points' }, { t: 4.6, author: 'e', text: 'secret words of a viewer' },
+    ];
+    const result = await suggestHooks({ source: loudSource, start: 1, end: 5, streamer: '@Keerk', chat, cacheDir: path.join(dir, 'none3'), transcriber, ai: ai({ hooks: ['Keerk loses it'] }) });
+    const [request] = asked;
+    expect(request.system).toContain('The streamer is called Keerk.');
+    expect(request.user).toMatch(/^Transcript:\n\[0\.2-1\.4\] He really did that\./);
+    // The shout is at 1-2 s on the clip's clock.
+    expect(request.user).toMatch(/\n\[1\.0-2\.0\] \d+ dB louder than usual/);
+    // "no way" is shock and fail in chat's word lists.
+    expect(request.user).toContain("Chat's reactions to this clip (messages counted by kind): laughing 2, shock 1, fail 1.");
+    expect(request.user + request.system).not.toMatch(/LMAOOO|KEKW|secret words|points|author/);
+    expect(result.used).toEqual({ loud: 1, chat: 3 });
+  }, 60_000);
 
   it('says what is missing, in its own words', async () => {
     await expect(suggestHooks({ source, start: 1, end: 4, cacheDir: dir, transcriber, ai: { ...ai({}), isConfigured: () => false } })).rejects.toThrow('Set it up.');

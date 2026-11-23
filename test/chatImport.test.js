@@ -93,7 +93,7 @@ describe('keeping and fetching a chat', () => {
   };
 
   it('reads where a fetched part came from out of its name', () => {
-    expect(fetchedOrigin('papillon_pkStu8LFpq8_1h02m00s-1h05m00s.mp4')).toEqual({ videoId: 'pkStu8LFpq8', offset: 3720, link: 'https://www.youtube.com/watch?v=pkStu8LFpq8' });
+    expect(fetchedOrigin('papillon_pkStu8LFpq8_1h02m00s-1h05m00s.mp4')).toEqual({ videoId: 'pkStu8LFpq8', offset: 3720, end: 3900, link: 'https://www.youtube.com/watch?v=pkStu8LFpq8' });
     expect(fetchedOrigin('papillon_pkStu8LFpq8_0m40s-19m29s_2.mp4')?.offset).toBe(40);
     expect(fetchedOrigin('my-own-video.mp4')).toBeNull();
   });

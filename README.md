@@ -215,7 +215,7 @@ The **Download** page (its own button in the left column) brings a part of a You
 
 The file is named after the channel, the video and the range, such as `channel-name_<video id>_1h02m00s-1h05m00s.mp4`; a whole video is named from 0 to its length, such as `channel-name_<video id>_0m00s-1h31m10s.mp4`. It then works like any other video in `in/`. When you add it to a compilation, its credit is filled in with the channel's name, and `description.txt` lists that channel's link next to the credit.
 
-**Clips from a stream's chat**, the second section of the Download page, works the other way round: paste the link of a **finished live stream**, optionally a few words (`goal, penalty`), and how many clips you want (6), and press "Get the clips". The tool reads the stream's chat and its top comments (not the video), finds its best moments, and downloads only those parts: 20 seconds before to 20 seconds after each one (15 and 15 until 2026-11-22). Change the seconds under "Seconds before and after".
+**Clips from a stream's chat**, the second section of the Download page, works the other way round: paste the link of a **finished live stream**, optionally a few words (`goal, penalty`), and how many clips you want (6), and press "Get the clips". The tool reads the stream's chat and its top comments (not the video), finds its best moments, and downloads only those parts: 30 seconds before to 30 seconds after each one, so 1-minute clips (15 and 15 at first, 20 and 20 for 40-second clips, then 30 and 30 on 2026-11-22). Change the seconds under "Seconds before and after".
 
 A best moment is found two ways:
 
@@ -228,6 +228,7 @@ A best moment is found two ways:
 - **A quiet chat** is handled too: the tool asks less of it until it finds enough moments, but a chat of a few messages a minute is mostly greetings and side talk, so it finds fewer real moments. Only the words and like counts of comments are used, never who wrote them.
 - **Only a finished live stream has a chat.** An uploaded video has comments, not chat, and is refused with a message saying so.
 - The clips are ordinary videos in `in/`, named by the stream and their time, such as `papillon_<id>_2h09m15s-2h09m45s.mp4`, with an "Open" button for each. The stream's chat is kept (`data/chats/youtube-<id>.json`), so asking again, or fetching the chat of one of these clips on the cutting screen, does not download it again.
+- Asking again gives the same parts, since they come from the same chat. Tick **"Skip parts already suggested for this stream"** for new ones: every part of that stream you were given before (kept in `data/chats/suggested/<id>.json`, on this computer only), and every part of it already in `in/`, is left out, and the next-best moments are taken instead. When none are left, it says so.
 
 On a 2 h 14 min watchalong, six clips took 2 minutes: 21 s to read 1,421 chat messages, then 15 to 22 s a clip. Reading the comments takes a few seconds. A busy chat takes longer to read: an 11-hour stream with 54,000 messages took tens of minutes, because the downloader reads the chat replay in order, piece by piece.
 
@@ -304,7 +305,7 @@ Two optional features use an AI service. Everything else works without them.
 
 - **Suggested moments:** proposes ranges worth clipping, each with a reason, a hook, a title and a description. They can also come from a finished stream's chat, found on your computer (see [Moments from the chat](#moments-from-the-chat)).
 - **Caption fixes:** proposes corrections for words the transcriber misheard, such as names.
-- **Hooks:** "Suggest" beside the hook box on the cutting screen proposes three hooks for the clip you are setting up, from the words spoken in its range. Click one to put it in the box; change it as you like. It uses the whole-video transcript if one was already made, and otherwise transcribes only the range (a few seconds). With a brief, a hook that breaks one of its rules (a word the screen must show, a forbidden word) is marked.
+- **Hooks:** "Suggest" beside the hook box on the cutting screen proposes three hooks for the clip you are setting up, about the moment and how the streamer feels rather than what they say: one about the reaction, one about the stakes, one question. It is given the words spoken in the range, the streamer's name (from the sources list, or the channel tag), where the voice is much louder than usual (measured on your computer; only times and decibels are sent, never the sound), and, if you tick "Let Suggest use chat's reactions", how many chat messages of each kind (laughing, shock, hype, fail) reacted to the range (never the messages or who wrote them). Click one to put it in the box; change it as you like. It uses the whole-video transcript if one was already made, and otherwise transcribes only the range (a few seconds). With a brief, a hook that breaks one of its rules (a word the screen must show, a forbidden word) is marked.
 
 Both only propose. Nothing is cut, saved or rendered until you press the button yourself.
 
@@ -410,6 +411,7 @@ Every command has built-in help: `node src/cli.js cut --help`.
 | `--trim <pixels>` | Cut this many pixels off every edge of the source first | `0` |
 | `--hook <text>` | Line shown at the top at the start of the clip, up to 60 characters | none |
 | `--hook-seconds <seconds>` | How long the hook stays on screen; `0` keeps it for the whole clip | `2.5` |
+| `--tag <text>` | The streamer's channel, such as `@theburntpeanut`, up to 40 characters, drawn in capitals at the top for all the footage (not on the end card). The hook then sits just under it. On the cutting screen, a video fetched from a channel in the sources list offers that channel's handle with one click | none |
 | `--no-captions` | Skip transcription and captions | captions on |
 | `--lang <code>` | Language spoken in the video | `en` |
 | `--brief <file>` | Campaign brief to follow and check the clip against | none |

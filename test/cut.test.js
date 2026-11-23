@@ -316,6 +316,26 @@ describe('captions and hook', () => {
     await expect(cut({ source, start: 1, end: 2, hook: 'x', hookSeconds: -1, outDir: dir, toolVersion: 'test' })).rejects.toThrow(/0 or more/);
   }, 120_000);
 
+  it('draws a channel tag, saves it, and keeps it on a render', async () => {
+    const { clipDir, meta } = await cut({
+      source, start: 1, end: 3, tag: ' @theburntpeanut ', hook: 'Watch this', captions: false,
+      outDir: path.join(dir, 'out-tag'), toolVersion: 'test', transcriber: fakeTranscriber,
+    });
+    expect(meta.tag).toBe('@theburntpeanut');
+    const assFile = path.join(clipDir, 'work', 'captions.ass');
+    expect(await readFile(assFile, 'utf8')).toContain('0:00:00.00,0:00:02.00,Tag,,0,0,0,,@THEBURNTPEANUT');
+    // The tag is white on black footage: its rows near the top are bright after the hook has gone.
+    const again = await rerender(clipDir);
+    expect(again.meta.tag).toBe('@theburntpeanut');
+    expect(await readFile(assFile, 'utf8')).toContain(',Tag,');
+    const { stdout } = await run('ffmpeg', [
+      '-hide_banner', '-loglevel', 'error', '-ss', '1.5', '-i', path.join(clipDir, 'clip.mp4'), '-frames:v', '1',
+      '-vf', 'crop=1080:120:0:230,signalstats,metadata=print:key=lavfi.signalstats.YMAX:file=-', '-f', 'null', '-',
+    ]);
+    expect(Number(/YMAX=(\d+)/.exec(stdout)[1])).toBeGreaterThan(200);
+    await expect(cut({ source, start: 1, end: 2, tag: 'x'.repeat(41), outDir: dir, toolVersion: 'test' })).rejects.toThrow(/limit is 40/);
+  }, 120_000);
+
   it('makes the clip without captions when the transcriber is not installed', async () => {
     const { meta, warnings } = await cut({
       source, start: 1, end: 2, outDir: path.join(dir, 'out-not-installed'), toolVersion: 'test',

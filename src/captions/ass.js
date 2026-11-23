@@ -1,6 +1,6 @@
 import { CAM_HEIGHT, OUT_HEIGHT, OUT_WIDTH } from '../layout.js';
 import { formatAssTime } from '../time.js';
-import { CAPTION_SIZE, captionWidth } from './width.js';
+import { CAPTION_SIZE, captionWidth, TAG_OUTLINE, TAG_SIZE, tagWidth } from './width.js';
 
 // The bundled font. The file sits in assets/fonts, and the name here must
 // match the family name inside it.
@@ -10,6 +10,8 @@ export const FONT_FILE = 'LiberationSans-Bold.ttf';
 export const HOOK_SECONDS = 2.5;
 export const HOOK_MAX_CHARS = 60;
 export const DISCLOSURE_SECONDS = 3;
+// The channel tag ("@THEBURNTPEANUT"), asked for on 2026-11-22: one line naming the streamer.
+export const TAG_MAX_CHARS = 40;
 
 // Top margin of the hook. Its white box reaches 18 px above the text, so 240
 // keeps the box below the top 200 px of the frame.
@@ -24,6 +26,10 @@ const CAPTION_MAX_WIDTH = OUT_WIDTH - 2 * CAPTION_SIDE_MARGIN;
 // End-card text sits where captions do. Its box reaches 18 px below the
 // text, so the margin is a little larger to end at the same height.
 const CARD_TEXT_MARGIN = CAPTION_MARGIN + 20;
+// The tag takes the hook's place at the top, and the hook and the disclosure move
+// down by this much so that neither touches it (see docs/decisions.md).
+export const TAG_STEP = 100;
+const TAG_MAX_WIDTH = OUT_WIDTH - 2 * CAPTION_SIDE_MARGIN;
 
 // Colours are &HAABBGGRR. Caption: white with a black outline, bottom centre.
 // Hook: black on a white box (BorderStyle 3), top centre.
@@ -37,9 +43,13 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Caption,${FONT_NAME},${CAPTION_SIZE},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,${CAPTION_SIDE_MARGIN},${CAPTION_SIDE_MARGIN},${CAPTION_MARGIN},1
-Style: Hook,${FONT_NAME},64,&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,18,0,8,80,80,${HOOK_MARGIN},1
+Style: Hook,${FONT_NAME},64,&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,18,0,8,80,80,${HOOK_MARGIN},1`;
 
-[Events]
+// Channel tag: white with a black outline and a soft shadow, top centre. Only
+// written when a clip has a tag, so every other subtitle file is as it was.
+const TAG_STYLE = `Style: Tag,${FONT_NAME},${TAG_SIZE},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,${TAG_OUTLINE},3,8,${CAPTION_SIDE_MARGIN},${CAPTION_SIDE_MARGIN},${HOOK_MARGIN},1`;
+
+const EVENTS = `[Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`;
 
 /**
@@ -52,18 +62,25 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
  * @param {string | null} [options.hook]
  * @param {number} [options.hookSeconds]   how long the hook stays; 0 means the whole clip
  * @param {string | null} [options.disclosure]   shown at the top for the first 3 seconds
+ * @param {string | null} [options.tag]   the channel tag, shown at the top for all the footage
  * @param {{ text: string, seconds: number } | null} [options.endCard]
  *   text shown on the card, which follows the footage
  * @param {string} options.layout
  * @param {number} options.clipSeconds   length of the footage, without the card
  * @returns {string}
  */
-export function buildAss({ groups = [], hook = null, hookSeconds = HOOK_SECONDS, disclosure = null, endCard = null, layout, clipSeconds, camHeight = CAM_HEIGHT }) {
-  const lines = [HEADER];
+export function buildAss({ groups = [], hook = null, hookSeconds = HOOK_SECONDS, disclosure = null, tag = null, endCard = null, layout, clipSeconds, camHeight = CAM_HEIGHT }) {
+  const lines = [HEADER, ...(tag ? [TAG_STYLE] : []), '', EVENTS];
 
   // 0 means "use the style's margin". \q0 lets these lines wrap; captions
   // never wrap (WrapStyle 2) because their groups are short by construction.
-  const topMargin = layout === 'facecam' ? camHeight + HOOK_BELOW_CAM : 0;
+  const tagMargin = layout === 'facecam' ? camHeight + HOOK_BELOW_CAM : 0;
+  // Under a tag the hook and the disclosure start one tag line lower.
+  const topMargin = tag ? (tagMargin || HOOK_MARGIN) + TAG_STEP : tagMargin;
+  if (tag) {
+    // For all the footage, never on the end card (it is not footage). It never wraps.
+    lines.push(event(1, 0, clipSeconds, 'Tag', tagMargin, fitTag(tagText(tag))));
+  }
   // The disclosure is written first: when two top lines are on screen
   // together, the renderer puts the earlier event above the later one.
   if (disclosure) {
@@ -115,6 +132,34 @@ export function checkHook(text) {
     );
   }
   return hook;
+}
+
+/**
+ * Check a channel tag before any work starts.
+ *
+ * @param {string} text   such as "@theburntpeanut"
+ * @returns {string} the cleaned tag, as typed; it is drawn in capitals
+ */
+export function checkTag(text) {
+  const tag = cleanOverlayText(text);
+  if (!tag) throw new Error('--tag is empty.');
+  if ([...tag].length > TAG_MAX_CHARS) {
+    throw new Error(`--tag is ${[...tag].length} characters; the limit is ${TAG_MAX_CHARS}, which is one line on screen.`);
+  }
+  return tag;
+}
+
+/** The tag as it is drawn: in capitals, like the captions. */
+export function tagText(tag) {
+  return cleanOverlayText(tag).toUpperCase();
+}
+
+/** The tag never wraps; a long one is shrunk to fit inside the side margins. */
+function fitTag(text) {
+  const width = tagWidth(text);
+  if (width <= TAG_MAX_WIDTH) return text;
+  const percent = Math.floor((TAG_MAX_WIDTH / width) * 100);
+  return `{\\fscx${percent}\\fscy${percent}}${text}`;
 }
 
 /**

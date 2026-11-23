@@ -114,7 +114,7 @@ describe('moments viewers pointed to in the comments', () => {
     const comments = [{ text: '30:00 the jump scare', likes: 5 }, { text: '30:10 lmao this part', likes: 1 }];
     const moments = pickChatMoments(messages, { duration: 3600, comments, count: 2 });
     expect(moments.map((moment) => moment.sources)).toEqual([['comments'], ['chat']]);
-    expect(moments[0]).toMatchObject({ start: 1780, end: 1830 });
+    expect(moments[0]).toMatchObject({ start: 1770, end: 1840 });
     expect(moments[0].comments.texts[0]).toBe('30:00 the jump scare');
   });
 });
@@ -128,9 +128,9 @@ describe('choosing the moments', () => {
     expect(moments.filter((moment) => moment.matched).map((moment) => moment.label)).toEqual(['Goal', 'Penalty']);
     // In the order they happen.
     expect(moments.map((moment) => moment.start)).toEqual([...moments.map((moment) => moment.start)].sort((a, b) => a - b));
-    // The goal: the chat exploded at 600 s, the moment is taken 5 s earlier, and the clip is 20 s either side.
+    // The goal: the chat exploded at 600 s, the moment is taken 5 s earlier, and the clip is 30 s either side.
     const goal = moments.find((moment) => moment.label === 'Goal');
-    expect(goal).toMatchObject({ at: 595, start: 575, end: 615 });
+    expect(goal).toMatchObject({ at: 595, start: 565, end: 625 });
   });
 
   it('without words, takes the biggest explosions', () => {
@@ -167,6 +167,22 @@ describe('choosing the moments', () => {
     const moments = pickChatMoments(early, { duration: 3600, count: 6, before: 20, after: 10 });
     expect(moments[0]).toMatchObject({ at: 125, start: 105, end: 135 });
     expect(moments.at(-1).end).toBeLessThanOrEqual(3600);
+  });
+
+  it('leaves out parts already suggested, and finds the next ones instead', () => {
+    // Without words this stream has three reactions (1200, 2400, 3000); the first ask gives two.
+    const first = pickChatMoments(messages, { duration: 3600, count: 2 });
+    const again = pickChatMoments(messages, { duration: 3600, count: 2, skip: first });
+    expect(again.map((moment) => moment.at)).toEqual([2995]);
+    // Nothing given before comes back, and nothing new shares a second with it.
+    for (const moment of again) {
+      for (const part of first) expect(moment.start >= part.end || moment.end <= part.start).toBe(true);
+    }
+    // Without the parts to skip, the same moments come back, as before.
+    expect(pickChatMoments(messages, { duration: 3600, count: 2 })).toEqual(first);
+    // Once every explosion has been given, there is nothing new.
+    const all = pickChatMoments(messages, { duration: 3600, count: 20 });
+    expect(pickChatMoments(messages, { duration: 3600, count: 2, skip: all.map(({ start, end }) => ({ start, end })) }).filter((moment) => BURSTS.some(([at]) => Math.abs(moment.at - (at - 5)) < 3))).toEqual([]);
   });
 });
 
@@ -210,10 +226,10 @@ describe('the whole request', () => {
     const result = await clipsFromChat({ url: 'https://youtu.be/pkStu8LFpq8', words: 'goal, penalty', count: 3, sources, outDir, dataDir: path.join(dir, 'data'), downloader: stand, onStep: (step, detail) => steps.push(detail ? `${step} ${detail.done + 1}/${detail.total}` : step) });
     expect(result).toMatchObject({ videoId: 'pkStu8LFpq8', channel: 'Papillon', words: ['Goal', 'Penalty'], asked: 3, matched: 2 });
     expect(result.clips).toHaveLength(3);
-    expect(result.clips.map((clip) => clip.name)).toEqual(expect.arrayContaining(['papillon_pkStu8LFpq8_9m35s-10m15s.mp4']));
+    expect(result.clips.map((clip) => clip.name)).toEqual(expect.arrayContaining(['papillon_pkStu8LFpq8_9m25s-10m25s.mp4']));
     expect(await readdir(outDir)).toHaveLength(3);
-    // Only the parts: three 40-second ranges, and one lookup for all of them.
-    expect(stand.done.download.every(([start, end]) => end - start === 40)).toBe(true);
+    // Only the parts: three 1-minute ranges, and one lookup for all of them.
+    expect(stand.done.download.every(([start, end]) => end - start === 60)).toBe(true);
     expect(stand.done.info).toBe(1);
     expect(steps).toEqual(['looking', 'chat', 'comments', 'finding', 'fetching 1/3', 'fetching 2/3', 'fetching 3/3']);
   }, 60_000);
@@ -224,6 +240,36 @@ describe('the whole request', () => {
     expect(stand.done.chat).toBe(0);
     expect(result.clips.filter((clip) => clip.error)).toHaveLength(1);
     expect(result.clips.filter((clip) => clip.name)).toHaveLength(2);
+  }, 60_000);
+
+  it('remembers what it gave, and with "skip" gives other parts the next time', async () => {
+    const dataDir = path.join(dir, 'data-skip');
+    const outDir = path.join(dir, 'in-skip');
+    const ask = (more) => clipsFromChat({ url: 'https://youtu.be/pkStu8LFpq8', count: 2, sources, outDir, dataDir, downloader: downloader(), ...more });
+    const first = await ask({});
+    expect(first.skipped).toBe(0);
+    // Unticked, the same parts again (its downloads get a _2 name; the parts are the same).
+    expect((await ask({})).clips.map((clip) => [clip.start, clip.end])).toEqual(first.clips.map((clip) => [clip.start, clip.end]));
+    const second = await ask({ skipSuggested: true });
+    expect(second.skipped).toBe(2);
+    // Only one reaction of the three is left.
+    expect(second.clips).toHaveLength(1);
+    // A third ask has nothing new left, and says why.
+    await expect(ask({ skipSuggested: true })).rejects.toThrow(/No new moments: the 3 parts already suggested/);
+    for (const clip of second.clips) {
+      for (const old of first.clips) expect(clip.start >= old.end || clip.end <= old.start).toBe(true);
+    }
+  }, 60_000);
+
+  it('counts parts of the stream already in the videos folder as suggested', async () => {
+    const outDir = path.join(dir, 'in-old');
+    const dataDir = path.join(dir, 'data-old');
+    const before = await clipsFromChat({ url: 'https://youtu.be/pkStu8LFpq8', count: 1, sources, outDir, dataDir, downloader: downloader() });
+    // As if fetched before the record existed: the file is there, the record is not.
+    await rm(path.join(dataDir, 'chats', 'suggested'), { recursive: true, force: true });
+    const next = await clipsFromChat({ url: 'https://youtu.be/pkStu8LFpq8', count: 1, skipSuggested: true, sources, outDir, dataDir, downloader: downloader() });
+    expect(next.skipped).toBe(1);
+    expect(next.clips[0].start).not.toBe(before.clips[0].start);
   }, 60_000);
 
   it('refuses a video without a chat replay, a channel that is not agreed, a live stream, and bad numbers', async () => {

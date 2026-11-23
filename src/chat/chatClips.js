@@ -10,7 +10,7 @@ import { fetchVideo, ytDlp } from '../fetch.js';
 import { videoUrl } from '../fetchLink.js';
 import { isStopped } from '../run.js';
 import { agreedSourceOf } from '../sources.js';
-import { streamChat } from './chatStore.js';
+import { addSuggested, partsInFolder, readSuggested, streamChat } from './chatStore.js';
 import { CLIP_DEFAULTS, expandWords, pickChatMoments } from './pick.js';
 
 /**
@@ -20,13 +20,14 @@ import { CLIP_DEFAULTS, expandWords, pickChatMoments } from './pick.js';
  * @param {number} [options.count]
  * @param {number} [options.before]
  * @param {number} [options.after]
+ * @param {boolean} [options.skipSuggested]   leave out the parts of this stream already suggested
  * @param {import('../sources.js').Source[]} options.sources
  * @param {string} options.outDir    the videos folder
  * @param {string} options.dataDir
  * @param {import('../fetch.js').Downloader} [options.downloader]
  * @param {(step: string, detail?: unknown) => void} [options.onStep]
  */
-export async function clipsFromChat({ url, words = '', count = CLIP_DEFAULTS.count, before = CLIP_DEFAULTS.before, after = CLIP_DEFAULTS.after, sources, outDir, dataDir, downloader = ytDlp(), onStep = () => {} }) {
+export async function clipsFromChat({ url, words = '', count = CLIP_DEFAULTS.count, before = CLIP_DEFAULTS.before, after = CLIP_DEFAULTS.after, skipSuggested = false, sources, outDir, dataDir, downloader = ytDlp(), onStep = () => {} }) {
   if (!Number.isInteger(count) || count < 1 || count > CLIP_DEFAULTS.maxCount) throw new Error(`Ask for 1 to ${CLIP_DEFAULTS.maxCount} clips.`);
   for (const seconds of [before, after]) {
     if (!Number.isFinite(seconds) || seconds < 1 || seconds > 120) throw new Error('The seconds before and after must each be between 1 and 120.');
@@ -63,7 +64,15 @@ export async function clipsFromChat({ url, words = '', count = CLIP_DEFAULTS.cou
     : [];
 
   onStep('finding');
-  const moments = pickChatMoments(messages, { duration: info.duration, groups, comments, count, before, after });
+  // Parts already given: the record, and parts of this stream already in the videos folder
+  // (fetched before the record existed, or another way).
+  const found = skipSuggested ? [...await readSuggested(dataDir, videoId), ...await partsInFolder(outDir, videoId)] : [];
+  // The same part can be in both; it is counted once (names round the times a little).
+  const skip = found.filter((part, i) => !found.slice(0, i).some((other) => Math.abs(other.start - part.start) < 1 && Math.abs(other.end - part.end) < 1));
+  const moments = pickChatMoments(messages, { duration: info.duration, groups, comments, count, before, after, skip });
+  if (moments.length === 0 && skip.length > 0) {
+    throw new Error(`No new moments: the ${skip.length} parts already suggested for this stream cover every explosion left. Untick "Skip parts already suggested" to see them again, or try other words.`);
+  }
   if (moments.length === 0) throw new Error(`The chat never clearly exploded: ${messages.length} messages, spread evenly. Try another stream.`);
 
   // Each part is an ordinary fetch, with the stream looked up once for all of them.
@@ -80,9 +89,12 @@ export async function clipsFromChat({ url, words = '', count = CLIP_DEFAULTS.cou
       clips.push({ ...moment, error: error.message });
     }
   }
+  // Recorded whether or not they are skipped this time, so ticking the box next time works.
+  // A part that failed to download was never seen, so it can be offered again.
+  await addSuggested(dataDir, videoId, clips.filter((clip) => !clip.error));
   return {
     videoId, title: info.title, channel: source.name, messages: messages.length, comments: comments.length,
-    words: groups.map((group) => group.label), asked: count,
+    words: groups.map((group) => group.label), asked: count, skipped: skip.length,
     matched: clips.filter((clip) => clip.matched).length, clips,
   };
 }

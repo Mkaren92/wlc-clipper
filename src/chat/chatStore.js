@@ -9,7 +9,7 @@
 // rebuilt from its checked id; the channel read from YouTube's own data and only if
 // it is agreed in the sources list; nothing that is live or not yet prepared. Only
 // the chat is downloaded, never the video.
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { videoUrl } from '../fetchLink.js';
@@ -79,15 +79,31 @@ export async function setChatOffset(dataDir, video, offset) {
  * in the stream (the file may begin a few seconds earlier, at a keyframe).
  *
  * @param {string} video
- * @returns {{ videoId: string, offset: number, link: string } | null}
+ * @returns {{ videoId: string, offset: number, end: number, link: string } | null}
+ *   `end`: where the part ends in the stream
  */
 export function fetchedOrigin(video) {
-  const match = /_([\w-]{11})_((?:\d+h)?\d+m[\d.]+s)-(?:\d+h)?\d+m[\d.]+s(?:_\d+)?\.mp4$/.exec(path.basename(video));
+  const match = /_([\w-]{11})_((?:\d+h)?\d+m[\d.]+s)-((?:\d+h)?\d+m[\d.]+s)(?:_\d+)?\.mp4$/.exec(path.basename(video));
   if (!match) return null;
-  const [, videoId, from] = match;
-  const parts = /^(?:(\d+)h)?(\d+)m([\d.]+)s$/.exec(from);
-  const offset = Number(parts[1] ?? 0) * 3600 + Number(parts[2]) * 60 + Number(parts[3]);
-  return { videoId, offset, link: `https://www.youtube.com/watch?v=${videoId}` };
+  const [, videoId, from, to] = match;
+  const seconds = (stamp) => {
+    const parts = /^(?:(\d+)h)?(\d+)m([\d.]+)s$/.exec(stamp);
+    return Number(parts[1] ?? 0) * 3600 + Number(parts[2]) * 60 + Number(parts[3]);
+  };
+  return { videoId, offset: seconds(from), end: seconds(to), link: `https://www.youtube.com/watch?v=${videoId}` };
+}
+
+/**
+ * The parts of a stream that are already in the videos folder, by their file names.
+ * Parts fetched before the record of suggestions existed are found this way.
+ *
+ * @param {string} dir   the videos folder
+ * @param {string} videoId
+ * @returns {Promise<Array<{ start: number, end: number }>>}
+ */
+export async function partsInFolder(dir, videoId) {
+  const names = await readdir(dir).catch(() => []);
+  return names.map(fetchedOrigin).filter((origin) => origin?.videoId === videoId && origin.end > origin.offset).map((origin) => ({ start: origin.offset, end: origin.end }));
 }
 
 /**
@@ -171,6 +187,49 @@ export async function streamChat({ dataDir, videoId, url, downloader }) {
   } finally {
     await rm(work, { recursive: true, force: true });
   }
+}
+
+// The parts of a stream already given to the owner as clips from chat, so that asking
+// again can skip them (asked for on 2026-11-22: "if I don't like either of those and
+// ask again it gives me the same 20"). data/chats/suggested/<YouTube id>.json; it
+// stays on this machine with the chats.
+const suggestedFile = (dataDir, videoId) => path.join(chatsDir(dataDir), 'suggested', `${videoId}.json`);
+const suggestedSchema = z.object({ parts: z.array(z.object({ start: z.number().finite().min(0), end: z.number().finite().min(0) })) });
+
+/**
+ * The parts of a stream already suggested, in the stream's seconds. A file that
+ * cannot be read counts as none: it only ever narrows what is offered.
+ *
+ * @returns {Promise<Array<{ start: number, end: number }>>}
+ */
+export async function readSuggested(dataDir, videoId) {
+  if (!/^[\w-]{11}$/.test(videoId)) return [];
+  try {
+    const parsed = suggestedSchema.safeParse(JSON.parse(await readFile(suggestedFile(dataDir, videoId), 'utf8')));
+    return parsed.success ? parsed.data.parts : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Add parts to a stream's record of what was suggested, each once.
+ *
+ * @param {string} dataDir
+ * @param {string} videoId
+ * @param {Array<{ start: number, end: number }>} parts
+ */
+export async function addSuggested(dataDir, videoId, parts) {
+  if (!/^[\w-]{11}$/.test(videoId) || parts.length === 0) return;
+  const all = await readSuggested(dataDir, videoId);
+  for (const part of parts) {
+    if (!all.some((one) => one.start === part.start && one.end === part.end)) all.push({ start: part.start, end: part.end });
+  }
+  all.sort((a, b) => a.start - b.start);
+  const file = suggestedFile(dataDir, videoId);
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(`${file}.partial`, `${JSON.stringify({ parts: all }, null, 2)}\n`);
+  await rename(`${file}.partial`, file);
 }
 
 /**
