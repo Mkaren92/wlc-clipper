@@ -6,6 +6,7 @@ import { buildAss, checkHook, checkTag, cleanOverlayText, tagText } from '../src
 import { displayText, groupWords } from '../src/captions/group.js';
 import { findVoiceLevels, LEVEL_STEP, readVoiceLevels, snapToVoice } from '../src/captions/onsets.js';
 import { findPauses, readPauses, snapToSpeech } from '../src/captions/pauses.js';
+import { fillGaps, quietGaps } from '../src/transcribe/fill.js';
 import { run } from '../src/run.js';
 import { captionWidth } from '../src/captions/width.js';
 import { CAPTION_AREA } from '../src/layout.js';
@@ -399,5 +400,38 @@ describe('checkTranscript', () => {
 
   it('rejects a file without a words list', () => {
     expect(() => checkTranscript({ language: 'en' })).toThrow(/"words" list/);
+  });
+});
+
+// A clip of 2026-11-23: the plain pass heard nothing in the first 5.5 seconds, where a whole
+// sentence is said; the pass with the voice filter heard it. These are those two answers.
+describe('filling the stretches where the recogniser heard nothing', () => {
+  const w = (text, start, end) => ({ text, start, end });
+  const plain = [w('Oh', 5.5, 6.3), w('my', 6.4, 6.5), w('god,', 6.5, 6.9), w('what', 6.9, 8.4), w('the', 8.4, 8.8), w('fuck?', 8.8, 9.3), w('Is', 11.4, 11.8), w('that', 11.8, 11.9), w('the', 11.9, 12.0), w('military?', 12.0, 12.6)];
+// The second pass, with how sure it was of each word; its first words change from run to run.
+  const p = (text, start, end, sure) => ({ text, start, end, p: sure });
+  const filtered = [p('What', 1.34, 2.06, 0.09), p('the', 2.06, 2.06, 0.7), p('fuck?', 2.06, 2.06, 0.81), p("Who's", 2.06, 2.1, 0.23), p('shaking', 2.1, 2.22, 0.03), p('the', 2.22, 2.46, 0.97), p('fucking', 2.46, 2.72, 0.85), p('car?', 2.72, 3.28, 0.69), p('Oh', 5.9, 6.3, 0.9), p('my', 6.4, 6.5, 0.9), p('god!', 6.5, 6.9, 0.9), p('What', 7.9, 8.4, 0.9), p('the', 8.4, 8.8, 0.9), p('fuck?', 8.8, 9.3, 0.9), p('Is', 11.6, 11.8, 0.9), p('that', 11.8, 11.9, 0.9), p('the', 11.9, 12.0, 0.9), p('military?', 12.0, 12.6, 0.9)];
+
+  it('finds the long silences: before the first word, between words, and at the end when the length is known', () => {
+    expect(quietGaps(plain, 12.93)).toEqual([{ start: 0, end: 5.5 }, { start: 9.3, end: 11.4 }]);
+    expect(quietGaps([w('Hi', 0.2, 0.5), w('there', 1.9, 2.2)], 10)).toEqual([{ start: 2.2, end: 10 }]); // 1.4 s between words is a pause
+    expect(quietGaps([w('Hi', 0.2, 0.5)])).toEqual([]); // the length is not known: the end is not looked at
+    expect(quietGaps([], 3)).toEqual([{ start: 0, end: 3 }]);
+    expect(quietGaps([], 1)).toEqual([]);
+  });
+
+  it('adds the second pass\'s words only inside those silences, and changes nothing of the first', () => {
+    const filled = fillGaps(plain, filtered, 12.93);
+    // Only the words it was sure of, and that have a length: not "What the fuck? Who's shaking".
+    expect(filled.map((word) => word.text).join(' ')).toBe('the fucking car? Oh my god, what the fuck? Is that the military?');
+    expect(filled.slice(0, 3)).toEqual([w('the', 2.22, 2.46), w('fucking', 2.46, 2.72), w('car?', 2.72, 3.28)]); // saved as ordinary words
+    expect(filled.slice(3)).toEqual(plain); // the first pass's words and times, untouched
+    // The second pass's "Is" at 11.6 sits at the edge of a silence, where the first pass has it already: not added twice.
+    expect(filled.filter((word) => word.text === 'Is')).toHaveLength(1);
+    // Nothing to add: the very same list comes back.
+    expect(fillGaps(plain, [], 12.93)).toBe(plain);
+    expect(fillGaps(plain, plain, 12.93)).toBe(plain);
+    // A word at the very end of the sound needs no room after it.
+    expect(fillGaps([w('Hi', 0.2, 0.5)], [w('bye', 8.0, 10)], 10).map((word) => word.text)).toEqual(['Hi', 'bye']);
   });
 });

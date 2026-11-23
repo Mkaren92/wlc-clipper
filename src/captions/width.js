@@ -9,6 +9,8 @@ const ADVANCE = {
   S: 667, T: 611, U: 722, V: 667, W: 944, X: 667, Y: 667, Z: 611,
   ' ': 278, "'": 238, '’': 278, '-': 333, '$': 556, '%': 889, '&': 722,
   '+': 584, '#': 556, '@': 975, '/': 278,
+  // The star of a covered swear word (mask.js); read from the font file on 2026-11-23.
+  '*': 389,
 };
 const DIGIT = 556;
 const WIDEST = 944;

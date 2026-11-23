@@ -273,6 +273,8 @@ const MAX_TRIM_SHARE = 0.05;
  *   gameplay is taken, as before
  * @param {BlurBox[]} [options.blurs]   parts of the frame hidden for part of the clip, already
  *   checked (checkBlurs); without any the graph is exactly what it always was
+ * @param {{ start: number, end: number }[]} [options.muffle]   clip seconds in which the sound is
+ *   muffled (swear words); without any the sound is exactly what it always was
  * @param {boolean} [options.subtitles]   burn in the clip folder's subtitle file
  * @param {{ at: number, seconds: number, image?: boolean }} [options.endCard]
  *   show the card for `seconds` after the footage ends at `at`. The card's
@@ -284,7 +286,7 @@ const MAX_TRIM_SHARE = 0.05;
  *   than the 9:16 column, or null. `audioLabel` names the sound output when
  *   the graph makes one; otherwise the source's sound is used as it is.
  */
-export function buildFilter({ layout, source, cropX, cropWidth, trim = 0, cam, camHeight = CAM_HEIGHT, game, overlay = null, blurs = [], subtitles = false, endCard }) {
+export function buildFilter({ layout, source, cropX, cropWidth, trim = 0, cam, camHeight = CAM_HEIGHT, game, overlay = null, blurs = [], muffle = [], subtitles = false, endCard }) {
   if (!LAYOUTS.includes(layout)) {
     throw new Error(`Unknown layout "${layout}". Use one of: ${LAYOUTS.join(', ')}.`);
   }
@@ -310,11 +312,33 @@ export function buildFilter({ layout, source, cropX, cropWidth, trim = 0, cam, c
   else if (layout === 'blur') picture = { graph: blurGraph(area, end, input), cropX: null, cropWidth: null };
   else picture = { graph: facecamGraph(source, area, cam, end, camHeight, game, input), cropX: null, cropWidth: null };
 
+  const sound = muffle.length > 0 ? muffleSteps(muffle) : [];
   // The card adds time after the footage, so the sound needs silence to match.
-  if (endCard && source.audioStreams > 0) {
-    return { ...picture, graph: `${picture.graph};[0:a:0]apad=pad_dur=${endCard.seconds}[a]`, audioLabel: '[a]' };
+  if (endCard) sound.push(`apad=pad_dur=${endCard.seconds}`);
+  if (sound.length > 0 && source.audioStreams > 0) {
+    return { ...picture, graph: `${picture.graph};[0:a:0]${sound.join(',')}[a]`, audioLabel: '[a]' };
   }
   return { ...picture, audioLabel: null };
+}
+
+// The muffle: everything above this is cut away, three times over, which leaves the rhythm and
+// the tone of a voice and takes the word. Measured on 2026-11-23 on a stream recording with the
+// local speech recogniser as the judge: at 300 Hz three times none of six muffled words was still
+// recognised, at 250 or 350 Hz twice two or three were (see docs/decisions.md).
+const MUFFLE_HZ = 300;
+const MUFFLE_PASSES = 3;
+// The muffled sound came out about 12 dB quieter; this gives a little of that back.
+const MUFFLE_GAIN = 1.5;
+
+/**
+ * Sound filters that muffle the given windows and leave everything else as it is.
+ *
+ * @param {{ start: number, end: number }[]} windows   in clip seconds
+ * @returns {string[]}
+ */
+export function muffleSteps(windows) {
+  const when = `enable='${windows.map((one) => `between(t,${one.start},${one.end})`).join('+')}'`;
+  return [...Array.from({ length: MUFFLE_PASSES }, () => `lowpass=f=${MUFFLE_HZ}:${when}`), `volume=${MUFFLE_GAIN}:${when}`];
 }
 
 /**

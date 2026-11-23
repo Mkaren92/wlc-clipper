@@ -110,6 +110,8 @@ program
   .option('--hook-seconds <seconds>', 'how long the hook stays on screen; 0 keeps it for the whole clip', secondsOption, 2.5)
   .option('--tag <text>', 'the streamer\'s channel, such as @theburntpeanut, shown at the top for the whole clip')
   .option('--no-captions', 'skip transcription and captions')
+  .option('--no-censor', 'show swear words in the captions and the hook as they are, not as F*CK')
+  .option('--no-muffle', 'leave the sound as it is while a swear word is spoken')
   .option('--lang <code>', 'language spoken in the video, passed to the transcriber', 'en')
   .option('--brief <file>', 'campaign brief to follow and check the clip against')
   .option('--title <text>', 'title for post.txt (defaults to the hook)')
@@ -135,6 +137,8 @@ program
         hookSeconds: options.hookSeconds,
         tag: options.tag,
         captions: options.captions,
+        censor: options.censor,
+        muffle: options.muffle,
         lang: options.lang,
         briefFile: options.brief,
         title: options.title,

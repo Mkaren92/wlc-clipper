@@ -25,6 +25,8 @@ const { app } = createApp({
   dataDir: path.join(root, 'data'),
   webDir: existsSync(webDir) ? webDir : undefined,
   toolVersion: pkg.version,
+  // Once connected to a data repository, look every minute whether anything needs syncing.
+  syncEvery: 60_000,
 });
 
 // 127.0.0.1 keeps the dashboard off the network: only this machine can reach it.

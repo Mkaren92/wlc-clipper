@@ -182,8 +182,8 @@ This takes two to three minutes and uses every processor core.
 **It should end with** two lines like these, with no failed count:
 
 ```
- Test Files  20 passed (20)
-      Tests  528 passed (528)
+ Test Files  22 passed (22)
+      Tests  559 passed (559)
 ```
 
 The numbers grow as the project grows. What matters is that everything passed. If a test fails, see [Troubleshooting](#troubleshooting) before going on.
@@ -348,7 +348,22 @@ Suggested moments and caption fixes need an AI service. Everything else works wi
 
 The project itself comes from GitHub. Your own files do not.
 
-**The easy way** is the dashboard's "My data" page. On the old computer press "Download my data". The file lands in the old computer's Downloads folder; copy it to this one. Then, in the dashboard here, open "My data", choose that file under "Load my data", check what it shows, and press "Load it". It carries your channels and their clubs, your leagues and clubs with logos, your sounds, your overlay images and your briefs; videos, clips, combinations, compilations and matches stay on the old computer. See "My data" in the [README](../README.md).
+**By itself, through GitHub.** If the old computer is connected under "Sync with GitHub" on the dashboard's "My data" page, connect this one too and your data arrives and stays the same on both. This computer needs an SSH key that GitHub accepts (these steps were written from GitHub's documentation and not run on Windows):
+
+```bash
+ssh-keygen -t ed25519 -C "wlc-clipper"      # press Enter at each question
+cat ~/.ssh/id_ed25519.pub                     # copy the line it prints
+```
+
+On GitHub open Settings, "SSH and GPG keys", "New SSH key", paste the line and save. Then check, answering `yes` to the question about the host:
+
+```bash
+ssh -T git@github.com
+```
+
+It must greet you by your GitHub name. Then, in the dashboard, open "My data", paste the address of your private data repository, press "Check this address", and choose "Take GitHub's data onto this computer".
+
+**With one file** is the same page, lower down. On the old computer press "Download my data". The file lands in the old computer's Downloads folder; copy it to this one. Then, in the dashboard here, open "My data", choose that file under "Load my data", check what it shows, and press "Load it". It carries your channels and their clubs, your leagues and clubs with logos, your sounds, your overlay images and your briefs; videos, clips, combinations, compilations and matches stay on the old computer. See "My data" in the [README](../README.md).
 
 **By hand**, the same thing is copying these from the old computer into the same places in `~/wlc-clipper` on the new one:
 

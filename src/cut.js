@@ -6,6 +6,7 @@ import { applyReplacements } from './brief/replacements.js';
 import { loadBrief } from './brief/schema.js';
 import { buildAss, checkHook, checkTag, cleanOverlayText, HOOK_SECONDS, tagText } from './captions/ass.js';
 import { groupWords } from './captions/group.js';
+import { maskProfanity, swearWindows } from './captions/mask.js';
 import { findVoiceLevels, snapToVoice } from './captions/onsets.js';
 import { findPauses, snapToSpeech } from './captions/pauses.js';
 import { buildFilter, camPanelHeight, checkBlurs, OUT_FPS, OUT_HEIGHT, OUT_WIDTH, SUBTITLE_FILE } from './layout.js';
@@ -62,6 +63,8 @@ const LENGTH_TOLERANCE = 0.1;
  * @param {string} [options.hook]
  * @param {number} [options.hookSeconds]   how long the hook stays; 0 means the whole clip
  * @param {string} [options.tag]   the channel tag, such as "@theburntpeanut", shown at the top for the whole clip
+ * @param {boolean} [options.censor]       cover swear words in the captions and the hook (F*CK); on unless turned off
+ * @param {boolean} [options.muffle]       muffle the sound while a swear word is spoken; on unless turned off, and only with captions
  * @param {boolean} [options.captions]
  * @param {string} [options.lang]
  * @param {string} [options.briefFile]
@@ -89,6 +92,8 @@ export async function cut({
   hook,
   hookSeconds = HOOK_SECONDS,
   tag,
+  censor = true,
+  muffle = true,
   captions = true,
   lang = 'en',
   briefFile,
@@ -183,6 +188,8 @@ export async function cut({
     hook: hookText,
     hookSeconds,
     tag: tagLine,
+    censor: Boolean(censor),
+    muffle: Boolean(muffle),
     captions: wantCaptions,
     lang,
     briefPath,
@@ -209,7 +216,7 @@ export async function cut({
     onStep('transcribing');
     try {
       const audioFile = await extractAudio({ source: sourcePath, start, seconds: end - start, workDir });
-      const transcript = checkTranscript(await transcriber.transcribe(audioFile, { lang }));
+      const transcript = checkTranscript(await transcriber.transcribe(audioFile, { lang, seconds: end - start }));
       transcript.words = snapToSpeech(transcript.words, await findPauses(audioFile));
       transcript.words = snapToVoice(transcript.words, await findVoiceLevels(audioFile));
       if (brief) transcript.words = applyReplacements(transcript.words, brief.replacements);
@@ -360,10 +367,17 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
   const total = seconds + (card?.seconds ?? 0);
 
   let groups = [];
+  let words = [];
   if (meta.captions) {
-    groups = groupWords((await readTranscript(workDir)).words, seconds);
+    ({ words } = await readTranscript(workDir));
+    groups = groupWords(words, seconds);
     if (groups.length === 0) warnings.push('No speech was found in this range, so the clip has no captions.');
+    // Swear words are covered in what is drawn only; the transcript keeps the real words.
+    if (meta.censor) groups = groups.map((group) => ({ ...group, text: maskProfanity(group.text) }));
   }
+
+  // The sound is muffled while a swear word is spoken. It needs the word times, so only with captions on.
+  const muffle = meta.muffle ? swearWindows(words, seconds) : [];
 
   const shown = onScreenTexts(meta.hook, meta.brief, meta.tag);
   const subtitles = groups.length > 0 || Boolean(shown.hook || shown.disclosure || shown.tag || shown.endCard);
@@ -371,7 +385,8 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
   if (subtitles) {
     const ass = buildAss({
       groups,
-      hook: shown.hook,
+      // Covered here and not in `shown`, which the brief's checks read: they judge the real words.
+      hook: meta.censor && shown.hook ? maskProfanity(shown.hook) : shown.hook,
       hookSeconds: meta.hookSeconds,
       disclosure: shown.disclosure,
       tag: shown.tag,
@@ -396,6 +411,7 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
     game: meta.game ?? undefined,
     overlay: overlaySpec,
     blurs: meta.blurs,
+    muffle,
     subtitles,
     endCard: card ? { at: seconds, seconds: card.seconds, image: Boolean(card.image) } : undefined,
   });
@@ -434,6 +450,7 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
     seconds: Math.round(result.duration * 1000) / 1000,
     audio: result.audioStreams > 0,
     captionGroups: groups.length,
+    muffled: muffle.length,
   };
   meta.checks = meta.brief ? await checkAgainst(clipDir, workDir, meta, meta.brief, result) : [];
   await writeJson(path.join(workDir, META_FILE), meta);
@@ -532,6 +549,10 @@ async function readMeta(workDir) {
     hookSeconds: HOOK_SECONDS,
     // Nor a channel tag.
     tag: null,
+    // Clips from before swear words were covered keep showing them, as when they were made.
+    censor: false,
+    // And sound as they did.
+    muffle: false,
     captions: false,
     lang: 'en',
     briefPath: null,

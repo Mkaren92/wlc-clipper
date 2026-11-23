@@ -61,14 +61,14 @@ npm run dashboard
 
 Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 
-- **Cut:** pick a video in the left column. It plays on the left and stays in view while you set the range, the layout, the text and the brief on the right. Drag the bright window over the video to place the crop (for the facecam layout, two boxes: the yellow one over the webcam, with any shape or 16:9, 4:3 or 1:1 under "Webcam shape", and the blue one over the content shown below it; each is moved and resized on its own). With the center layout, the "Show more of the picture" slider makes the crop wider, for a person who moves out of the narrow column. The bar at the bottom of the screen always shows what will be made, anything that is in the way, and "Cut the clip".
+- **Cut:** pick a video in the left column. It plays on the left and stays in view while you set the range, the layout, the text and the brief on the right. Drag the bright window over the video to place the crop (for the facecam layout, two boxes: the yellow one over the webcam, with any shape or 16:9, 4:3 or 1:1 under "Webcam shape", and the blue one over the content shown below it; each is moved and resized on its own). With the center layout, the "Show more of the picture" slider makes the crop wider, for a person who moves out of the narrow column. The bar at the bottom of the screen always shows what will be made, anything that is in the way, and "Cut the clip". Swear words in the captions and the hook are drawn as `F*CK` and muffled in the voice; two boxes under "Text" turn either off for the clip.
 - **Keys for the player:** Space plays and pauses, the left and right arrows move one second (a tenth with Shift), I sets the start, O sets the end, and P plays the range. They do nothing while you are typing in a box, and they go by the key's place on the keyboard, so they work on a keyboard set to another alphabet.
 - **Activity:** while a clip is being cut, rendered again, fetched, combined, or searched for moments, the left column says what is happening and at which step, under "Activity". It is there on every page and after a reload. You can start another cut meanwhile; it waits its turn. When something is ready, it offers "Open". Anything waiting or running has a **Stop** button: the work ends within a few seconds, what it was making is thrown away, and the next job in line starts. Nothing that was already finished is touched.
 - **Deleting a video:** each video in the left column has a trash icon. It asks once, then deletes the file from `in/`. Clips already cut from it stay, but can no longer be rendered again, because rendering reads the source. A compilation that uses the video will not build until the item is taken out. It is not possible while a clip is being made.
 - **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
 - **Clip:** watch the result, download it, see each brief rule as passed or failed, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
 - **Download:** paste a YouTube link from one of your channels and bring a part of the video, or the whole of it, into `in/`; or paste a finished live stream and get the moments its chat exploded as clips (see [Sources and fetching](#sources-and-fetching)).
-- **My data:** one file to download with everything you have made, and the place to load such a file on another computer (see [My data](#my-data-moving-to-another-computer)).
+- **My data:** keeps what you chose to carry the same on every computer through a private GitHub repository of yours, by itself; and, as a fallback, one file to download and load on another computer (see [My data](#my-data-moving-to-another-computer)).
 - **Unsaved changes:** the card, combine, compilation and sources pages show "Changes not saved" until you save, and their Save button stays in view.
 
 Only this computer can reach the dashboard; it is not visible on your network.
@@ -271,9 +271,9 @@ cp "data/backups/sources/2026-11-20T18-22-45-123Z.json" data/sources.json
 
 ## My data: moving to another computer
 
-GitHub holds the code. What you have made or added stays on the computer it was made on. The **My data** page turns the part you chose to carry into one file, and loads such a file on another computer.
+The public repository holds the code. What you have made or added stays on the computer it was made on, unless you carry it. The **My data** page carries the part you chose in two ways: **Sync with GitHub**, which keeps it the same on every computer by itself, and one file to download and load by hand.
 
-**What travels in the file:**
+**What travels, either way:**
 
 - your channels, with the club each streamer supports, their pictures and subscriber counts
 - your leagues and clubs, with all their logos
@@ -281,7 +281,28 @@ GitHub holds the code. What you have made or added stays on the computer it was 
 - your overlay images (the logos in `overlays/`)
 - your briefs
 
-**What stays on the computer it was made on:** source videos, parts, clips, combinations, compilations, and matches with their cards. Your AI key is never put in the file; copy the file `.env` by hand if you use one.
+**What stays on the computer it was made on:** source videos, parts, clips, combinations, compilations, and matches with their cards. Your AI key and your YouTube sign-in are never carried; copy the file `.env` by hand if you use one.
+
+### Sync with GitHub
+
+Your data goes to a **private** repository of your own on GitHub, separate from the public one with the code. Each computer needs `git` and an SSH key that your GitHub account accepts (`ssh -T git@github.com` must greet you by name).
+
+1. On GitHub make a new repository: any name, such as `wlc-clipper-data`, **Private**, nothing else ticked.
+2. On the computer that has your data, open "My data", paste the repository's address (as the browser shows it is fine), press "Check this address", then "Connect and send".
+3. On every other computer do the same. The page shows what is on GitHub beside what is there and asks whose lists to keep: choose "Take GitHub's data onto this computer".
+
+The steps for a second computer, with what to do when GitHub does not know it yet, are in [docs/home-pc.md](docs/home-pc.md).
+
+From then on nothing needs pressing. The dashboard syncs when it starts and within a minute of a change, here or on the other computer. The section shows "In sync", what last arrived or was sent, and has "Sync now". The "My data" button in the left column shows "check sync" when something needs a look.
+
+- **The tool refuses** the repository that holds the code, and a repository that is public.
+- **Changed on both computers before they synced:** different channels or clubs are put together. If the very same channel or club was changed on both, the one sent first is kept, the page says which, and the other is still in the repository's history.
+- **Nothing is deleted here.** A file that was replaced or removed on the other computer is moved into `data/backups/sync/` (the newest 20 rounds are kept). When a computer connects, its lists as they were are kept in `data/backups/before-connect-<date and time>/`.
+- **No internet:** nothing changes, and your work is sent on the next try.
+- **"Save the list" on the Sources page** is refused when the list changed since the page read it (a sync brought something from the other computer). Reload the page and make the change again; anything typed and not saved is lost by the reload.
+- "Disconnect" stops syncing on that computer. Its data stays, and so does what is on GitHub.
+
+### By hand, with one file
 
 **To take your work to another computer:**
 
@@ -413,6 +434,8 @@ Every command has built-in help: `node src/cli.js cut --help`.
 | `--hook-seconds <seconds>` | How long the hook stays on screen; `0` keeps it for the whole clip | `2.5` |
 | `--tag <text>` | The streamer's channel, such as `@theburntpeanut`, up to 40 characters, drawn in capitals at the top for all the footage (not on the end card). The hook then sits just under it. On the cutting screen, a video fetched from a channel in the sources list offers that channel's handle with one click | none |
 | `--no-captions` | Skip transcription and captions | captions on |
+| `--no-censor` | Show swear words in the captions and the hook as they are. Without it they are drawn with a letter covered (`F*CK`, `SH*T`); the voice, the saved transcript and `post.txt` are not changed. On the page: "Cover swear words (F*CK)" | covered |
+| `--no-muffle` | Leave the sound as it is while a swear word is spoken. Without it the sound is muffled over the middle of each such word (about 60% of it), so you hear that something is said, and how the word begins and ends, but not the word. Needs captions (they give the word times); a word the speech recogniser missed is not muffled. On the page: "Muffle them in the voice" | muffled |
 | `--lang <code>` | Language spoken in the video | `en` |
 | `--brief <file>` | Campaign brief to follow and check the clip against | none |
 | `--title <text>` | Title for `post.txt` | the hook |

@@ -1,11 +1,11 @@
 // Every call the pages make to the server (server/app.js).
 
-async function request(path, { method = 'GET', body } = {}) {
+async function request(path, { method = 'GET', body, headers = {} } = {}) {
   // A picture is sent as it is; everything else as JSON.
   const isPicture = body instanceof Blob;
   const response = await fetch(path, {
     method,
-    headers: body === undefined ? {} : { 'Content-Type': isPicture ? 'image/png' : 'application/json' },
+    headers: { ...headers, ...(body === undefined ? {} : { 'Content-Type': isPicture ? 'image/png' : 'application/json' }) },
     body: body === undefined ? undefined : isPicture ? body : JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));
@@ -71,6 +71,12 @@ export const api = {
     if (!response.ok) throw new Error(data.error ?? `The server answered ${response.status}.`);
     return data;
   },
+  // Sync with a private GitHub repository.
+  sync: () => request('/api/sync'),
+  syncLook: (address) => request('/api/sync/look', { method: 'POST', body: { address } }),
+  syncConnect: (address, wins) => request('/api/sync/connect', { method: 'POST', body: { address, wins } }),
+  syncNow: () => request('/api/sync/now', { method: 'POST' }),
+  syncOff: () => request('/api/sync', { method: 'DELETE' }),
   // My data: what a download would hold, the file itself, and loading one (two steps).
   transfer: () => request('/api/transfer'),
   dataFileUrl: () => '/api/transfer/download',
@@ -83,7 +89,8 @@ export const api = {
   loadData: () => request('/api/transfer/apply', { method: 'POST' }),
   discardData: () => request('/api/transfer/waiting', { method: 'DELETE' }),
   sources: () => request('/api/sources'),
-  saveSources: (sources) => request('/api/sources', { method: 'PUT', body: sources }),
+  // `version` is the mark the list came with; the server refuses the save when the list has changed since.
+  saveSources: (sources, version) => request('/api/sources', { method: 'PUT', body: sources, headers: version ? { 'X-List-Version': version } : {} }),
   // Changes to one saved channel, which leave every other channel as it is on the server.
   setSourceClubs: (id, clubs) => request(`/api/sources/${enc(id)}/clubs`, { method: 'PUT', body: { clubs } }),
   deleteSource: (id) => request(`/api/sources/${enc(id)}`, { method: 'DELETE' }),

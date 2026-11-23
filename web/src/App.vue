@@ -14,6 +14,7 @@ import Sources from './pages/Sources.vue';
 import { clock, fileSize } from './format.js';
 import { describe, isActive, jobs, refresh as refreshJobs, visibleJobs } from './jobs.js';
 import { liveCount, stopWatchingLive, watchLive } from './live.js';
+import { stopWatchingSync, sync, syncNeedsALook, watchSync } from './sync.js';
 import { applyPalette, PALETTES, savedPalette } from './theme.js';
 
 const videos = ref([]);
@@ -79,6 +80,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKey);
   window.removeEventListener('hashchange', onHash);
   stopWatchingLive();
+  stopWatchingSync();
 });
 
 const firstVideo = () => (videos.value.length > 0 ? { kind: 'video', name: videos.value[0].name } : { kind: 'none' });
@@ -167,6 +169,7 @@ function openJob(job) {
 onMounted(async () => {
   refreshJobs();
   watchLive();
+  watchSync();
   await refresh();
   view.value = firstVideo();
 });
@@ -188,6 +191,9 @@ onMounted(async () => {
           <Icon :name="p.icon" /> {{ p.name }}
           <!-- How many of the channels are live right now, on whichever page you are. -->
           <span v-if="p.id === 'sources' && liveCount() > 0" class="chip bad on-air">{{ liveCount() }} live</span>
+          <!-- Syncing needs a look: it is failing, or two PCs changed the same thing. -->
+          <span v-if="p.id === 'data' && syncNeedsALook()" class="chip warn on-air">check sync</span>
+          <span v-else-if="p.id === 'data' && sync.connected && sync.state === 'offline'" class="chip on-air">offline</span>
         </button>
       </nav>
 

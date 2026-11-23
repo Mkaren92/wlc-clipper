@@ -136,6 +136,7 @@ async function render() {
         <template v-if="meta.output">
           <span class="chip">{{ meta.output.seconds.toFixed(1) }} s</span>
           <span class="chip">{{ meta.captions ? `${meta.output.captionGroups} caption lines` : 'no captions' }}</span>
+          <span v-if="meta.output.muffled" class="chip">{{ meta.output.muffled }} muffled {{ meta.output.muffled === 1 ? 'moment' : 'moments' }}</span>
         </template>
         <span v-if="brief && failed === 0" class="chip good"><Icon name="check" /> all {{ checks.length }} checks passed</span>
         <span v-else-if="brief" class="chip bad"><Icon name="alert" /> {{ failed }} of {{ checks.length }} checks failed</span>

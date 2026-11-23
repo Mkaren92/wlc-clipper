@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated 2026-11-22. Update this file when something here changes.
+Last updated 2026-11-23. Update this file when something here changes.
 
 ## Built
 
@@ -23,6 +23,7 @@ Version 1 of the spec is complete: all three "evenings".
 - The club a streamer supports, chosen from the owner's clubs, saved as it is chosen and shown as a logo on the row
 - Backups: a copy of the channels list and of the clubs list is kept before every change (`data/backups/`)
 - My data: one file to download with what the owner chose to carry (channels with clubs, pictures and counts, leagues and clubs with logos, sounds, briefs, overlay images), and a two-step load on another machine that never deletes
+- Sync with GitHub: the same data kept the same on every computer by itself, through a private repository of the owner's; connected on the first machine on 2026-11-23
 - Who is live: channels in the list that are broadcasting are marked LIVE, listed first and counted in the side column
 - A Stop button for anything waiting or running, in "Activity"
 - A sources list and `fetch`: part of a YouTube video or a whole one, each up to 3 hours (parts were capped at 20 minutes until 2026-11-21), from a channel in the list (the owner adds a channel only once it has agreed)
@@ -33,10 +34,12 @@ Version 1 of the spec is complete: all three "evenings".
 - Suggested moments from the transcript, the chat of a finished stream, or both merged: event terms (with Football and Gaming presets) and guidance that steer both, a chart of the chat, edits, filters, and an optional AI check of chat moments
 - Blur boxes: a part of the frame blurred or blacked out for some seconds, drawn on the cutting screen or with `--blur`
 - A logo overlay for the whole clip: a logo in a corner or a full-frame picture, chosen on the cutting screen, with `--overlay`, or set by a brief (checked)
+- Swear words covered in the captions and the hook (`F*CK`, `SH*T`), and the voice muffled for the length of each such word; two boxes on the cutting screen, both on unless unticked (2026-11-23); the muffle covers the middle 60% of the word
+- Captions where the recogniser first heard nothing: a second pass with its voice filter fills long silences with the words it is sure of (2026-11-23)
 - Hook suggestions: "Suggest" beside the hook box proposes three hooks for the clip being set up
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-528 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube.
+559 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube.
 
 ## Waiting on the owner
 
@@ -46,6 +49,8 @@ Version 1 of the spec is complete: all three "evenings".
 - **A verdict on caption timing** in continuous speech, judged by eye on real clips. Word starts after pauses were measured, and since 2026-11-22 starts under game sound (the clip "what-just-happened-here", rendered again with the fix): watch it and say whether the captions now land with the shouts.
 - **Whether the `small` speech model is accurate enough.** A larger model needs about 1.5 GB more disk and is slower.
 - **How to keep two downloader runs from rewriting the YouTube sign-in at once.** yt-dlp writes the cookies file back when it ends, and the live check runs beside a fetch or a chat download, so two can write it at the same moment and spoil it. Ways out: run downloader calls one at a time (the live check would then wait behind a long fetch), or hand each call a copy of the file (the rules say never to copy it). Found in review on 2026-11-22; not yet seen to happen.
+
+- **Disk space on the first machine.** On 2026-11-23 it was 99% full (2.7 GB free); a long fetch is refused when there is too little room.
 
 ## Known faults, not yet fixed
 
@@ -65,6 +70,8 @@ Found in a review on 2026-11-22. They are in the pages, which need driving in a 
 - The Combine page in the owner's hands. It was driven by script: a whole run on generated test videos with a frame counter, and a preview of two of the owner's own videos (a fetched part and a phone recording), which played in step within about 0.03 s. Lining up a real reaction by eye and ear is the owner's to judge.
 - How a combined video sounds. Levels were measured, not listened to.
 - The LIVE mark on one of the owner's own channels: none was live when it was built.
+- Sync between two real computers. Against the real GitHub only the first send and a stand-in for the home PC in a scratch folder were run; changes going both ways, a clash and a removal were run between scratch machines with a repository in a folder. The home PC also needs its own SSH key on GitHub.
+- Why the first real connect lost its copy's `.git` folder halfway (nothing was sent; the second try worked). Sync actions now run one at a time, which is the likely cause but was not proven.
 - "Load my data" on a second real computer. The round trip was run between two scratch dashboards on this machine, with a copy of the owner's real lists; loading on Windows inside WSL was not tried. The browser round trip was run before the contents were narrowed to what the owner chose; after that the engine and server tests were run again, and the download was checked on the real dashboard.
 - The clubs set on 45 of the owner's channels on 2026-11-20. They were worked out from each channel's own description, tags and recent titles after the owner's own marks were lost; five were told to the owner as less certain, ten channels were left without a club, and the owner has not yet confirmed them.
 - Stop pressed on a fast fetch from the page. A stop was tried through the engine (`fetchVideo`); the owner has fetched from the page (a whole video of about 1.5 hours in about 20 s, 2026-11-21) but has not pressed Stop on one. The owner's first dashboard fetch with it fell back to the slow way for a reason that was not recorded; retries and a visible reason were added after it, and have not yet been seen on a real dashboard fetch.
@@ -73,6 +80,9 @@ Found in a review on 2026-11-22. They are in the pages, which need driving in a 
 - Suggested moments on a real football watchalong with a busy chat (the brief's acceptance check). It was run on a made-up match chat and on the real, quiet chat of one stream; the real service was not used, only a stand-in, so neither the steered prompt nor the AI check of chat moments has been answered by Claude or OpenAI.
 - The blur boxes on the cutting screen, driven in a browser (drawn, moved, resized, timed); the render was measured by tests and a frame of real footage.
 - The overlay controls on the cutting screen, driven in a browser, and a real cut with a brief that sets an overlay. The render was measured by tests and frames; the page only built.
+- How YouTube treats a muffled swear word. Its guidelines name only bleeping and muting as obscured. The owner listened to a muffled "What the fuck" on 2026-11-23 and liked it; the rest was measured (see `docs/decisions.md`).
+- The second recogniser pass, beyond the one clip it was built on: whether it ever fills a real silence with words that were not said, and how much longer cuts take.
+- The word list for covering and muffling, in long use: which words it misses, and whether it ever covers a name.
 - A hook suggestion from the real AI service. Only a stand-in answered in the tests; the button was looked at on the dashboard, not pressed.
 - The YouTube sign-in with a real cookies file. The tests use a stand-in for the downloader; whether a saved sign-in gets past "confirm you're not a bot", and for how long, was not seen.
 - Whether the chat defaults (3×, 8 messages, 5 people per 5 s) suit the owner's channels. On the one channel on this machine they find nothing.
@@ -98,6 +108,9 @@ The owner was told about the rest on 2026-11-19 and accepted them as they are, a
 
 Nothing is decided. Ideas the owner has been offered:
 
+- Removing "Download my data" and "Load my data", or folding them under one line, once the home PC has synced (the owner agreed on 2026-11-23 to keep them until then)
+- Refreshing an open Sources page by itself when a sync brings a change; now it shows the older list until reloaded, and refuses "Save the list"
+- Covering swear words in `post.txt` titles too, where YouTube is strictest; and turning the cover or the muffle on or off for a clip that is already made
 - On the Combine page: a delay before the second video comes in, and removing the older "Show another video beside it" option from Compilations if the page replaces it
 - A credits card at the end of a compilation, listing each streamer with their picture
 - A faster encoder setting for compilations (`superfast`: about two thirds of the time, the same quality, twice the file size)

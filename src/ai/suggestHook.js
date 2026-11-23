@@ -93,11 +93,12 @@ async function rangeSound({ source, start, end, lang, cacheDir, transcriber, onS
   }
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'clipper-hook-'));
   try {
-    const audio = await extractAudio({ source: info.path, start, seconds: Math.min(end, info.duration) - start, workDir });
+    const seconds = Math.min(end, info.duration) - start;
+    const audio = await extractAudio({ source: info.path, start, seconds, workDir });
     const loud = loudParts(await findLoudness(audio));
     if (kept) return { words: keptWords(kept, start, end), loud };
     onStep('transcribing');
-    const transcript = checkTranscript(await transcriber.transcribe(audio, { lang }));
+    const transcript = checkTranscript(await transcriber.transcribe(audio, { lang, seconds }));
     const words = snapToSpeech(transcript.words, await findPauses(audio));
     return { words: Object.assign(words, { transcribed: true }), loud };
   } finally {
