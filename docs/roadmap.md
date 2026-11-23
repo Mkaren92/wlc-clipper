@@ -34,10 +34,11 @@ Version 1 of the spec is complete: all three "evenings".
 - Suggested moments from the transcript, the chat of a finished stream, or both merged: event terms (with Football and Gaming presets) and guidance that steer both, a chart of the chat, edits, filters, and an optional AI check of chat moments
 - Blur boxes: a part of the frame blurred or blacked out for some seconds, drawn on the cutting screen or with `--blur`
 - A logo overlay for the whole clip: a logo in a corner or a full-frame picture, chosen on the cutting screen, with `--overlay`, or set by a brief (checked)
+- Swear words covered in the captions and the hook (`F*CK`, `SH*T`), and the voice muffled for the length of each such word; two boxes on the cutting screen, both on unless unticked (2026-11-23)
 - Hook suggestions: "Suggest" beside the hook box proposes three hooks for the clip being set up
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-547 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube.
+557 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube.
 
 ## Waiting on the owner
 
@@ -78,6 +79,8 @@ Found in a review on 2026-11-22. They are in the pages, which need driving in a 
 - Suggested moments on a real football watchalong with a busy chat (the brief's acceptance check). It was run on a made-up match chat and on the real, quiet chat of one stream; the real service was not used, only a stand-in, so neither the steered prompt nor the AI check of chat moments has been answered by Claude or OpenAI.
 - The blur boxes on the cutting screen, driven in a browser (drawn, moved, resized, timed); the render was measured by tests and a frame of real footage.
 - The overlay controls on the cutting screen, driven in a browser, and a real cut with a brief that sets an overlay. The render was measured by tests and frames; the page only built.
+- How YouTube treats a muffled swear word. Its guidelines name only bleeping and muting as obscured. The owner listened to a muffled "What the fuck" on 2026-11-23 and liked it; the rest was measured (see `docs/decisions.md`).
+- The word list for covering and muffling, in long use: which words it misses, and whether it ever covers a name.
 - A hook suggestion from the real AI service. Only a stand-in answered in the tests; the button was looked at on the dashboard, not pressed.
 - The YouTube sign-in with a real cookies file. The tests use a stand-in for the downloader; whether a saved sign-in gets past "confirm you're not a bot", and for how long, was not seen.
 - Whether the chat defaults (3×, 8 messages, 5 people per 5 s) suit the owner's channels. On the one channel on this machine they find nothing.
@@ -105,6 +108,7 @@ Nothing is decided. Ideas the owner has been offered:
 
 - Removing "Download my data" and "Load my data", or folding them under one line, once the home PC has synced (the owner agreed on 2026-11-23 to keep them until then)
 - Refreshing an open Sources page by itself when a sync brings a change; now it shows the older list until reloaded, and refuses "Save the list"
+- Covering swear words in `post.txt` titles too, where YouTube is strictest; and turning the cover or the muffle on or off for a clip that is already made
 - On the Combine page: a delay before the second video comes in, and removing the older "Show another video beside it" option from Compilations if the page replaces it
 - A credits card at the end of a compilation, listing each streamer with their picture
 - A faster encoder setting for compilations (`superfast`: about two thirds of the time, the same quality, twice the file size)

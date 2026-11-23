@@ -60,6 +60,12 @@ async function firstSound(file) {
   return match ? Number(match[1]) : null;
 }
 
+/** Average level of a stretch of a file's sound, in dB. */
+async function levelBetween(file, from, seconds) {
+  const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', file, '-vn', '-af', `atrim=start=${from}:duration=${seconds},volumedetect`, '-f', 'null', '-']);
+  return Number(/mean_volume: (-?[\d.]+) dB/.exec(stderr)[1]);
+}
+
 /** Loudest level anywhere in a file, in dB. Digital silence is about -91. */
 async function peakLevel(file) {
   const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', file, '-vn', '-af', 'volumedetect', '-f', 'null', '-']);
@@ -301,6 +307,91 @@ describe('captions and hook', () => {
     await expect(rerender(clipDir)).rejects.toThrow(/not valid JSON/);
     expect((await probe(path.join(clipDir, 'clip.mp4'))).duration).toBeCloseTo(2, 1);
   }, 120_000);
+
+  // Asked for on 2026-11-23, for YouTube: F*CK in what is drawn; the real words everywhere else.
+  it('covers swear words in the captions and the hook, and judges the real words', async () => {
+    const swearing = {
+      ...fakeTranscriber,
+      transcribe: async () => ({ language: 'en', words: [{ text: 'Holy', start: 0.32, end: 0.48 }, { text: 'shit', start: 0.48, end: 0.66 }, { text: 'fuuuck!', start: 0.66, end: 0.95 }] }),
+    };
+    const briefFile = path.join(dir, 'swear.json');
+    await writeFile(briefFile, JSON.stringify({ id: 'swear', forbiddenTerms: ['shit'] }));
+    const base = { source, start: 1, end: 4, hook: 'What the fuck', title: 'A title', toolVersion: 'test', transcriber: swearing, briefFile };
+    const events = async (clipDir) => (await readFile(path.join(clipDir, 'work', 'captions.ass'), 'utf8')).split('\n').filter((line) => line.startsWith('Dialogue:'));
+
+    const on = await cut({ ...base, outDir: path.join(dir, 'out-censor') }); // on unless turned off
+    expect(on.meta.censor).toBe(true);
+    const covered = await events(on.clipDir);
+    expect(covered.find((line) => line.includes(',Caption,'))).toContain(',,HOLY SH*T F***CK');
+    expect(covered.find((line) => line.includes(',Hook,'))).toContain('{\\q0}What the f*ck');
+    // What is saved keeps the real words: the hook, the transcript, and so the brief's check of what was said.
+    expect(on.meta.hook).toBe('What the fuck');
+    expect(JSON.parse(await readFile(path.join(on.clipDir, 'work', 'transcript.json'), 'utf8')).words.map((word) => word.text)).toEqual(['Holy', 'shit', 'fuuuck!']);
+    expect(on.checks.find((check) => check.rule === 'Forbidden terms')).toMatchObject({ pass: false, detail: '"shit" is in the captions at 0:00.48' });
+
+    // Turned off, the same clip with the words as they are: same lines, same times.
+    const off = await cut({ ...base, censor: false, outDir: path.join(dir, 'out-plain') });
+    expect(off.meta.censor).toBe(false);
+    const plain = await events(off.clipDir);
+    expect(plain.find((line) => line.includes(',Caption,'))).toContain(',,HOLY SHIT FUUUCK');
+    expect(plain.find((line) => line.includes(',Hook,'))).toContain('{\\q0}What the fuck');
+    expect(covered.map((line) => line.replace(/\*/g, '?').length)).toEqual(plain.map((line) => line.length));
+
+    // A clip from before this existed has no such setting, and renders with its words as it did.
+    const metaFile = path.join(on.clipDir, 'work', 'meta.json');
+    const { censor, ...older } = JSON.parse(await readFile(metaFile, 'utf8'));
+    await writeFile(metaFile, JSON.stringify(older));
+    await rerender(on.clipDir);
+    expect((await events(on.clipDir)).find((line) => line.includes(',Caption,'))).toContain(',,HOLY SHIT FUUUCK');
+  }, 180_000);
+
+  // Asked for on 2026-11-23: the voice is muffled for the length of a swear word.
+  it('muffles the sound while a swear word is spoken, and only then', async () => {
+    // The beep (1000 Hz, 0.1 s long) stands in for the word: it starts 1 second into this clip.
+    const saying = (start, end) => ({ ...fakeTranscriber, transcribe: async () => ({ language: 'en', words: [{ text: 'fuck', start, end }] }) });
+    const base = { source, start: 1, end: 4, toolVersion: 'test' };
+
+    const onTheWord = await cut({ ...base, transcriber: saying(1.0, 1.1), outDir: path.join(dir, 'out-muffle') });
+    expect(onTheWord.meta).toMatchObject({ muffle: true, output: { muffled: 1 } });
+    const muffled = path.join(onTheWord.clipDir, 'clip.mp4');
+    // The middle of the beep, away from its edges (a tone switched on at once clicks, and a click is
+    // every pitch at once). A tone that high is all but gone; measured on a steady one: 60 dB down.
+    const beep = (file) => levelBetween(file, SIGNAL_AT - 1 + 0.03, 0.05);
+    expect(await beep(muffled)).toBeLessThan(-35);
+    expect((await probe(muffled)).duration).toBeCloseTo(3, 1);
+
+    // The same word said earlier leaves the beep as it is, and so does turning the muffle off.
+    const elsewhere = await cut({ ...base, transcriber: saying(0.2, 0.5), outDir: path.join(dir, 'out-muffle-elsewhere') });
+    expect(elsewhere.meta.output.muffled).toBe(1);
+    expect(await beep(path.join(elsewhere.clipDir, 'clip.mp4'))).toBeGreaterThan(-10);
+    expect(Math.abs((await firstSound(path.join(elsewhere.clipDir, 'clip.mp4'))) - (SIGNAL_AT - 1))).toBeLessThan(1 / 30);
+    const off = await cut({ ...base, muffle: false, transcriber: saying(1.0, 1.1), outDir: path.join(dir, 'out-muffle-off') });
+    expect(off.meta).toMatchObject({ muffle: false, output: { muffled: 0 } });
+    expect(await beep(path.join(off.clipDir, 'clip.mp4'))).toBeGreaterThan(-10);
+
+    // The same in the other layouts, whose picture graphs split the video, and before an end card's silence.
+    const cardBrief = path.join(dir, 'muffle-card.json');
+    await writeFile(cardBrief, JSON.stringify({ id: 'muffle-card', endCard: { seconds: 1, text: 'The end' } }));
+    const others = {
+      facecam: { layout: 'facecam', cam: { x: 1400, y: 40, width: 480, height: 270 } },
+      blur: { layout: 'blur' },
+      card: { briefFile: cardBrief, title: 'A title' },
+    };
+    for (const [name, options] of Object.entries(others)) {
+      const made = await cut({ ...base, ...options, transcriber: saying(1.0, 1.1), outDir: path.join(dir, `out-muffle-${name}`) });
+      const file = path.join(made.clipDir, 'clip.mp4');
+      expect(made.meta.output.muffled, name).toBe(1);
+      expect(await beep(file), name).toBeLessThan(-35);
+      expect((await probe(file)).duration, name).toBeCloseTo(name === 'card' ? 4 : 3, 1);
+    }
+
+    // A clip from before this existed sounds as it did.
+    const metaFile = path.join(onTheWord.clipDir, 'work', 'meta.json');
+    const { muffle, ...older } = JSON.parse(await readFile(metaFile, 'utf8'));
+    await writeFile(metaFile, JSON.stringify(older));
+    await rerender(onTheWord.clipDir);
+    expect(await beep(muffled)).toBeGreaterThan(-10);
+  }, 480_000);
 
   it('still shows the hook with captions off', async () => {
     const { clipDir, meta } = await cut({

@@ -6,6 +6,7 @@ import { applyReplacements } from './brief/replacements.js';
 import { loadBrief } from './brief/schema.js';
 import { buildAss, checkHook, cleanOverlayText, HOOK_SECONDS } from './captions/ass.js';
 import { groupWords } from './captions/group.js';
+import { maskProfanity, swearWindows } from './captions/mask.js';
 import { findVoiceLevels, snapToVoice } from './captions/onsets.js';
 import { findPauses, snapToSpeech } from './captions/pauses.js';
 import { buildFilter, camPanelHeight, checkBlurs, OUT_FPS, OUT_HEIGHT, OUT_WIDTH, SUBTITLE_FILE } from './layout.js';
@@ -61,6 +62,8 @@ const LENGTH_TOLERANCE = 0.1;
  * @param {{ x: number, y: number, width: number, height: number }} [options.cam]
  * @param {string} [options.hook]
  * @param {number} [options.hookSeconds]   how long the hook stays; 0 means the whole clip
+ * @param {boolean} [options.censor]       cover swear words in the captions and the hook (F*CK); on unless turned off
+ * @param {boolean} [options.muffle]       muffle the sound while a swear word is spoken; on unless turned off, and only with captions
  * @param {boolean} [options.captions]
  * @param {string} [options.lang]
  * @param {string} [options.briefFile]
@@ -87,6 +90,8 @@ export async function cut({
   blurs = [],
   hook,
   hookSeconds = HOOK_SECONDS,
+  censor = true,
+  muffle = true,
   captions = true,
   lang = 'en',
   briefFile,
@@ -179,6 +184,8 @@ export async function cut({
     blurs: blurBoxes,
     hook: hookText,
     hookSeconds,
+    censor: Boolean(censor),
+    muffle: Boolean(muffle),
     captions: wantCaptions,
     lang,
     briefPath,
@@ -356,10 +363,17 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
   const total = seconds + (card?.seconds ?? 0);
 
   let groups = [];
+  let words = [];
   if (meta.captions) {
-    groups = groupWords((await readTranscript(workDir)).words, seconds);
+    ({ words } = await readTranscript(workDir));
+    groups = groupWords(words, seconds);
     if (groups.length === 0) warnings.push('No speech was found in this range, so the clip has no captions.');
+    // Swear words are covered in what is drawn only; the transcript keeps the real words.
+    if (meta.censor) groups = groups.map((group) => ({ ...group, text: maskProfanity(group.text) }));
   }
+
+  // The sound is muffled while a swear word is spoken. It needs the word times, so only with captions on.
+  const muffle = meta.muffle ? swearWindows(words, seconds) : [];
 
   const shown = onScreenTexts(meta.hook, meta.brief);
   const subtitles = groups.length > 0 || Boolean(shown.hook || shown.disclosure || shown.endCard);
@@ -367,7 +381,8 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
   if (subtitles) {
     const ass = buildAss({
       groups,
-      hook: shown.hook,
+      // Covered here and not in `shown`, which the brief's checks read: they judge the real words.
+      hook: meta.censor && shown.hook ? maskProfanity(shown.hook) : shown.hook,
       hookSeconds: meta.hookSeconds,
       disclosure: shown.disclosure,
       endCard: shown.endCard ? { text: shown.endCard, seconds: card.seconds } : null,
@@ -391,6 +406,7 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
     game: meta.game ?? undefined,
     overlay: overlaySpec,
     blurs: meta.blurs,
+    muffle,
     subtitles,
     endCard: card ? { at: seconds, seconds: card.seconds, image: Boolean(card.image) } : undefined,
   });
@@ -429,6 +445,7 @@ async function renderClip(clipDir, workDir, meta, info, warnings, onStep) {
     seconds: Math.round(result.duration * 1000) / 1000,
     audio: result.audioStreams > 0,
     captionGroups: groups.length,
+    muffled: muffle.length,
   };
   meta.checks = meta.brief ? await checkAgainst(clipDir, workDir, meta, meta.brief, result) : [];
   await writeJson(path.join(workDir, META_FILE), meta);
@@ -523,6 +540,10 @@ async function readMeta(workDir) {
     blurs: [],
     hook: null,
     hookSeconds: HOOK_SECONDS,
+    // Clips from before swear words were covered keep showing them, as when they were made.
+    censor: false,
+    // And sound as they did.
+    muffle: false,
     captions: false,
     lang: 'en',
     briefPath: null,

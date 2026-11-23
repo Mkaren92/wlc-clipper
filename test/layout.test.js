@@ -3,6 +3,31 @@ import { buildFilter, CAM_HEIGHT, checkBlurs, CAM_MAX_HEIGHT, CAM_MIN_HEIGHT, ca
 
 const landscape = { width: 1920, height: 1080 };
 
+describe('muffling the sound', () => {
+  const source = { width: 1920, height: 1080, audioStreams: 1 };
+  const windows = [{ start: 0.42, end: 0.92 }, { start: 3, end: 3.5 }];
+
+  it('leaves the graph and the sound exactly as they were when there is nothing to muffle', () => {
+    for (const endCard of [undefined, { at: 3, seconds: 1 }]) {
+      const before = buildFilter({ layout: 'center', source, endCard });
+      expect(buildFilter({ layout: 'center', source, endCard, muffle: [] })).toEqual(before);
+    }
+    expect(buildFilter({ layout: 'center', source, muffle: [] }).audioLabel).toBeNull(); // the source's own sound
+  });
+
+  it('muffles only inside the windows, before the silence under an end card', () => {
+    const when = "enable='between(t,0.42,0.92)+between(t,3,3.5)'";
+    const chain = `lowpass=f=300:${when},lowpass=f=300:${when},lowpass=f=300:${when},volume=1.5:${when}`;
+    const plain = buildFilter({ layout: 'center', source });
+    const muffled = buildFilter({ layout: 'center', source, muffle: windows });
+    expect(muffled.graph).toBe(`${plain.graph};[0:a:0]${chain}[a]`); // the picture is untouched
+    expect(muffled.audioLabel).toBe('[a]');
+    expect(buildFilter({ layout: 'center', source, muffle: windows, endCard: { at: 4, seconds: 1 } }).graph).toContain(`;[0:a:0]${chain},apad=pad_dur=1[a]`);
+    // A video with no sound has nothing to muffle.
+    expect(buildFilter({ layout: 'center', source: { ...source, audioStreams: 0 }, muffle: windows })).toEqual(buildFilter({ layout: 'center', source: { ...source, audioStreams: 0 } }));
+  });
+});
+
 describe('blur boxes', () => {
   const box = { x: 600, y: 300, width: 120, height: 80, start: 1, end: 2.5, style: 'blur' };
 

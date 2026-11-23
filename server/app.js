@@ -71,6 +71,8 @@ const cutRequest = z.strictObject({
   hook: optionalText,
   hookSeconds: z.number().min(0).default(2.5),
   captions: z.boolean().default(true),
+  censor: z.boolean().default(true),
+  muffle: z.boolean().default(true),
   lang: z.string().trim().regex(LANG_PATTERN).default('en'),
   brief: optionalText,
   title: optionalText,

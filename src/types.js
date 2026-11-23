@@ -59,13 +59,15 @@
  *   the webcam panel's height in the clip; null for clips made before it followed the box (640)
  * @property {string | null} hook
  * @property {number} hookSeconds   how long the hook stays on screen; 0 means the whole clip
+ * @property {boolean} censor   swear words in the captions and the hook are drawn with a letter covered (F*CK)
+ * @property {boolean} muffle   the sound is muffled while a swear word is spoken (needs captions, for the word times)
  * @property {boolean} captions   whether the clip has a transcript to caption from
  * @property {string} lang
  * @property {string | null} briefPath   the brief file the clip was made with
  * @property {import('./brief/schema.js').Brief | null} brief   a copy of that
  *   brief as it was then, so a later render does not depend on the file
  * @property {{ file: string, width: number, height: number, fps: number,
- *   seconds: number, audio: boolean, captionGroups: number } | null} output
+ *   seconds: number, audio: boolean, captionGroups: number, muffled?: number } | null} output
  * @property {import('./brief/check.js').CheckResult[]} checks   result of each brief rule
  * @property {string} createdAt   local time with UTC offset
  */

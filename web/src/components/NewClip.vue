@@ -95,6 +95,8 @@ const trim = ref(0);
 const hook = ref('');
 const hookSeconds = ref(2.5); // 0 keeps the hook for the whole clip
 const captions = ref(true);
+const censor = ref(true); // swear words drawn as F*CK
+const muffle = ref(true); // and muffled in the sound
 const lang = ref('en');
 const brief = ref('');
 const title = ref('');
@@ -374,6 +376,8 @@ async function cut() {
       hook: hook.value,
       hookSeconds: hookSeconds.value,
       captions: captions.value,
+      censor: censor.value,
+      muffle: muffle.value,
       lang: lang.value,
       brief: brief.value,
       title: title.value,
@@ -660,6 +664,8 @@ async function cut() {
 
           <div class="row option">
             <label class="check fixed"><input v-model="captions" type="checkbox" /> Burn in captions</label>
+            <label class="check fixed" title="In the captions and the hook: one letter of each swear word becomes a star."><input v-model="censor" type="checkbox" /> Cover swear words (F*CK)</label>
+            <label class="check fixed" title="For the length of each swear word the sound is muffled: you hear that something is said, not the word. Needs captions, which give the word times."><input v-model="muffle" type="checkbox" :disabled="!captions" /> Muffle them in the voice</label>
             <div class="narrow">
               <label for="lang">Spoken language</label>
               <input id="lang" v-model="lang" type="text" />
