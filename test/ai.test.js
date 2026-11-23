@@ -294,11 +294,13 @@ describe('hook suggestions', () => {
   const said = [['He', 0.2, 0.4], ['really', 0.4, 0.8], ['did', 0.8, 1.0], ['that.', 1.0, 1.4], ['No', 2.0, 2.2], ['way!', 2.2, 2.6]].map(([text, start, end]) => ({ text, start, end }));
   const transcriber = {
     name: 'fake', isInstalled: async () => true,
-    transcribe: async (file) => {
+    transcribe: async (file, options) => {
       transcribed.push(file);
+      howAsked.push(options);
       return { language: 'en', words: said };
     },
   };
+  const howAsked = [];
   const ai = (answer) => ({
     service: 'Fake', model: 'fake-1', help: 'Set it up.', isConfigured: () => true,
     ask: async (request) => {
@@ -320,6 +322,8 @@ describe('hook suggestions', () => {
     transcribed = [];
     const result = await suggestHooks({ source, start: 1, end: 4, cacheDir: path.join(dir, 'none'), transcriber, ai: ai({ hooks: ['He REALLY did that', 'No way he did that?', 'Wait for it'] }) });
     expect(transcribed).toHaveLength(1);
+    // The fast way, not the captions' two passes: a hook reads only the words.
+    expect(howAsked.at(-1)).toMatchObject({ batched: true });
     expect(result).toMatchObject({ transcribed: true, model: 'fake-1' });
     expect(result.hooks.map((hook) => hook.text)).toEqual(['He REALLY did that', 'No way he did that?', 'Wait for it']);
     const [request] = asked;

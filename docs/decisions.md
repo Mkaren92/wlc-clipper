@@ -486,6 +486,7 @@ Asked for on 2026-11-23: a 1-hour video took almost 6 minutes to transcribe for 
 - **Any failure of the card falls back to the processor**, as does a PC with no card (tried with the card hidden: it used the processor and said nothing).
 - **The transcript can be made straight after a download** (`prepareTranscript`), as a job of its own after the download job, so it shows in Activity and a stop loses nothing of the download. On by default on the Download page, remembered in the browser. It waits behind other jobs and other jobs wait behind it, as always (one job at a time); on the processor that is minutes, which is why it is a box to untick. Videos over 60 minutes are skipped, since suggestions refuse them.
 - **Not verified:** the box on the Download page in a browser (the page was built only); `npm run setup` run on a PC with no card (the check was written, not run there).
+- **A hook's range is transcribed the same fast way** (2026-11-23), when no whole-video transcript is kept. The owner found hooks slower after the captions' second pass came in: a hook on 46 s of a stream took 49 s, of which the range's transcript, made the captions' way with the second pass, was 25.7 s; the fast way took 5.4 s on the card with the same words. A hook reads only the words, not caption timing. Claude Code's own answer was not the cause: a trivial question took under 4 s.
 
 ## Suggested moments hear where the streamer gets loud
 
