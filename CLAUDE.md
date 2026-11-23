@@ -9,6 +9,7 @@ Read these before changing behaviour:
 - `README.md`: how the tool is used, every command and flag, the brief format.
 - `docs/decisions.md`: where the code departs from the spec and why, with the measurements behind each choice. Check it before "fixing" something that looks odd.
 - `docs/roadmap.md`: what is built, what the owner still owes, what comes next.
+- `docs/home-pc.md`: the owner's own steps for connecting the home PC to the data repository. Keep it true when sync's page or messages change.
 - `docs/install-windows.md`: installing on Windows through WSL. Keep its versions, sizes and expected outputs true when setup, the commands or the test count change.
 - `docs/build-spec-v1.pdf`: the original spec. The code and `docs/decisions.md` win where they differ from it.
 

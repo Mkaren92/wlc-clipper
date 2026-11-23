@@ -290,6 +290,8 @@ Your data goes to a **private** repository of your own on GitHub, separate from 
 2. On the computer that has your data, open "My data", paste the repository's address (as the browser shows it is fine), press "Check this address", then "Connect and send".
 3. On every other computer do the same. The page shows what is on GitHub beside what is there and asks whose lists to keep: choose "Take GitHub's data onto this computer".
 
+The steps for a second computer, with what to do when GitHub does not know it yet, are in [docs/home-pc.md](docs/home-pc.md).
+
 From then on nothing needs pressing. The dashboard syncs when it starts and within a minute of a change, here or on the other computer. The section shows "In sync", what last arrived or was sent, and has "Sync now". The "My data" button in the left column shows "check sync" when something needs a look.
 
 - **The tool refuses** the repository that holds the code, and a repository that is public.
