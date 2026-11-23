@@ -97,15 +97,17 @@ export function isSwear(text) {
   return text.includes('*') || maskProfanity(text) !== text;
 }
 
-// The muffle starts a little before the word and ends a little after it: word
-// times are good to about a tenth of a second, and a word's end is often early.
-const BEFORE = 0.08;
-const AFTER = 0.12;
+// Only the middle of the word is muffled, so its first and last sounds stay
+// clear (the owner asked for less than the whole word on 2026-11-23; before,
+// it was the whole word and a little on each side). A very short word is
+// muffled whole: less than this many seconds of muffle is hardly heard.
+export const MUFFLE_PART = 0.6;
+const MUFFLE_LEAST = 0.12;
 
 /**
  * When the swear words are spoken, for muffling the sound: one window per
- * word, a little wider than the word, kept inside the clip, with windows
- * that touch joined into one.
+ * word, over the middle of it, kept inside the clip, with windows that touch
+ * joined into one.
  *
  * @param {{ text: string, start: number, end: number }[]} words   times in seconds from the start of the clip
  * @param {number} clipSeconds
@@ -115,9 +117,12 @@ export function swearWindows(words, clipSeconds) {
   const windows = [];
   for (const word of words) {
     if (!isSwear(word.text)) continue;
-    const start = Math.max(0, word.start - BEFORE);
-    const end = Math.min(clipSeconds, word.end + AFTER);
-    if (!(end > start)) continue;
+    const from = Math.max(0, word.start);
+    const to = Math.min(clipSeconds, word.end);
+    if (!(to > from)) continue;
+    const length = Math.min(to - from, Math.max(MUFFLE_LEAST, (to - from) * MUFFLE_PART));
+    const start = from + (to - from - length) / 2;
+    const end = start + length;
     const last = windows.at(-1);
     if (last && start <= last.end) last.end = Math.max(last.end, end);
     else windows.push({ start, end });

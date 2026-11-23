@@ -433,7 +433,7 @@ Every command has built-in help: `node src/cli.js cut --help`.
 | `--hook-seconds <seconds>` | How long the hook stays on screen; `0` keeps it for the whole clip | `2.5` |
 | `--no-captions` | Skip transcription and captions | captions on |
 | `--no-censor` | Show swear words in the captions and the hook as they are. Without it they are drawn with a letter covered (`F*CK`, `SH*T`); the voice, the saved transcript and `post.txt` are not changed. On the page: "Cover swear words (F*CK)" | covered |
-| `--no-muffle` | Leave the sound as it is while a swear word is spoken. Without it the sound is muffled for the length of each such word, so you hear that something is said but not the word. Needs captions (they give the word times); a word the speech recogniser missed is not muffled. On the page: "Muffle them in the voice" | muffled |
+| `--no-muffle` | Leave the sound as it is while a swear word is spoken. Without it the sound is muffled over the middle of each such word (about 60% of it), so you hear that something is said, and how the word begins and ends, but not the word. Needs captions (they give the word times); a word the speech recogniser missed is not muffled. On the page: "Muffle them in the voice" | muffled |
 | `--lang <code>` | Language spoken in the video | `en` |
 | `--brief <file>` | Campaign brief to follow and check the clip against | none |
 | `--title <text>` | Title for `post.txt` | the hook |

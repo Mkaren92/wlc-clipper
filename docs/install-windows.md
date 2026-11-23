@@ -183,7 +183,7 @@ This takes two to three minutes and uses every processor core.
 
 ```
  Test Files  22 passed (22)
-      Tests  557 passed (557)
+      Tests  559 passed (559)
 ```
 
 The numbers grow as the project grows. What matters is that everything passed. If a test fails, see [Troubleshooting](#troubleshooting) before going on.

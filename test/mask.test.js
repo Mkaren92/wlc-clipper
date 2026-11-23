@@ -49,16 +49,17 @@ describe('covering swear words in drawn text', () => {
     expect(captionWidth('*') - captionWidth('')).toBe(Math.round((389 * 66.5) / 1000));
   });
 
-  it('finds when the swear words are spoken: a little wider than the word, inside the clip, joined when they touch', () => {
+  it('finds when the swear words are spoken: the middle of the word, inside the clip, joined when they touch', () => {
     const words = [
-      { text: 'What', start: 0.02, end: 0.2 }, { text: 'the', start: 0.2, end: 0.3 }, { text: 'fuck', start: 0.03, end: 0.5 },
-      { text: 'is', start: 0.5, end: 0.6 }, { text: 'this', start: 0.6, end: 0.9 },
-      { text: 'Shit,', start: 2.0, end: 2.3 }, { text: 'shit!', start: 2.35, end: 2.6 }, // one after the other: one window
+      { text: 'What', start: 0.02, end: 0.2 }, { text: 'the', start: 0.2, end: 0.3 }, { text: 'fuck', start: 0.5, end: 1.0 },
+      { text: 'is', start: 1.0, end: 1.1 }, { text: 'this', start: 1.1, end: 1.4 },
+      { text: 'Shit,', start: 2.0, end: 2.1 }, { text: 'shit!', start: 2.1, end: 2.2 }, // short ones are muffled whole; back to back: one window
       { text: 'f***', start: 4.0, end: 4.3 }, // starred by the recogniser: still muffled
       { text: 'BITCH', start: 5.9, end: 6.4 }, // runs past the end of the clip
       { text: 'fuck', start: 7, end: 7.2 }, // after the clip: nothing
     ];
-    expect(swearWindows(words, 6)).toEqual([{ start: 0, end: 0.62 }, { start: 1.92, end: 2.72 }, { start: 3.92, end: 4.42 }, { start: 5.82, end: 6 }]);
+    // 60% of the word, in its middle: half a second of "fuck" is muffled from 0.6 to 0.9.
+    expect(swearWindows(words, 6)).toEqual([{ start: 0.6, end: 0.9 }, { start: 2, end: 2.2 }, { start: 4.06, end: 4.24 }, { start: 5.9, end: 6 }]);
     expect(swearWindows(words.slice(0, 2), 6)).toEqual([]);
     expect(swearWindows([], 6)).toEqual([]);
     expect([isSwear('Fuck!'), isSwear('f***'), isSwear('duck'), isSwear('Scunthorpe')]).toEqual([true, true, false, false]);

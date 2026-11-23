@@ -78,8 +78,9 @@ async function rangeWords({ source, start, end, lang, cacheDir, transcriber, onS
   if (info.audioStreams === 0) throw new Error('This video has no sound, so there is nothing to base a hook on.');
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'clipper-hook-'));
   try {
-    const audio = await extractAudio({ source: info.path, start, seconds: Math.min(end, info.duration) - start, workDir });
-    const transcript = checkTranscript(await transcriber.transcribe(audio, { lang }));
+    const seconds = Math.min(end, info.duration) - start;
+    const audio = await extractAudio({ source: info.path, start, seconds, workDir });
+    const transcript = checkTranscript(await transcriber.transcribe(audio, { lang, seconds }));
     const words = snapToSpeech(transcript.words, await findPauses(audio));
     return Object.assign(words, { transcribed: true });
   } finally {

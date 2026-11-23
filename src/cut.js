@@ -212,7 +212,7 @@ export async function cut({
     onStep('transcribing');
     try {
       const audioFile = await extractAudio({ source: sourcePath, start, seconds: end - start, workDir });
-      const transcript = checkTranscript(await transcriber.transcribe(audioFile, { lang }));
+      const transcript = checkTranscript(await transcriber.transcribe(audioFile, { lang, seconds: end - start }));
       transcript.words = snapToSpeech(transcript.words, await findPauses(audioFile));
       transcript.words = snapToVoice(transcript.words, await findVoiceLevels(audioFile));
       if (brief) transcript.words = applyReplacements(transcript.words, brief.replacements);
