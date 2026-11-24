@@ -7,7 +7,7 @@
 // how long the result is, how long the screen is split, and which part of each
 // video shows in its half. What is seen here is what "Make the combined video" makes.
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
-import { COMBINE_SIZES, halves, MAIN_SHARES, MAX_ZOOM, rangeOf, shownPart, timing } from '../../../src/combine/layout.js';
+import { COMBINE_SIZES, halves, lineUp, MAIN_SHARES, MAX_ZOOM, rangeOf, shownPart, timing } from '../../../src/combine/layout.js';
 import { api } from '../api.js';
 import Icon from '../components/Icon.vue';
 import TrashButton from '../components/TrashButton.vue';
@@ -40,6 +40,9 @@ const copy = (value) => JSON.parse(JSON.stringify(value));
 const draft = ({ result: _result, ...settings }) => JSON.stringify(settings);
 const unsaved = computed(() => current.value !== null && draft(current.value) !== savedText.value);
 const clock = (seconds) => `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(1).padStart(4, '0')}`;
+// A sync mark is shown to the hundredth: a frame of the result is a thirtieth of a second.
+const clockFine = (seconds) => `${Math.floor(seconds / 60)}:${(seconds % 60).toFixed(2).padStart(5, '0')}`;
+const FRAME = 1 / 30;
 
 async function load() {
   try {
@@ -122,7 +125,7 @@ function choose(side, value) {
     return;
   }
   const [folder, ...rest] = value.split('/');
-  current.value[side] = { library: folder, name: rest.join('/'), start: null, end: null, zoom: 1, x: 0.5, y: 0.5 };
+  current.value[side] = { library: folder, name: rest.join('/'), start: null, end: null, mark: null, zoom: 1, x: 0.5, y: 0.5 };
   learn(current.value[side]);
 }
 const urlOf = (video) => (video.library === 'in' ? api.videoUrl(video.name) : video.library === 'parts' ? api.partUrl(video.name) : api.clipUrl(video.name, 0));
@@ -151,12 +154,60 @@ const blankIsNull = (video, field, value) => (video[field] = value === '' || val
 const size = computed(() => COMBINE_SIZES[current.value.preset]);
 const boxes = computed(() => halves(size.value, current.value.main, current.value.mainShare));
 const otherSide = computed(() => (current.value.main === 'left' ? 'right' : 'left'));
-const range = (side) => rangeOf(current.value[side], infoOf(side).duration);
-/** Lengths of the result and of its split part, or null until both videos are chosen and read. */
+// The two videos as they will be made: with a sync mark on both, the main one's start comes from the marks (layout.js).
+const lined = computed(() => (current.value ? lineUp(current.value) : null));
+const sync = computed(() => lined.value?.sync ?? null);
+const locked = (side) => side === current.value.main && sync.value !== null && 'start' in sync.value;
+const range = (side) => rangeOf(lined.value[side], infoOf(side).duration);
+/** Lengths of the result and of its split part, or null until both videos are chosen and read, or the marks cannot meet. */
 const plan = computed(() => {
   if (!current.value || !infoOf('left') || !infoOf('right')) return null;
+  if (sync.value && 'problem' in sync.value) return null;
   return timing(range(current.value.main).seconds, range(otherSide.value).seconds);
 });
+// The main video's saved start follows the marks, so what is saved is what is made.
+watch(() => (sync.value && 'start' in sync.value ? sync.value.start : null), (start) => {
+  const main = current.value?.[current.value.main];
+  if (start !== null && main && main.start !== start) main.start = start;
+});
+
+// --- Sync marks: watching one video on its own, with its sound, and marking a frame ------
+// Each video has a player of its own in its panel (asked for on 2026-11-24: frames without sound
+// were no way to find the goal or the shout). Only one thing plays at a time: starting one of
+// these pauses the preview and the other one, and the preview pauses them.
+
+const own = { left: null, right: null }; // each video's own player
+const ownTime = reactive({ left: 0, right: 0 }); // where each one is, in that video's own seconds
+const setOwn = (side, element) => (own[side] = element);
+function ownPlays(side) {
+  pause();
+  for (const other of SIDES) if (other !== side) own[other]?.pause();
+}
+const pauseOwn = () => SIDES.forEach((side) => own[side]?.pause());
+/** Show a video's own player at a moment of that video, paused. */
+function ownTo(side, seconds) {
+  const player = own[side];
+  if (!player) return;
+  player.pause();
+  player.currentTime = Math.min(Math.max(seconds, 0), infoOf(side)?.duration ?? 0);
+  ownTime[side] = player.currentTime;
+}
+/** The frame a video's own player shows now, in that video's own seconds. */
+const shownNow = (side) => Math.round((own[side]?.currentTime ?? 0) * 1000) / 1000;
+function markHere(side) {
+  own[side]?.pause();
+  current.value[side].mark = shownNow(side);
+}
+function moveMark(side, by) {
+  const video = current.value[side];
+  const whole = infoOf(side)?.duration ?? 0;
+  video.mark = Math.round(Math.min(Math.max((video.mark ?? 0) + by, 0), whole) * 1000) / 1000;
+  ownTo(side, video.mark);
+}
+/** Show the combined video a second before the marks meet. */
+function toMarks() {
+  if (sync.value && 'meet' in sync.value) seek(Math.max(0, sync.value.meet - 1));
+}
 const part = (side) => (infoOf(side) ? shownPart(infoOf(side), boxes.value[side], current.value[side]) : null);
 /** Whether there is anything to move along an axis: nothing sticks out along it when the video just fits. */
 const sticksOut = (side, axis) => {
@@ -220,6 +271,7 @@ function tick() {
 
 async function play() {
   if (!plan.value || !players.left || !players.right) return;
+  pauseOwn();
   if (time.value >= plan.value.seconds - 0.05) time.value = 0;
   place();
   setVolumes();
@@ -258,8 +310,11 @@ watch(() => current.value && [current.value.left?.name, current.value.left?.star
   if (current.value) seek(0);
 }, { flush: 'post' });
 watch(() => current.value?.sound, setVolumes);
-// Leaving the page stops both videos.
-onUnmounted(pause);
+// Leaving the page stops every video on it.
+onUnmounted(() => {
+  pause();
+  pauseOwn();
+});
 
 // --- Saving and making the video ---------------------------------------------------
 
@@ -343,8 +398,13 @@ async function generate() {
             <div class="row middle head">
               <h2 class="fixed">Preview</h2>
               <span v-if="plan" class="muted numbers">{{ clock(plan.seconds) }} long · split for the first {{ clock(plan.split) }}</span>
-              <span v-else class="muted">Choose both videos to see them together.</span>
+              <span v-else-if="!(sync && 'problem' in sync)" class="muted">Choose both videos to see them together.</span>
+              <template v-if="plan && sync && 'meet' in sync">
+                <span class="chip accent fixed numbers">Marks meet at {{ clockFine(sync.meet) }}</span>
+                <button class="small fixed" @click="toMarks">Go to the marks</button>
+              </template>
             </div>
+            <p v-if="sync && 'problem' in sync" class="error" role="alert">{{ sync.problem }}</p>
             <!-- The stage has the shape of the finished video. Its colours are fixed, like a player's. -->
             <div class="stage" :class="current.preset" :style="{ aspectRatio: `${size.width} / ${size.height}` }">
               <div v-for="side in SIDES" :key="side" class="half" :style="boxStyle(side)">
@@ -385,8 +445,10 @@ async function generate() {
               <button class="fixed" :disabled="!current.left && !current.right" @click="swap">Swap sides</button>
             </div>
             <p class="hint">
-              Move a video's start until the two are in step. The main video sets the length and has the whole screen
-              once the other ends. The sound balance in this preview is only rough.
+              Move a video's start until the two are in step, or mark the same moment in both, such as the goal and the
+              streamer's reaction to it: the other video then plays from its start, and the main video's start is set so the
+              two marks meet. The main video sets the length and has the whole screen once the other ends. The sound balance
+              in this preview is only rough.
             </p>
           </section>
         </div>
@@ -412,16 +474,43 @@ async function generate() {
             <p v-else-if="current[side] && infoOf(side) === null && info[key(current[side])] === null" class="notice">This video is not in the project any more. Choose another.</p>
 
             <template v-if="current[side] && infoOf(side)">
-              <label :for="`start-${side}`">Starts at: {{ clock(current[side].start ?? 0) }} of {{ clock(infoOf(side).duration) }}</label>
-              <input :id="`start-${side}`" type="range" min="0" :max="infoOf(side).duration" step="0.1" :value="current[side].start ?? 0" @input="current[side].start = Number($event.target.value)" />
+              <label :for="`start-${side}`">
+                Starts at: {{ clock(lined[side].start ?? 0) }} of {{ clock(infoOf(side).duration) }}
+                <span v-if="locked(side)" class="muted">· set by the sync marks</span>
+              </label>
+              <input :id="`start-${side}`" type="range" min="0" :max="infoOf(side).duration" step="0.1" :value="lined[side].start ?? 0" :disabled="locked(side)" @input="current[side].start = Number($event.target.value)" />
               <div class="row nudge">
-                <button class="small fixed" @click="move(side, 'start', -1)">−1 s</button>
-                <button class="small fixed" @click="move(side, 'start', -0.1)">−0.1 s</button>
-                <button class="small fixed" @click="move(side, 'start', 0.1)">+0.1 s</button>
-                <button class="small fixed" @click="move(side, 'start', 1)">+1 s</button>
+                <button class="small fixed" :disabled="locked(side)" @click="move(side, 'start', -1)">−1 s</button>
+                <button class="small fixed" :disabled="locked(side)" @click="move(side, 'start', -0.1)">−0.1 s</button>
+                <button class="small fixed" :disabled="locked(side)" @click="move(side, 'start', 0.1)">+0.1 s</button>
+                <button class="small fixed" :disabled="locked(side)" @click="move(side, 'start', 1)">+1 s</button>
                 <span />
                 <label :for="`end-${side}`" class="fixed inline">Ends at</label>
                 <input :id="`end-${side}`" class="fixed end" type="number" min="0" step="0.1" placeholder="the end" title="In seconds. Empty means the end of the video." :value="current[side].end ?? ''" @change="blankIsNull(current[side], 'end', $event.target.value)" />
+              </div>
+
+              <div class="row middle part-head">
+                <h3 class="fixed">Sync mark</h3>
+                <span class="fixed numbers" :class="{ muted: current[side].mark === null }">{{ current[side].mark === null ? 'not set' : clockFine(current[side].mark) }}</span>
+                <span />
+                <button v-if="current[side].mark !== null" class="small fixed" @click="current[side].mark = null">Clear</button>
+              </div>
+              <!-- This video on its own, with its sound: play it, pause on the moment, and mark that frame. -->
+              <video
+                :key="`own-${key(current[side])}`" :ref="(element) => setOwn(side, element)" class="own" :src="urlOf(current[side])"
+                controls preload="metadata" playsinline @play="ownPlays(side)" @timeupdate="ownTime[side] = $event.target.currentTime" @seeked="ownTime[side] = $event.target.currentTime"
+              />
+              <div class="row nudge marks">
+                <span class="fixed numbers muted">{{ clockFine(ownTime[side]) }}</span>
+                <button class="small fixed" title="Pause and go back one frame" @click="ownTo(side, ownTime[side] - FRAME)">−1 frame</button>
+                <button class="small fixed" title="Pause and go forward one frame" @click="ownTo(side, ownTime[side] + FRAME)">+1 frame</button>
+                <button class="small fixed primary" @click="markHere(side)">Mark this frame</button>
+                <button v-if="current[side].mark !== null" class="small fixed" title="Show the marked frame in the player above" @click="ownTo(side, current[side].mark)">Go to the mark</button>
+                <span />
+                <template v-if="current[side].mark !== null">
+                  <button class="small fixed" title="Move the mark a frame earlier" @click="moveMark(side, -FRAME)">Mark −1 frame</button>
+                  <button class="small fixed" title="Move the mark a frame later" @click="moveMark(side, FRAME)">+1 frame</button>
+                </template>
               </div>
 
               <div class="row middle part-head">
@@ -499,10 +588,14 @@ async function generate() {
 .nudge { margin-top: 6px; align-items: center; gap: 6px; flex-wrap: nowrap; }
 .nudge button { padding: 2px 7px; }
 .nudge .end { width: 92px; min-height: 28px; padding: 2px 8px; }
+/* Under a video's own player: the time, the frame steps and the mark buttons, on two lines when they do not fit. */
+.nudge.marks { flex-wrap: wrap; row-gap: 6px; }
 .part-head { margin-top: 12px; flex-wrap: nowrap; }
 .part-head h3 { margin: 0; }
 .part { gap: 12px; }
 .notice { margin: 10px 0 0; }
+/* Each video's own player: black behind it, like the preview's stage. */
+.own { display: block; width: 100%; max-height: 240px; margin-top: 8px; background: black; border-radius: var(--radius); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .result video { width: 100%; max-height: 60vh; background: black; border-radius: var(--radius); display: block; }
 .result video.portrait { max-width: 300px; }

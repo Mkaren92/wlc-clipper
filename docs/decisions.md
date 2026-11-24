@@ -583,6 +583,25 @@ Asked for on 2026-11-24, after the captions moved to large-v3-turbo in pieces (s
 - **Whole cuts**: 28 s instead of 99 s, and 24 s instead of 69 s.
 - So captions use the card where there is one, with the processor as the fallback and `CLIPPER_TRANSCRIBE_DEVICE=cpu` to choose it.
 
+## Sync marks on the Combine page
+
+Asked for on 2026-11-24: "an option to match two videos at exact point", so a streamer's reaction lines up with the goal it reacts to. The owner chose how it behaves: they make sure the reaction starts before the goal clip's first frame and ends after it; everything of the reaction before the goal clip's first frame is cut, the goal clip plays whole, and the reaction carries on full screen after it; once both marks are set they stay locked.
+
+- **A mark is a moment in the video's own seconds**, saved with it (`mark`, null when not set), so it means the same thing whatever the starts are.
+- **The other video (the goal clip) keeps its start; the main video's start is worked out**: `main.mark - (other.mark - other.start)` (`syncStart` in `src/combine/layout.js`). The main video is the one that runs on full screen, which is what the owner wants of the reaction. Nothing new was needed for "full screen after": the main video already had it.
+- **The engine uses the same sum** (`lineUp` in `build.js`), so a start saved by an older page, or edited by hand, cannot undo the sync. Too little of the main video before its mark stops the make with the number of seconds missing, rather than shifting the goal clip by itself.
+- **Measured in a test**: a goal clip flashing 0.8 s in and a reaction flashing 1.5 s in, marked there, made into one video: both halves flash on the same frame, 0.8 s in, and the reaction's beep stays with its flash.
+- **On the page**, each video has a player of its own, with its sound and the browser's own controls (asked for the same day: silent frames on a slider were no way to find the goal or the shout). A mark is the frame that player shows; it can be stepped a thirtieth of a second (a frame of the result) at a time. Only one thing plays at a time: starting one of these players pauses the preview and the other, and "Play both" pauses them.
+- **Tried by the owner** on the home PC the same day, with each video's own player: "everything works as expected". Before that the page had only been looked at in a screenshot with both marks set ("Marks meet at 0:12.40", the reaction's start 0:18.8 and locked).
+
+## YouTube's JavaScript puzzle
+
+On 2026-11-23, with the owner's sign-in in place, every lookup failed: the downloader said "n challenge solving failed ... Ensure you have a supported JavaScript runtime and challenge solver script distribution installed", then "Only images are available". Without the sign-in the same lookup worked, with a warning that YouTube without a JavaScript runtime is deprecated. The sign-in was switched off (the file renamed) and the owner was offered the fix; on 2026-11-24 the bot check came back and the owner agreed.
+
+- **The yt-dlp team's own solver**: the `yt-dlp-ejs` package (0.8.0 on 2026-11-24), installed into `.venv` by `npm run setup` beside yt-dlp and updated with it. Not the downloader's `--remote-components ejs:github`, which would fetch code from GitHub on every run.
+- **Run by Node**, which the tool needs anyway, named by the full path of the Node running the tool (`--js-runtimes node:<path>`), so no other runtime is picked up. Deno, the downloader's default, is not installed.
+- **Measured signed in, on the owner's video WzbTJ4eRwCk**: the lookup in 5.4 s, a 5-second part the fast way in 7.8 s. The tests check that every call carries the runtime.
+
 ## Clip folder
 
 - **A clip folder is named after its hook**, at the owner's request: numbers said nothing about what a clip was. The hook is lower-cased and everything that is not a letter or a digit becomes a dash, cut at a word to 50 characters; a taken name gets `-2`, `-3`. With no hook, or a hook with nothing usable in it, the folder is the next free `clip-NNN` as before. Older numbered folders keep working. The dashboard lists clips newest first by the folder's creation time, since the names no longer sort by age, and it accepts a clip name made only of letters, digits and dashes.

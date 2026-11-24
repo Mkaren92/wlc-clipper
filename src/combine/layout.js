@@ -76,6 +76,48 @@ export function rangeOf(video, duration) {
 }
 
 /**
+ * Line the two videos up at their sync marks (asked for on 2026-11-24): the moment the owner
+ * marked in each, such as a goal and the streamer's reaction to it, comes at the same instant of
+ * the combined video. The other video plays from its own start; the main video's start is worked
+ * out from the marks, so everything of it before the other's first frame is left out, and it runs
+ * on, full screen, after the other ends.
+ *
+ * @param {{ start?: number | null, mark?: number | null } | null} main
+ * @param {{ start?: number | null, mark?: number | null } | null} other
+ * @returns {null | { start: number, meet: number } | { problem: string }}
+ *   null when a mark is missing; `start`: the main video's start in its own seconds;
+ *   `meet`: the moment of the combined video where the marks meet
+ */
+export function syncStart(main, other) {
+  if (typeof main?.mark !== 'number' || typeof other?.mark !== 'number') return null;
+  const otherStart = other.start ?? 0;
+  const meet = other.mark - otherStart;
+  if (meet < 0) return { problem: 'The other video\'s sync mark is before its start. Move its start earlier, or mark again.' };
+  const start = main.mark - meet;
+  if (start < -0.0005) {
+    return { problem: `The main video needs ${(-start).toFixed(2)} s more before its sync mark than it has. Start the other video later, or choose a main video that begins earlier.` };
+  }
+  return { start: Math.max(0, Math.round(start * 1000) / 1000), meet: Math.round(meet * 1000) / 1000 };
+}
+
+/**
+ * The two videos as they are made: when both have a sync mark, the main video's start is the
+ * one the marks give (syncStart), whatever was saved; otherwise as saved.
+ *
+ * @template {{ start?: number | null, mark?: number | null }} V
+ * @param {{ left: V | null, right: V | null, main: 'left' | 'right' }} combination
+ * @returns {{ left: V | null, right: V | null, sync: ReturnType<typeof syncStart> }}
+ */
+export function lineUp(combination) {
+  const mainSide = combination.main;
+  const otherSide = mainSide === 'left' ? 'right' : 'left';
+  const sync = syncStart(combination[mainSide], combination[otherSide]);
+  const sides = { left: combination.left, right: combination.right };
+  if (sync && 'start' in sync) sides[mainSide] = { ...combination[mainSide], start: sync.start };
+  return { ...sides, sync };
+}
+
+/**
  * How long the combined video is and how long its screen is split, in whole
  * frames. It lasts as long as the main video's part; the screen is split
  * while the other video's part runs, and the main video has it all after.

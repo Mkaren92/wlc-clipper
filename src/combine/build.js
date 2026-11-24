@@ -13,7 +13,7 @@ import { OUT_FPS } from '../layout.js';
 import { probe } from '../probe.js';
 import { run } from '../run.js';
 import { combinationDir, combinedFile, madeFrom, madeFromFile } from './combination.js';
-import { COMBINE_SIZES, halves, rangeOf, shownPart, timing } from './layout.js';
+import { COMBINE_SIZES, halves, lineUp, rangeOf, shownPart, timing } from './layout.js';
 
 // A combined video is encoded here and once more when a compilation uses it,
 // so this first encode is kept close to the source (see docs/decisions.md).
@@ -50,9 +50,12 @@ export async function buildCombination({ combination, dataDir, resolveVideo }) {
 export async function planCombination(combination, resolveVideo) {
   const size = COMBINE_SIZES[combination.preset];
   const boxes = halves(size, combination.main, combination.mainShare);
+  // With a sync mark on both videos, the main one's start is the one the marks give.
+  const lined = lineUp(combination);
+  if (lined.sync && 'problem' in lined.sync) throw new Error(lined.sync.problem);
   const sides = {};
   for (const side of ['left', 'right']) {
-    const video = combination[side];
+    const video = lined[side];
     if (!video) throw new Error(`Choose the video for the ${side} side first.`);
     const file = path.resolve(await resolveVideo(video.library, video.name));
     const info = await probe(file);

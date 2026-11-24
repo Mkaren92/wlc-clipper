@@ -153,6 +153,8 @@ describe('keeping and fetching a chat', () => {
       expect(info.chat).toBe(true);
       const args = (await readFile(argsFile, 'utf8')).trim().split('\n');
       expect(args.slice(args.indexOf('--cookies'), args.indexOf('--cookies') + 2)).toEqual(['--cookies', cookies]);
+      // YouTube's JavaScript puzzle is solved by the Node this tool runs on (2026-11-24).
+      expect(args.slice(args.indexOf('--js-runtimes'), args.indexOf('--js-runtimes') + 2)).toEqual(['--js-runtimes', `node:${process.execPath}`]);
       // The link still comes last, after "--".
       expect(args.slice(-2)).toEqual(['--', 'https://www.youtube.com/watch?v=pkStu8LFpq8']);
       expect((await stat(cookies)).mode & 0o777).toBe(0o600);

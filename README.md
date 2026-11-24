@@ -180,6 +180,8 @@ The Combine page puts two videos side by side, such as a streamer's reaction and
 2. Choose the left video and the right video from your videos, parts and clips.
 3. Mark one as the **main video**. It sets the length of the result, and it gets the whole screen once the other video has ended.
 4. Set where each video starts with its slider; the preview shows that frame at once. Press "Play both" to watch and hear them together, and nudge a start by 0.1 s or 1 s until they are in step. "Ends at" cuts a video short.
+
+   **Or line them up exactly with sync marks.** Under each video is a player of its own, with its sound: play it, pause on the moment (the goal in the goal clip, the shout in the reaction), step a frame at a time if needed, and press **"Mark this frame"**. Starting one of these players pauses the combined preview and the other player; "Go to the mark" shows the marked frame again. With both marked, the other video plays from its start and the main video's start is set so the two marks come at the same instant: everything of the main video before the other's first frame is left out, and after the other ends the main video carries on full screen. The preview says where the marks meet ("Go to the marks" jumps there), the main video's start is locked while both marks are set, and a mark can be moved a frame either way or cleared. If the main video has too little before its mark, the page says how many seconds are missing. Make the main video the reaction, and give it more before and after the goal than the goal clip has.
 5. Choose the part of each video that shows while the screen is split: zoom in, and move left or right, up or down. This is how a streamer who sits off-centre is brought into view.
 6. Choose how the screen is shared while it is split: equal (50–50), or the main video larger (60–40 or 70–30).
 7. Choose the sound: the main video in front with the other quieter (about 70 to 30), both about the same, or only the main video. The balance in the preview is only rough.
@@ -273,6 +275,8 @@ After many lookups from one connection, YouTube may answer every request with "S
    cd ~/wlc-clipper
    mv /mnt/c/Users/<you>/Downloads/www.youtube.com_cookies.txt data/youtube-cookies.txt
    ```
+
+It needs YouTube's puzzle solver, which `npm run setup` installs with the downloader (`yt-dlp-ejs`, the yt-dlp team's own, run with the Node the tool runs on): signed in, YouTube gives a video only after a small JavaScript puzzle is solved, and without the solver every lookup fails with "could not be looked up". If that happens, run `npm run setup` once.
 
 From then on the downloader uses it for video downloads, chat replays and comments. The live check and channel pictures go out without it: they ask about every channel again and again, and that many signed-in requests from one account is what gets it flagged. While YouTube is refusing your connection, the LIVE marks may say "could not be checked" until it clears; downloads keep working. No restart is needed. The tool makes the file readable by you only, never prints it, and leaves it out of "My data"; `data/` is not in the repository. To sign out, delete `data/youtube-cookies.txt`. If YouTube refuses again even so, save the file again: sign-ins expire.
 

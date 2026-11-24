@@ -25,6 +25,8 @@ const video = z.strictObject({
   name: z.string().min(1).max(200),
   start: seconds.default(null), // null means from the beginning
   end: seconds.default(null), // null means to the end
+  // The sync mark: the moment, in this video's own seconds, that must meet the other video's (2026-11-24).
+  mark: seconds.default(null),
   // Which part of it shows in its half of the screen (see shownPart in layout.js).
   zoom: z.number().min(1).max(MAX_ZOOM).default(1),
   x: share,

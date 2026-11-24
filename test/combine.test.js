@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildCombination } from '../src/combine/build.js';
 import { combinedFile, combinedResult, deleteCombination, listCombinations, newCombinationId, parseCombination, readCombination, saveCombination } from '../src/combine/combination.js';
-import { COMBINE_SIZES, halves, rangeOf, shownPart, timing } from '../src/combine/layout.js';
+import { COMBINE_SIZES, halves, lineUp, rangeOf, shownPart, syncStart, timing } from '../src/combine/layout.js';
 import { probe } from '../src/probe.js';
 import { run } from '../src/run.js';
 
@@ -45,6 +45,24 @@ describe('the sums of a combined video', () => {
     expect(shownPart({ width: 961, height: 1081 }, half).width).toBeGreaterThanOrEqual(960);
   });
 
+  it('works out the main video\'s start from the two sync marks, and says when it cannot', () => {
+    // A goal 12.4 s into its clip, the shout 225.2 s into the reaction: the reaction starts at 212.8, and they meet 12.4 s in.
+    expect(syncStart({ start: 100, mark: 225.2 }, { start: null, mark: 12.4 })).toEqual({ start: 212.8, meet: 12.4 });
+    // The other video's own start counts: from 2 s in, the goal is 10.4 s into the result.
+    expect(syncStart({ mark: 225.2 }, { start: 2, mark: 12.4 })).toEqual({ start: 214.8, meet: 10.4 });
+    // A mark missing on either: nothing to line up.
+    expect(syncStart({ mark: 5 }, { mark: null })).toBeNull();
+    expect(syncStart({ start: 3 }, { mark: 2 })).toBeNull();
+    // Too little of the main video before its mark, or the other's mark before its start.
+    expect(syncStart({ mark: 8 }, { mark: 12 })).toEqual({ problem: expect.stringMatching(/needs 4\.00 s more/) });
+    expect(syncStart({ mark: 8 }, { start: 5, mark: 3 })).toEqual({ problem: expect.stringMatching(/before its start/) });
+    // lineUp puts the worked-out start on the main video only, and leaves everything else.
+    const lined = lineUp({ main: 'right', left: { name: 'goal', start: null, mark: 12.4 }, right: { name: 'react', start: 0, end: 300, mark: 225.2 } });
+    expect(lined.right).toEqual({ name: 'react', start: 212.8, end: 300, mark: 225.2 });
+    expect(lined.left).toEqual({ name: 'goal', start: null, mark: 12.4 });
+    expect(lineUp({ main: 'left', left: { start: 4 }, right: { start: 1 } })).toEqual({ left: { start: 4 }, right: { start: 1 }, sync: null });
+  });
+
   it('holds a part to what the file has, and counts lengths in whole frames', () => {
     expect(rangeOf({ start: null, end: null }, 10)).toEqual({ start: 0, seconds: 10 });
     expect(rangeOf({ start: 2, end: 30 }, 10)).toEqual({ start: 2, seconds: 8 });
@@ -66,8 +84,10 @@ describe('a saved combination', () => {
     const bare = parseCombination({ id: 'a', name: ' Goal ', left: { library: 'in', name: 'a.mp4' } });
     expect(bare).toEqual({
       id: 'a', name: 'Goal', preset: 'landscape', main: 'left', mainShare: 50, sound: 'low', right: null,
-      left: { library: 'in', name: 'a.mp4', start: null, end: null, zoom: 1, x: 0.5, y: 0.5 },
+      left: { library: 'in', name: 'a.mp4', start: null, end: null, mark: null, zoom: 1, x: 0.5, y: 0.5 },
     });
+    // A combination saved before sync marks existed loads with none.
+    expect(parseCombination({ id: 'a', name: 'x', left: { library: 'in', name: 'a.mp4', start: 3, end: null, zoom: 1, x: 0.5, y: 0.5 } }).left.mark).toBeNull();
     expect(() => parseCombination({ id: 'a', name: 'x', delay: 2 })).toThrow(/not valid/);
     expect(() => parseCombination({ id: 'a', name: 'x', left: { library: 'etc', name: 'passwd' } })).toThrow(/not valid/);
     expect(() => parseCombination({ id: 'a', name: 'x', left: { library: 'in', name: 'a.mp4', zoom: 9 } })).toThrow(/not valid/);
@@ -182,6 +202,40 @@ describe('making a combined video', () => {
     expect(await combinedResult(dataDir, combination({ sound: 'off' }))).toMatchObject({ changedSince: true });
     expect((await readdir(path.join(dataDir, 'combinations', 'made'))).sort()).toEqual(['combination.json', 'combined.mp4', 'made-from.json']);
   }, 240_000);
+
+  it('lines the two videos up at their sync marks: both marked moments on the same frame', async () => {
+    // The thing reacted to: a flash 0.8 s into a 2-second file. The reaction: flash.mp4, its flash 1.5 s in.
+    const goal = path.join(dir, 'videos', 'goal.mp4');
+    await ff(['-f', 'lavfi', '-i', "color=c=black:s=1280x720:r=30,drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='between(t,0.8,0.92)'", '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', goal]);
+    // The main video's own start (0.5) is overruled by the marks: it starts at 1.5 - 0.8 = 0.7.
+    const built = await make({ left: { library: 'in', name: 'goal.mp4', start: null, end: null, mark: 0.8 }, right: { ...flash, mark: 1.5 } });
+    // The goal clip plays whole (2 s), then the reaction runs on to its end (4 - 0.7 = 3.3 s; its saved end, 3.5, gives 2.8).
+    expect(built.split).toBe(2);
+    expect(Math.abs(built.seconds - 2.8)).toBeLessThan(0.05);
+    // Each half flashes at 0.8 s into the result, on the same frame.
+    const flashIn = async (crop) => {
+      const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', built.file, '-an', '-vf', `crop=${crop},signalstats,metadata=print:key=lavfi.signalstats.YAVG`, '-f', 'null', '-']);
+      let time = null;
+      for (const line of stderr.split('\n')) {
+        const pts = /pts_time:([\d.]+)/.exec(line);
+        if (pts) time = Number(pts[1]);
+        const lit = /YAVG=([\d.]+)/.exec(line);
+        if (lit && Number(lit[1]) > 150) return time;
+      }
+      return null;
+    };
+    const [left, right] = [await flashIn(LEFT), await flashIn(RIGHT)];
+    expect(Math.abs(left - 0.8)).toBeLessThan(1 / 30 + 0.005);
+    expect(Math.abs(right - left)).toBeLessThan(0.001);
+    // The reaction's sound is still with its picture.
+    expect(Math.abs((await beepAt(built.file)) - right)).toBeLessThan(1 / 30 + 0.01);
+  }, 240_000);
+
+  it('says so, before making anything, when the main video has too little before its mark', async () => {
+    // The reaction's flash is 1.5 s in; a goal marked 2 s after its start would need the reaction to start 0.5 s before its file does.
+    await expect(make({ left: { library: 'in', name: 'colours.mp4', start: 0, end: null, mark: 2 }, right: { ...flash, mark: 1.5 } }))
+      .rejects.toThrow(/needs 0\.50 s more before its sync mark/);
+  });
 
   it('shows the part of a video that was asked for, and puts the main video on the side asked for', async () => {
     const leftEdge = await make({ left: { ...colours, x: 0 } });

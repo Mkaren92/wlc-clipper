@@ -18,6 +18,7 @@ Version 1 of the spec is complete: all three "evenings".
 - An intro card for a match: both clubs with their icons and names and "V" or the score, with the owner's intro sound under it
 - A video behind a card: a video file in `sounds/` gives the card its sound and a moving background
 - A second video beside a reaction in a compilation: split screen while it runs, then the reaction full screen
+- Sync marks on the Combine page (2026-11-24): mark the goal in one video and the reaction in the other, and the two meet on the same frame; the reaction's start is locked to the marks
 - A Combine page: two videos side by side with a live preview to line them up by eye, a side, a start and a shown part for each, a main video that takes the whole screen at the end, and the result offered to compilations
 - A list of leagues and clubs (name, colour, logo) to fill a match's teams from, starting with La Liga and the Premier League as of 2026–27, a "Europe" league of leading Italian, French, German and Portuguese clubs, and the 36 clubs of the 2026–27 Champions League
 - The club a streamer supports, chosen from the owner's clubs, saved as it is chosen and shown as a logo on the row
@@ -46,7 +47,7 @@ Version 1 of the spec is complete: all three "evenings".
 - Clips from a stream's chat are 1 minute (30 s before and after) since 2026-11-22, and "Skip parts already suggested" gives new parts when asking a stream again
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-587 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
+590 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
 
 ## Waiting on the owner
 
@@ -56,7 +57,7 @@ Version 1 of the spec is complete: all three "evenings".
 - **A verdict on caption timing** in continuous speech, judged by eye on real clips. Word starts after pauses were measured, and since 2026-11-22 starts under game sound (the clip "what-just-happened-here", rendered again with the fix): watch it and say whether the captions now land with the shouts.
 - **How to keep two downloader runs from rewriting the YouTube sign-in at once.** yt-dlp writes the cookies file back when it ends, and the live check runs beside a fetch or a chat download, so two can write it at the same moment and spoil it. Ways out: run downloader calls one at a time (the live check would then wait behind a long fetch), or hand each call a copy of the file (the rules say never to copy it). Found in review on 2026-11-22; not yet seen to happen.
 
-- **For the work PC, from the home PC (2026-11-24).** After `git pull`, nothing needs installing: with no NVIDIA card, transcripts (captions, whole videos, hooks) and the clip's picture are made on the processor, exactly as before. If `nvidia-smi --query-gpu=name --format=csv` does find a card there, run `npm run setup` once to get the card's libraries. On the home PC captions now run on its card (see "Captions on the graphics card" in `docs/decisions.md`): a word can start up to about 0.3 s apart between a clip made there and one made here, so compare caption timing between the two PCs with that in mind. The card code in `scripts/transcribe.py` and `src/render.js` can only be tried on the home PC: keep its fallback to the processor when changing those files, and leave a note here if it needs trying there.
+- **For the work PC, from the home PC (2026-11-24).** After `git pull`, run `npm run setup` once: it installs `yt-dlp-ejs`, the solver YouTube's JavaScript puzzle needs, without which a signed-in lookup fails with "could not be looked up" (on the home PC the sign-in was off for a day because of that); if `nvidia-smi --query-gpu=name --format=csv` finds a card there, it also installs the card's libraries. With no NVIDIA card, transcripts (captions, whole videos, hooks) and the clip's picture are made on the processor, exactly as before. The Combine page's sync marks and each video's own player need nothing; the owner tried them on the home PC and they work. Combinations stay on the PC they were made on (they do not sync), so one made at home is not on the work PC. On the home PC captions now run on its card (see "Captions on the graphics card" in `docs/decisions.md`): a word can start up to about 0.3 s apart between a clip made there and one made here, so compare caption timing between the two PCs with that in mind. The card code in `scripts/transcribe.py` and `src/render.js` can only be tried on the home PC: keep its fallback to the processor when changing those files, and leave a note here if it needs trying there.
 - **Pull the new code on every PC before adding the first Twitch channel.** A PC with older code cannot read a channels list that has a Twitch address, so its sync would stop with a message until it is updated.
 - **TwitchDownloader**, if Twitch chat is wanted: a free program to save a past broadcast's chat as JSON. It is the owner's to install.
 
@@ -77,7 +78,7 @@ Found in a review on 2026-11-22. They are in the pages, which need driving in a 
 ## Not verified
 
 - The Windows guide (`docs/install-windows.md`) on a real Windows computer. Its Ubuntu steps were run from a fresh copy cloned from GitHub; installing WSL, and the browser and Explorer on the Windows side, were written from Microsoft's documentation and not run.
-- The Combine page in the owner's hands. It was driven by script: a whole run on generated test videos with a frame counter, and a preview of two of the owner's own videos (a fetched part and a phone recording), which played in step within about 0.03 s. Lining up a real reaction by eye and ear is the owner's to judge.
+- The Combine page in the owner's hands, beyond the sync marks (which the owner used on 2026-11-24 and confirmed work). It was driven by script: a whole run on generated test videos with a frame counter, and a preview of two of the owner's own videos (a fetched part and a phone recording), which played in step within about 0.03 s. Lining up a real reaction by eye and ear is the owner's to judge.
 - How a combined video sounds. Levels were measured, not listened to.
 - The LIVE mark on one of the owner's own channels: none was live when it was built.
 - Sync beyond what has happened so far. Between the owner's two PCs it has carried changes from home to the first PC (channels, among them the first Twitch row, and pictures; 2026-11-24), and the owner reports it works at home. A clash (the same channel changed on both before a sync) and a removal have only been run between scratch machines with a repository in a folder.

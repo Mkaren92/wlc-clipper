@@ -33,7 +33,8 @@ if (!existsSync(path.join(venv, 'bin', 'pip'))) {
 // time, because YouTube changes often and old versions stop working.
 const installed =
   step('Installing faster-whisper into .venv', python, ['-m', 'pip', 'install', 'faster-whisper']) &&
-  step('Installing or updating yt-dlp in .venv', python, ['-m', 'pip', 'install', '--upgrade', 'yt-dlp']);
+  // yt-dlp-ejs is the yt-dlp team's solver for YouTube's JavaScript puzzle (2026-11-24); it is updated with yt-dlp.
+  step('Installing or updating yt-dlp and its YouTube solver in .venv', python, ['-m', 'pip', 'install', '--upgrade', 'yt-dlp', 'yt-dlp-ejs']);
 if (!installed) {
   console.error('\nThe install failed. Fix the error above, then run "npm run setup" again.');
   process.exit(1);

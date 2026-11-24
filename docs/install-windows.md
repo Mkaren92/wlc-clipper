@@ -40,7 +40,7 @@ What gets installed, and the versions it was built and measured with:
 | Python | 3.10 | comes with Ubuntu 22.04 |
 | Node.js | 24 (22.12 or later is required) | nvm, step 5 |
 | Project packages | as listed in `package-lock.json` | `npm install`, step 6 (about 150 MB) |
-| faster-whisper and yt-dlp | 1.2.1 and the newest | `npm run setup`, step 7 (about 520 MB) |
+| faster-whisper, yt-dlp and its YouTube solver (`yt-dlp-ejs`) | 1.2.1 and the newest | `npm run setup`, step 7 (about 520 MB) |
 | Speech model | Whisper `large-v3-turbo` for captions, `small` for whole-video transcripts | downloaded when first used (about 1.6 GB and 460 MB) |
 
 **Use Ubuntu 22.04, not a newer one.** Ubuntu 22.04 gives exactly ffmpeg 4.4.2 and Python 3.10, which is what every measurement in `docs/decisions.md` was taken on. Ubuntu 24.04 gives ffmpeg 6 and Python 3.12; the project has not been run there.
@@ -183,7 +183,7 @@ This takes two to three minutes and uses every processor core.
 
 ```
  Test Files  25 passed (25)
-      Tests  587 passed (587)
+      Tests  590 passed (590)
 ```
 
 The numbers grow as the project grows. What matters is that everything passed. If a test fails, see [Troubleshooting](#troubleshooting) before going on.

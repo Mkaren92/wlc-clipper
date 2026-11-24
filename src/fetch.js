@@ -377,6 +377,16 @@ export function youtubeCookiesFile(root) {
   return process.env.CLIPPER_YOUTUBE_COOKIES || path.join(root, 'data', 'youtube-cookies.txt');
 }
 
+/**
+ * YouTube gives a video's addresses only after a JavaScript puzzle is solved, and asks for it
+ * whenever the downloader is signed in (seen on 2026-11-23: with the sign-in, "n challenge solving
+ * failed ... Only images are available", and every lookup failed). The downloader solves it with
+ * the yt-dlp team's own solver scripts (the `yt-dlp-ejs` package, installed by `npm run setup`,
+ * never fetched at run time) run by a JavaScript runtime: the Node this tool runs on, named by its
+ * full path so no other is picked up.
+ */
+const SOLVER = ['--js-runtimes', `node:${process.execPath}`];
+
 /** The downloader's sign-in options: none without a cookies file, and never for a link or a folder. */
 async function cookiesArgs(file) {
   let info;
@@ -454,7 +464,7 @@ export function ytDlp() {
     // Signed in when the owner has saved a cookies file; looked for on every call, so adding
     // or removing it needs no restart. Only its path is passed, never its contents.
     const signIn = signedIn ? await cookiesArgs(cookies) : [];
-    return run(python, ['-m', 'yt_dlp', '--no-playlist', '--no-warnings', ...signIn, ...args], options);
+    return run(python, ['-m', 'yt_dlp', '--no-playlist', '--no-warnings', ...SOLVER, ...signIn, ...args], options);
   };
   // Twitch's answers about a channel (twitch.js); tests replace the whole downloader instead.
   const twitch = (login) => twitchChannel(login);
