@@ -16,7 +16,7 @@ const STATE_NAMES = { waiting: 'Waiting', working: 'Working…', done: 'Done', r
 const compilations = ref([]);
 const current = ref(null); // the compilation being edited: a copy, saved with Save or Generate
 const matches = ref([]);
-const sounds = ref({ builtIn: [], files: [], automatic: {}, lengths: {} }); // what can play under a card
+const sounds = ref({ files: [], automatic: {}, lengths: {} }); // what can play under a card
 const sources = ref([]); // for filling in the credit of a fetched video
 const prefixes = ref({}); // source id -> what its fetched files are named after
 const pictures = ref({}); // source id -> a number that changes with the channel's picture
@@ -169,15 +169,16 @@ function addCard() {
 // --- Sounds under cards ---------------------------------------------------------
 
 const cardOf = (item) => matches.value.find((m) => m.id === item.matchId)?.cards.find((c) => c.id === item.cardId);
-/** The sound "Automatic" stands for on this card: your file named after its kind, or the built-in one. */
+/** The sound "Automatic" stands for on this card: your file named after its kind, or none. */
 const autoSound = (item) => sounds.value.automatic[cardOf(item)?.type] ?? 'none';
 /** The sound a card really plays, whatever its setting says. */
 const soundOf = (item) => (item.sound === 'auto' ? autoSound(item) : item.sound);
 function soundName(choice) {
-  if (choice.startsWith('file:')) return `${choice.slice(5)} (your file)`;
-  return sounds.value.builtIn.find((sound) => `builtin:${sound.id}` === choice)?.name ?? 'no sound';
+  return choice.startsWith('file:') ? `${choice.slice(5)} (your file)` : 'no sound';
 }
 const missingFile = (item) => item.sound.startsWith('file:') && !sounds.value.files.includes(item.sound.slice(5));
+// A card saved with one of the three sounds the tool once made. They were removed; another must be chosen.
+const removedSound = (item) => item.sound.startsWith('builtin:');
 
 // One sound at a time can be listened to. Pressing the button again stops it.
 let player = null;
@@ -384,12 +385,10 @@ async function generate() {
       <section class="panel">
         <h2>Add a card</h2>
         <p class="hint first">
-          A card plays a sound and is shown exactly as long as that sound: a voice saying “Goool” under a goal, a
-          tragic chord under a red card and a soft whistle under full time. These are made by the tool (the voice is a
-          computer's), so listen before you rely on them. To use your own, put audio files in the project's
-          <code>sounds</code> folder and reload. A file named <code>intro</code>, <code>goal</code>, <code>red</code>
-          or <code>fulltime</code> (for example <code>goal.mp3</code>) is used for every card of that kind without
-          choosing anything. An intro card is silent unless there is such a file. A video file there works too
+          A card plays a sound and is shown exactly as long as that sound. The sounds are your own: put audio files
+          in the project's <code>sounds</code> folder and reload. A file named <code>intro</code>, <code>goal</code>,
+          <code>red</code> or <code>fulltime</code> (for example <code>goal.mp3</code>) is used for every card of that
+          kind without choosing anything. A card with no such file is silent and shown for 3 seconds. A video file there works too
           (for example <code>intro.mp4</code>): its sound plays and its picture moves behind the card.
         </p>
         <p v-if="matches.length === 0" class="empty">No saved cards yet. Make some on the Cards page first.</p>
@@ -516,15 +515,13 @@ async function generate() {
                   <select :id="`sound-${item.id}`" v-model="item.sound" @change="stopHearing">
                     <option value="auto">Automatic: {{ soundName(autoSound(item)) }}</option>
                     <option value="none">No sound</option>
-                    <optgroup label="Made by the tool">
-                      <option v-for="sound in sounds.builtIn" :key="sound.id" :value="`builtin:${sound.id}`">{{ sound.name }}</option>
-                    </optgroup>
+                    <option v-if="removedSound(item)" :value="item.sound">A sound the tool made (removed): choose another</option>
                     <optgroup v-if="sounds.files.length > 0 || missingFile(item)" label="Your files, from the sounds folder">
                       <option v-for="name in sounds.files" :key="name" :value="`file:${name}`">{{ name }}</option>
                       <option v-if="missingFile(item)" :value="item.sound">{{ item.sound.slice(5) }} (not in the folder any more)</option>
                     </optgroup>
                   </select>
-                  <button :disabled="item.sound === 'none' || missingFile(item)" :aria-label="`${hearing === item.id ? 'Stop' : 'Listen to'} the sound of item ${index + 1}`" @click="hear(item)">
+                  <button :disabled="item.sound === 'none' || missingFile(item) || removedSound(item)" :aria-label="`${hearing === item.id ? 'Stop' : 'Listen to'} the sound of item ${index + 1}`" @click="hear(item)">
                     <Icon :name="hearing === item.id ? 'pause' : 'play'" /> {{ hearing === item.id ? 'Stop' : 'Listen' }}
                   </button>
                 </div>

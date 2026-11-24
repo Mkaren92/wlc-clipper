@@ -59,7 +59,7 @@ const cardItem = z.strictObject({
   seconds: z.number().min(0.5).max(60).nullable().default(null),
   // What plays under the card (see sounds.js). "auto" is the sound for its
   // kind of card; compilations saved before sounds existed get it too.
-  sound: z.string().max(210).refine(isSoundChoice, 'choose "auto", "none", a built-in sound or a file from the sounds folder').default('auto'),
+  sound: z.string().max(210).refine(isSoundChoice, 'choose "auto", "none" or a file from the sounds folder').default('auto'),
 });
 
 export const timelineSchema = z.strictObject({

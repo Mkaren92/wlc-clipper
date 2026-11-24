@@ -58,7 +58,6 @@ export const api = {
   // Where a card's sound can be heard from; null for "none". `auto` is the sound "auto" stands for on that card.
   soundUrl(choice, auto) {
     const sound = choice === 'auto' ? auto : choice;
-    if (sound.startsWith('builtin:')) return `/media/sounds/builtin/${enc(sound.slice(8))}`;
     return sound.startsWith('file:') ? `/media/sounds/file/${enc(sound.slice(5))}` : null;
   },
   generate: (id) => request(`/api/compilations/${enc(id)}/generate`, { method: 'POST' }),

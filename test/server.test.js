@@ -348,26 +348,22 @@ describe('compilations', () => {
   it('lists the sounds a card can have, and serves them by name only', async () => {
     // The sounds folder is made beside the data folder, for the owner to put files in.
     const first = (await api('/api/sounds')).data;
-    expect(first.builtIn.map((sound) => sound.id)).toEqual(['goal', 'tragic', 'whistle']);
-    expect(first).toMatchObject({ files: [], automatic: { intro: 'none', goal: 'builtin:goal', red: 'builtin:tragic', fulltime: 'builtin:whistle' } });
-    // How long each plays, for a card that lasts as long as its sound.
-    expect(Object.keys(first.lengths).sort()).toEqual(['builtin:goal', 'builtin:tragic', 'builtin:whistle']);
-    expect(first.lengths['builtin:tragic']).toBeCloseTo(4.6, 1);
+    // The tool has no sounds of its own: with an empty folder every kind of card is silent.
+    expect(first).toEqual({ files: [], automatic: { intro: 'none', goal: 'none', red: 'none', fulltime: 'none' }, lengths: {} });
     const soundsDir = path.join(dir, 'sounds');
     await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '0.3', path.join(soundsDir, 'horn.wav')]);
     await writeFile(path.join(soundsDir, 'notes.txt'), 'not a sound');
     expect((await api('/api/sounds')).data).toMatchObject({ files: ['horn.wav'], lengths: { 'file:horn.wav': expect.closeTo(0.3, 1) } });
-    // A file named after a kind of card takes the built-in sound's place for that kind.
+    // A file named after a kind of card is that kind's sound. How long each plays is given too, for a card that lasts as long as its sound.
     await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=500', '-t', '0.4', path.join(soundsDir, 'goal.wav')]);
-    expect((await api('/api/sounds')).data.automatic).toEqual({ intro: 'none', goal: 'file:goal.wav', red: 'builtin:tragic', fulltime: 'builtin:whistle' });
+    expect((await api('/api/sounds')).data.automatic).toEqual({ intro: 'none', goal: 'file:goal.wav', red: 'none', fulltime: 'none' });
 
     const heard = async (address) => {
       const response = await fetch(`${base}${address}`);
       return [response.status, response.headers.get('content-type')];
     };
     expect(await heard('/media/sounds/file/horn.wav')).toEqual([200, expect.stringMatching(/^audio\//)]);
-    expect(await heard('/media/sounds/builtin/whistle')).toEqual([200, expect.stringMatching(/^audio\//)]);
-    for (const address of ['/media/sounds/file/notes.txt', '/media/sounds/file/missing.mp3', '/media/sounds/file/..%2Fin%2Fgame.mp4', '/media/sounds/builtin/trumpet', '/media/sounds/builtin/..%2Fx']) {
+    for (const address of ['/media/sounds/file/notes.txt', '/media/sounds/file/missing.mp3', '/media/sounds/file/..%2Fin%2Fgame.mp4', '/media/sounds/builtin/whistle', '/media/sounds/builtin/..%2Fx']) {
       expect((await heard(address))[0], address).toBe(404);
     }
 

@@ -147,7 +147,7 @@ async function planCard(item, timeline, dataDir, soundsDir) {
   const card = match.cards.find((c) => c.id === item.cardId);
   if (!card) throw new Error('its card was deleted from the match. Remove it from the timeline.');
   // What plays under the card: the sound for its kind, another one, a file, or nothing.
-  const sound = await resolveSound({ choice: item.sound ?? 'auto', cardType: card.type, dataDir, soundsDir });
+  const sound = await resolveSound({ choice: item.sound ?? 'auto', cardType: card.type, soundsDir });
   // A video gives the card a moving background too, and then the card's
   // see-through picture is the one laid over it.
   const overVideo = Boolean(sound?.hasPicture);

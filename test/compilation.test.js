@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { saveCardPng, saveMatch } from '../src/cards/match.js';
 import { buildCompilation, creditLayout, creditSubtitles } from '../src/compilation/build.js';
 import { buildDescription, cardTitle, chapterTime } from '../src/compilation/description.js';
-import { automaticSounds, BUILT_IN, builtInSoundFile, DEFAULT_SOUND, isSoundChoice, listSoundFiles, soundInfo, soundSeconds } from '../src/compilation/sounds.js';
+import { automaticSounds, CARD_KINDS, isSoundChoice, listSoundFiles, resolveSound, soundInfo, soundSeconds } from '../src/compilation/sounds.js';
 import { deleteCompilation, listCompilations, newCompilationId, parseTimeline, readTimeline, saveTimeline } from '../src/compilation/timeline.js';
 import { probe } from '../src/probe.js';
 import { run } from '../src/run.js';
@@ -110,15 +110,12 @@ describe('buildCompilation', () => {
     const final = await probe(built.file);
     expect([final.width, final.height, final.fps, final.audioStreams]).toEqual([1920, 1080, 30, 1]);
 
-    // Both cards have their sound under them: a voice under the goal, a soft whistle under full time.
-    expect(await level(built.file, 0.3, 1.5)).toBeGreaterThan(-40);
-    expect(await level(built.file, 8.15, 0.25)).toBeGreaterThan(-45);
-    // A sound starts when its card does. The whistle's first note eases in from
-    // 0.05 s into its sound, and its card starts at 8 s, after a clip with no sound.
-    expect(Math.abs((await soundAt(built.file, 7.5)) - 8.08)).toBeLessThan(0.06);
+    // With no sounds folder a card has no sound: the tool has none of its own (2026-11-24).
+    expect(await level(built.file, 0.3, 1.5)).toBeLessThan(-70);
+    expect(await level(built.file, 8.15, 1.5)).toBeLessThan(-70);
 
     // The flash and beep are 1.5 s into the last clip, which starts 0.5 s in and follows 10 s of other items.
-    // The card before it has a whistle under it, cut off as the card ends, and the two must still be in step.
+    // A silent card comes before it, and the two must still be in step.
     const flash = await flashAt(built.file, 9);
     const beep = await soundAt(built.file, 10.2);
     expect(Math.abs(flash - 11)).toBeLessThan(0.1);
@@ -179,14 +176,17 @@ describe('buildCompilation', () => {
     await mkdir(soundsDir, { recursive: true });
     // An owner's file as awkward as they come: mono, a low sample rate, half a second long.
     await ff(['-f', 'lavfi', '-i', 'sine=frequency=660:sample_rate=22050', '-t', '0.5', '-ac', '1', path.join(soundsDir, 'my horn.wav')]);
+    await ff(['-f', 'lavfi', '-i', 'sine=frequency=220:sample_rate=48000', '-t', '4.6', path.join(soundsDir, 'chord.wav')]);
+    // Named after the kind of card, so a full-time card set to "auto" plays it.
+    await ff(['-f', 'lavfi', '-i', 'sine=frequency=1500:sample_rate=48000', '-t', '2.9', path.join(soundsDir, 'fulltime.wav')]);
     const sounded = timeline({ id: 'sounded', items: [
-      { id: 'i1', kind: 'card', matchId: 'm1', cardId: 'goal', seconds: 2, sound: 'builtin:tragic' }, // 4.6 s of sound: longer than the card
+      { id: 'i1', kind: 'card', matchId: 'm1', cardId: 'goal', seconds: 2, sound: 'file:chord.wav' }, // 4.6 s of sound: longer than the card
       { id: 'i2', kind: 'card', matchId: 'm1', cardId: 'full', seconds: 5 }, // the whistle is 2.9 s: shorter than the card
       { id: 'i3', kind: 'card', matchId: 'm1', cardId: 'goal', seconds: 1, sound: 'none' },
       { id: 'i4', kind: 'card', matchId: 'm1', cardId: 'goal', seconds: 2, sound: 'file:my horn.wav' },
       { id: 'i5', kind: 'video', library: 'in', name: 'c.mkv', start: 0.5, end: 3.5, credit: '' },
     ] });
-    expect(sounded.items.map((item) => item.sound)).toEqual(['builtin:tragic', 'auto', 'none', 'file:my horn.wav', undefined]);
+    expect(sounded.items.map((item) => item.sound)).toEqual(['file:chord.wav', 'auto', 'none', 'file:my horn.wav', undefined]);
     const built = await buildCompilation({ timeline: sounded, dataDir, resolveVideo, soundsDir });
 
     // Every card is exactly as long as asked, whatever the length of its sound.
@@ -198,6 +198,8 @@ describe('buildCompilation', () => {
     expect(await level(built.file, 6.3, 1.5)).toBeLessThan(-70); // the whistle is over; the card is still shown
     expect(await level(built.file, 7.1, 0.8)).toBeLessThan(-70); // the card with no sound
     expect(await level(built.file, 8.05, 0.4)).toBeGreaterThan(-40); // the owner's file
+    // A sound starts when its card does: this card starts at 8 s, after a second of silence.
+    expect(Math.abs((await soundAt(built.file, 7.2)) - 8)).toBeLessThan(0.06);
     expect(await level(built.file, 9, 0.9)).toBeLessThan(-70); // and silence once it has played
 
     // A sound under the card before it does not move the next clip: its flash and beep are still together.
@@ -207,7 +209,7 @@ describe('buildCompilation', () => {
     expect(Math.abs(flash - beep)).toBeLessThan(1 / 30 + 0.005);
 
     // Changing one card's sound makes only that card again.
-    const changed = timeline({ id: 'sounded', items: sounded.items.map((item) => (item.id === 'i3' ? { ...item, sound: 'builtin:whistle' } : item)) });
+    const changed = timeline({ id: 'sounded', items: sounded.items.map((item) => (item.id === 'i3' ? { ...item, sound: 'file:fulltime.wav' } : item)) });
     const again = await buildCompilation({ timeline: changed, dataDir, resolveVideo, soundsDir });
     expect(again.items.map((item) => item.reused)).toEqual([true, true, false, true, true]);
     expect(await level(again.file, 7.1, 0.8)).toBeGreaterThan(-45);
@@ -221,10 +223,12 @@ describe('buildCompilation', () => {
     const soundsDir = path.join(dir, 'fitted-sounds');
     await mkdir(soundsDir, { recursive: true });
     await ff(['-f', 'lavfi', '-i', 'sine=frequency=500:sample_rate=48000', '-t', '1.7', path.join(soundsDir, 'long shout.wav')]);
-    const voice = await soundSeconds(await builtInSoundFile(dataDir, 'goal'));
+    await ff(['-f', 'lavfi', '-i', 'sine=frequency=350:sample_rate=48000', '-t', '2.3', path.join(soundsDir, 'goal.wav')]);
+    await ff(['-f', 'lavfi', '-i', 'sine=frequency=220:sample_rate=48000', '-t', '4.6', path.join(soundsDir, 'chord.wav')]);
+    const voice = await soundSeconds(path.join(soundsDir, 'goal.wav'));
     const fitted = timeline({ id: 'fitted', items: [
-      { id: 'i1', kind: 'card', matchId: 'm1', cardId: 'goal' }, // the voice
-      { id: 'i2', kind: 'card', matchId: 'm1', cardId: 'full', sound: 'builtin:tragic' }, // 4.6 s
+      { id: 'i1', kind: 'card', matchId: 'm1', cardId: 'goal' }, // "auto": the file named goal
+      { id: 'i2', kind: 'card', matchId: 'm1', cardId: 'full', sound: 'file:chord.wav' }, // 4.6 s
       { id: 'i3', kind: 'card', matchId: 'm1', cardId: 'goal', sound: 'file:long shout.wav' }, // 1.7 s
       { id: 'i4', kind: 'card', matchId: 'm1', cardId: 'goal', sound: 'none' }, // silent: the usual 3 s
       { id: 'i5', kind: 'video', library: 'in', name: 'c.mkv', start: 0.5, end: 3.5, credit: '' },
@@ -253,26 +257,30 @@ describe('buildCompilation', () => {
     expect(Math.abs(flash - beep)).toBeLessThan(1 / 30 + 0.005);
   }, 240_000);
 
-  it('uses a file named after the kind of card in place of the built-in sound', async () => {
+  it('uses a file named after the kind of card, and is silent for a kind that has none', async () => {
     const soundsDir = path.join(dir, 'own-sounds');
     await mkdir(soundsDir, { recursive: true });
-    // An intro card has no sound of its own until the owner supplies one.
-    expect(await automaticSounds(soundsDir)).toEqual({ intro: 'none', goal: 'builtin:goal', red: 'builtin:tragic', fulltime: 'builtin:whistle' });
+    // No card has a sound of its own until the owner supplies one.
+    expect(await automaticSounds(soundsDir)).toEqual({ intro: 'none', goal: 'none', red: 'none', fulltime: 'none' });
     await ff(['-f', 'lavfi', '-i', 'sine=frequency=400:sample_rate=48000', '-t', '0.5', path.join(soundsDir, 'intro.wav')]);
     await ff(['-f', 'lavfi', '-i', 'sine=frequency=700:sample_rate=48000', '-t', '0.8', path.join(soundsDir, 'GOAL.wav')]);
     await ff(['-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000', '-t', '0.6', path.join(soundsDir, 'fulltime.wav')]);
     await writeFile(path.join(soundsDir, 'goalkeeper.wav'), 'not the goal sound');
-    expect(await automaticSounds(soundsDir)).toEqual({ intro: 'file:intro.wav', goal: 'file:GOAL.wav', red: 'builtin:tragic', fulltime: 'file:fulltime.wav' });
-    expect(await automaticSounds(undefined)).toEqual({ intro: 'none', goal: 'builtin:goal', red: 'builtin:tragic', fulltime: 'builtin:whistle' });
+    expect(await automaticSounds(soundsDir)).toEqual({ intro: 'file:intro.wav', goal: 'file:GOAL.wav', red: 'none', fulltime: 'file:fulltime.wav' });
+    expect(await automaticSounds(undefined)).toEqual({ intro: 'none', goal: 'none', red: 'none', fulltime: 'none' });
 
     const own = timeline({ id: 'own', items: [
       { id: 'i1', kind: 'card', matchId: 'm1', cardId: 'goal' },
       { id: 'i2', kind: 'card', matchId: 'm1', cardId: 'full' },
     ] });
     const built = await buildCompilation({ timeline: own, dataDir, resolveVideo, soundsDir });
-    // The cards are as long as the owner's two files, not as the built-in sounds.
+    // The cards are as long as the owner's two files.
     expect(Math.abs(built.items[0].seconds - 0.8)).toBeLessThan(0.04);
     expect(Math.abs(built.items[1].seconds - 0.6)).toBeLessThan(0.04);
+    // With no sounds folder at all the same cards are silent, and shown for the usual 3 seconds.
+    const silent = await buildCompilation({ timeline: timeline({ ...own, id: 'own-silent' }), dataDir, resolveVideo });
+    expect(silent.items.map((item) => Math.round(item.seconds * 100) / 100)).toEqual([3, 3]);
+    expect(await level(silent.file, 0.5, 2)).toBeLessThan(-70);
   }, 240_000);
 
   it('plays a video behind a card, with the card over it and the video\'s own sound', async () => {
@@ -525,8 +533,9 @@ describe('buildCompilation', () => {
     const card = (sound) => buildCompilation({ timeline: timeline({ id: 'bad', items: [{ id: 'x', kind: 'card', matchId: 'm1', cardId: 'goal', sound }] }), dataDir, resolveVideo, soundsDir });
     await expect(card('file:gone.mp3')).rejects.toThrow(/Item 1: its sound "gone.mp3" is not in the sounds folder/);
     await expect(card('file:empty.mp3')).rejects.toThrow(/Item 1: its sound "empty.mp3" has no sound in it/);
-    await expect(card('builtin:trumpet')).rejects.toThrow(/Item 1: its sound "trumpet" is not one of the built-in sounds/);
-    // Without a sounds folder a built-in sound still works, and a file is refused.
+    // The three sounds the tool once made are gone (2026-11-24); a card saved with one says so.
+    await expect(card('builtin:tragic')).rejects.toThrow(/Item 1: its sound "tragic" was one the tool made, and those were removed\. Choose another sound/);
+    // Without a sounds folder a file is refused.
     await expect(buildCompilation({ timeline: timeline({ id: 'bad', items: [{ id: 'x', kind: 'card', matchId: 'm1', cardId: 'goal', sound: 'file:my horn.wav' }] }), dataDir, resolveVideo }))
       .rejects.toThrow(/needs a sounds folder/);
   });
@@ -543,67 +552,13 @@ describe('buildCompilation', () => {
 });
 
 describe('sounds', () => {
-  it('has a built-in sound for each kind of card', () => {
-    expect(DEFAULT_SOUND).toEqual({ intro: null, goal: 'goal', red: 'tragic', fulltime: 'whistle' });
-    for (const id of Object.values(DEFAULT_SOUND).filter(Boolean)) expect(BUILT_IN[id].name.length).toBeGreaterThan(5);
-  });
-
-  it.each(Object.keys(BUILT_IN))('makes the built-in sound "%s" once: a sensible length, audible, not clipped', async (id) => {
-    const file = await builtInSoundFile(dataDir, id);
-    const { stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'stream=sample_rate,channels', '-of', 'csv=p=0', file]);
-    expect(stdout.trim()).toBe('48000,2');
-    const seconds = await soundSeconds(file);
-    expect(seconds).toBeGreaterThan(1.5);
-    expect(seconds).toBeLessThanOrEqual(BUILT_IN[id].longest + 0.01);
-    const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', file, '-af', 'volumedetect', '-f', 'null', '-']);
-    expect(Number(/mean_volume: (-?[\d.]+)/.exec(stderr)[1])).toBeGreaterThan(-40);
-    expect(Number(/max_volume: (-?[\d.]+)/.exec(stderr)[1])).toBeLessThan(-1);
-    expect(await level(file, 0, 0.6)).toBeGreaterThan(-45); // it starts straight away
-
-    // Asked for twice at the same moment, as when the page plays a sound while a
-    // video is being made, both get the one good file and nothing half-made is left.
-    const fresh = path.join(dir, `twice-${id}`);
-    const [one, other] = await Promise.all([builtInSoundFile(fresh, id), builtInSoundFile(fresh, id)]);
-    expect(one).toBe(other);
-    expect((await stat(one)).size).toBe((await stat(file)).size);
-    expect(await readdir(path.dirname(one))).toEqual([path.basename(one)]);
-
-    // Asked for again, the same file is handed back and not made a second time.
-    const made = (await stat(file)).mtimeMs;
-    expect(await builtInSoundFile(dataDir, id)).toBe(file);
-    expect((await stat(file)).mtimeMs).toBe(made);
-  }, 60_000);
-
-  // "Ear destroying" was the owner's word for the first whistle: a loud 2950 Hz
-  // tone, where hearing is keenest. These hold the new one to being soft.
-  it('makes a whistle that is soft: low in pitch, nothing sharp in it, and eased in', async () => {
-    const file = await builtInSoundFile(dataDir, 'whistle');
-    const band = async (filter) => {
-      const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', file, '-af', `${filter},volumedetect`, '-f', 'null', '-']);
-      return Number(/mean_volume: (-?[\d.]+)/.exec(stderr)[1]);
-    };
-    // It lies around 1568 Hz, and almost nothing of it is in the band the old one filled.
-    const around = await band('highpass=f=1100,lowpass=f=2100');
-    expect(around).toBeGreaterThan(await band('highpass=f=2700,highpass=f=2700') + 15);
-    expect(around).toBeGreaterThan(await band('lowpass=f=700,lowpass=f=700') + 15);
-    // Its first note starts quietly and grows: the first 30 ms are well under what follows.
-    expect(await level(file, 0.05, 0.03)).toBeLessThan((await level(file, 0.2, 0.1)) - 6);
-    // And it is played well under the other card sounds.
-    expect(BUILT_IN.whistle.quieter).toBeGreaterThanOrEqual(6);
-  });
-
-  it('makes a tragic chord that is low and dies away slowly', async () => {
-    const file = await builtInSoundFile(dataDir, 'tragic');
-    const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', file, '-af', 'highpass=f=2000,highpass=f=2000,volumedetect', '-f', 'null', '-']);
-    expect(Number(/mean_volume: (-?[\d.]+)/.exec(stderr)[1])).toBeLessThan(-60); // nothing bright in it
-    // The last chord is still sounding three seconds in, and quieter by the end.
-    expect(await level(file, 3, 0.4)).toBeGreaterThan(-45);
-    expect(await level(file, 4.2, 0.4)).toBeLessThan(await level(file, 2, 0.4));
-  });
-
-  it('refuses a built-in sound that does not exist', async () => {
-    await expect(builtInSoundFile(dataDir, 'trumpet')).rejects.toThrow(/no built-in sound called "trumpet"/);
-    await expect(builtInSoundFile(dataDir, 'constructor')).rejects.toThrow(/no built-in sound/);
+  it('has no sound of its own: every kind of card is silent until the owner gives it a file', async () => {
+    expect(CARD_KINDS).toEqual(['intro', 'goal', 'red', 'fulltime']);
+    for (const cardType of CARD_KINDS) {
+      expect(await resolveSound({ choice: 'auto', cardType, soundsDir: path.join(dir, 'no-such-folder') })).toBeNull();
+      expect(await resolveSound({ choice: 'none', cardType })).toBeNull();
+    }
+    await expect(resolveSound({ choice: 'builtin:goal', cardType: 'goal' })).rejects.toThrow(/was one the tool made, and those were removed/);
   });
 
   it('knows a sound choice when it sees one, and only plain file names', () => {

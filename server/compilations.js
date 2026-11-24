@@ -5,7 +5,7 @@ import { mkdir, readFile, rename, rm, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { buildCompilation } from '../src/compilation/build.js';
-import { automaticSounds, BUILT_IN, builtInSoundFile, isSoundFileName, listSoundFiles, soundSeconds } from '../src/compilation/sounds.js';
+import { automaticSounds, isSoundFileName, listSoundFiles, soundSeconds } from '../src/compilation/sounds.js';
 import { compilationDir, deleteCompilation, listCompilations, newCompilationId, readTimeline, saveTimeline } from '../src/compilation/timeline.js';
 import { probe } from '../src/probe.js';
 import { creditPictures } from '../src/pictures.js';
@@ -100,7 +100,7 @@ export function addCompilationRoutes(app, { dataDir, inDir, soundsDir, jobs, res
     });
   });
 
-  // The sounds a card can have: the built-in ones and the owner's files, what
+  // The sounds a card can have: the owner's files, what
   // "Automatic" stands for on each kind of card, and how long each sound
   // plays, since a card with no length of its own lasts as long as its sound.
   app.get('/api/sounds', async (req, res) => {
@@ -108,22 +108,15 @@ export function addCompilationRoutes(app, { dataDir, inDir, soundsDir, jobs, res
     await mkdir(soundsDir, { recursive: true });
     const files = await listSoundFiles(soundsDir);
     const lengths = {};
-    for (const id of Object.keys(BUILT_IN)) lengths[`builtin:${id}`] = await soundSeconds(await builtInSoundFile(dataDir, id));
     for (const name of files) lengths[`file:${name}`] = await soundSeconds(path.join(soundsDir, name));
     res.json({
-      builtIn: Object.entries(BUILT_IN).map(([id, sound]) => ({ id, name: sound.name })),
       files,
       automatic: await automaticSounds(soundsDir),
       lengths,
     });
   });
 
-  // For hearing a sound before generating. A built-in one is made on first use.
-  app.get('/media/sounds/builtin/:id', async (req, res) => {
-    if (!Object.hasOwn(BUILT_IN, req.params.id)) throw new HttpError(404, 'No such sound.');
-    res.sendFile(await builtInSoundFile(dataDir, req.params.id));
-  });
-
+  // For hearing a sound before generating.
   app.get('/media/sounds/file/:name', async (req, res) => {
     const name = req.params.name;
     const info = isSoundFileName(name) ? await stat(path.join(soundsDir, name)).catch(() => null) : null;

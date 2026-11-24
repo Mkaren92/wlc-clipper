@@ -14,7 +14,7 @@ Version 1 of the spec is complete: all three "evenings".
 - A dashboard in the browser (`npm run dashboard`): cut with a visual range and crop, view clips with their checks and post text, fix caption words
 - Two more dashboard pages: a card maker (goal, red card and full-time cards, saved per match, exported as PNG in two sizes) and a compilation builder (videos and cards in order, credits, one final video with a description file)
 - A redesigned dashboard on a five-colour palette that can be swapped (`web/src/theme.js`), one dark look since 2026-11-24 (two light palettes and the chooser were removed at the owner's word), keys for the player, and the cut button always in view
-- Sounds under the cards of a compilation, each card shown as long as its sound: a computer voice saying "Goool", a tragic chord and a soft whistle made by the tool, or the owner's own files from `sounds/`
+- Sounds under the cards of a compilation, each card shown as long as its sound: the owner's own files from `sounds/` (the three sounds the tool made were removed on 2026-11-24, at the owner's word)
 - An intro card for a match: both clubs with their icons and names and "V" or the score, with the owner's intro sound under it
 - A video behind a card: a video file in `sounds/` gives the card its sound and a moving background
 - A second video beside a reaction in a compilation: split screen while it runs, then the reaction full screen
@@ -45,7 +45,7 @@ Version 1 of the spec is complete: all three "evenings".
 - Clips from a stream's chat are 1 minute (30 s before and after) since 2026-11-22, and "Skip parts already suggested" gives new parts when asking a stream again
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-593 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
+587 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
 
 ## Waiting on the owner
 
@@ -101,7 +101,7 @@ Found in a review on 2026-11-22. They are in the pages, which need driving in a 
 - The Download page in a browser, beyond the owner's own use. The owner has downloaded from it (11 minutes in about 13 s, a whole video of about 1.5 hours in about 20 s), but Claude has not driven it in a browser or read its console, and its "slow way" notice has not been seen.
 - The sync button on the owner's real list. It was run on a test copy with one channel. "Update pictures and subscribers" was pressed on the real list when it had fourteen channels. The downloader also warned that it will stop supporting Python 3.10, which this machine has.
 - Which player showed the fetched part out of step. The file is now the same for every player, but the owner has not yet confirmed it plays in step.
-- How the second set of built-in card sounds sounds. The owner rejected the first set on 2026-11-19. The second was measured and the voice checked with the speech recogniser, but not listened to. A real "Goool" needs a recording from the owner, as `sounds/goal.mp3`.
+- A compilation saved with one of the removed tool-made sounds, opened in a browser: the page offers "A sound the tool made (removed): choose another"; that was built and not looked at, since none of the owner's compilations has one.
 - Whether the owner meant the supplied intro video to play behind the intro card. It was built that way on a reading of one sentence.
 - The colours in the starting list of clubs. Which clubs are in La Liga and the Premier League was checked for 2026–27; the colours are still from memory.
 - The redesigned dashboard in long use. The owner looked at it and accepted it on 2026-11-19; before that it was looked at in screenshots from a hidden Chrome and its main actions were run by script. A real mouse drag of the crop on the new layout, a screen reader and browsers other than Chrome were not tried.
