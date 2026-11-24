@@ -28,7 +28,7 @@ npm install
 npm run setup
 ```
 
-`npm run setup` creates a `.venv` folder in the project and installs two things into it: faster-whisper, which turns speech into text for captions, and yt-dlp, the downloader behind [`fetch`](#sources-and-fetching). The speech model (about 460 MB) is downloaded to `~/.cache/huggingface` the first time a clip is transcribed.
+`npm run setup` creates a `.venv` folder in the project and installs two things into it: faster-whisper, which turns speech into text for captions, and yt-dlp, the downloader behind [`fetch`](#sources-and-fetching). The speech model for captions (about 1.6 GB) is downloaded to `~/.cache/huggingface` the first time a clip is transcribed; a smaller one (about 460 MB) the first time a whole video is, for "Suggested moments". Captions use the larger model because the small one loses a voice under loud game sound; `CLIPPER_CAPTION_MODEL=small` in `.env` goes back to the small, faster one.
 
 On a PC with an NVIDIA graphics card (one that `nvidia-smi` finds), it also installs NVIDIA's libraries for it (about 2 GB). A whole video's transcript for "Suggest moments" then runs on the card: on a GTX 1660 Ti, a 38-minute video took 52 seconds instead of about 4 minutes. Without a card, or if the card fails, it runs on the processor as before. Captions always use the processor. To keep the card out of it, set `CLIPPER_TRANSCRIBE_DEVICE=cpu`.
 
@@ -64,13 +64,13 @@ npm run dashboard
 Then open http://127.0.0.1:4517. Stop it with Ctrl+C.
 
 - **Cut:** pick a video in the left column. It plays on the left and stays in view while you set the range, the layout, the text and the brief on the right. Drag the bright window over the video to place the crop (for the facecam layout, two boxes: the yellow one over the webcam, with any shape or 16:9, 4:3 or 1:1 under "Webcam shape", and the blue one over the content shown below it; each is moved and resized on its own). With the center layout, the "Show more of the picture" slider makes the crop wider, for a person who moves out of the narrow column. The bar at the bottom of the screen always shows what will be made, anything that is in the way, and "Cut the clip". Swear words in the captions and the hook are drawn as `F*CK` and muffled in the voice; two boxes under "Text" turn either off for the clip.
-- **Keys for the player:** Space plays and pauses, the left and right arrows move one second (a tenth with Shift), I sets the start, O sets the end, and P plays the range. They do nothing while you are typing in a box, and they go by the key's place on the keyboard, so they work on a keyboard set to another alphabet.
+- **Keys for the player:** Space plays and pauses, the left and right arrows move one second (a tenth with Shift), J and L move five seconds back and on (there are −5 s and +5 s buttons too), I sets the start, O sets the end, and P plays the range. They do nothing while you are typing in a box, and they go by the key's place on the keyboard, so they work on a keyboard set to another alphabet.
 - **Activity:** while a clip is being cut, rendered again, fetched, combined, or searched for moments, the left column says what is happening and at which step, under "Activity". It is there on every page and after a reload. You can start another cut meanwhile; it waits its turn. When something is ready, it offers "Open". Anything waiting or running has a **Stop** button: the work ends within a few seconds, what it was making is thrown away, and the next job in line starts. Nothing that was already finished is touched.
 - **Deleting a video:** each video in the left column has a trash icon. It asks once, then deletes the file from `in/`. Clips already cut from it stay, but can no longer be rendered again, because rendering reads the source. A compilation that uses the video will not build until the item is taken out. It is not possible while a clip is being made.
 - **Deleting a clip:** each clip in the left column has a trash icon. It asks once, then deletes the clip's whole folder: the video, the post text and the working files. This cannot be undone. It is not possible while a clip is being made.
 - **Clip:** watch the result, download it, see each brief rule as passed or failed, copy the post text, and fix caption words by typing over them. "Save words and render again" rebuilds the clip.
 - **Download:** paste a YouTube or Twitch link from one of your channels and bring a part of the video, or the whole of it, into `in/`; or paste a finished live stream and get the moments its chat exploded as clips (see [Sources and fetching](#sources-and-fetching)).
-- **My data:** keeps what you chose to carry the same on every computer through a private GitHub repository of yours, by itself; and, as a fallback, one file to download and load on another computer (see [My data](#my-data-moving-to-another-computer)).
+- **My data:** keeps what you chose to carry the same on every computer through a private GitHub repository of yours, by itself (see [My data](#my-data-moving-to-another-computer)).
 - **Unsaved changes:** the card, combine, compilation and sources pages show "Changes not saved" until you save, and their Save button stays in view.
 
 Only this computer can reach the dashboard; it is not visible on your network.
@@ -287,9 +287,9 @@ cp "data/backups/sources/2026-11-20T18-22-45-123Z.json" data/sources.json
 
 ## My data: moving to another computer
 
-The public repository holds the code. What you have made or added stays on the computer it was made on, unless you carry it. The **My data** page carries the part you chose in two ways: **Sync with GitHub**, which keeps it the same on every computer by itself, and one file to download and load by hand.
+The public repository holds the code. What you have made or added stays on the computer it was made on, unless you carry it. The **My data** page carries the part you chose: **Sync with GitHub** keeps it the same on every computer by itself. (Until 2026-11-24 the page could also make one file to download and load by hand; that was removed once sync worked on both computers.)
 
-**What travels, either way:**
+**What travels:**
 
 - your channels, with the club each streamer supports, their pictures and subscriber counts
 - your leagues and clubs, with all their logos
@@ -317,24 +317,6 @@ From then on nothing needs pressing. The dashboard syncs when it starts and with
 - **No internet:** nothing changes, and your work is sent on the next try.
 - **"Save the list" on the Sources page** is refused when the list changed since the page read it (a sync brought something from the other computer). Reload the page and make the change again; anything typed and not saved is lost by the reload.
 - "Disconnect" stops syncing on that computer. Its data stays, and so does what is on GitHub.
-
-### By hand, with one file
-
-**To take your work to another computer:**
-
-1. Here, open "My data" and press "Download my data". The file is a few tens of megabytes.
-2. On the other computer, install the project from GitHub (on Windows, follow [docs/install-windows.md](docs/install-windows.md)) and start the dashboard.
-3. There, open "My data", choose the file under "Load my data", look at what it shows, and press "Load it".
-
-**What a load does.** You are first shown what the file holds beside what that computer has, and a list of what would be replaced. Nothing changes until you press "Load it". Then:
-
-- A file from the data file takes the place of the file with the same name there. Your channels list, your clubs list and the subscriber counts are replaced whole.
-- **Nothing is deleted.** Whatever is replaced is moved into a folder named `data/backups/before-load-<date and time>/`, which the tool never cleans out. To undo a load, copy things back from there.
-- Anything on that computer that the file does not hold is left as it is, including everything that stays local.
-
-**Coming back** works the same way: download on the other computer, load here. Load the newer file onto the older computer, not the other way round: the page warns when the file has fewer channels, clubs or logos than the computer you are loading onto.
-
-The file is an ordinary `.tar` file, so any archive program can open it.
 
 ## AI help
 
@@ -404,7 +386,7 @@ A finished live stream's chat shows where viewers reacted. The tool finds bursts
 
 With **Both**, a moment found by both sources becomes one item tagged with both, and those rise to the top of the list. A moment only one source found is kept. A chat moment shows what was said in it, if the video was transcribed; a transcript moment shows how busy the chat was.
 
-Chats are kept in `data/chats/`, one per video, and stay on this computer: they are not in the "My data" file.
+Chats are kept in `data/chats/`, one per video, and stay on this computer: they are not synced.
 
 On a clip's screen, "Suggest fixes" marks the caption words it would change. Hover a marked word to see the original, edit as you like, then press "Save words and render again".
 
@@ -504,7 +486,7 @@ Some campaigns require their logo on screen for the whole clip. Put the logo (PN
   ```
 
   A relative image path is looked for from the folder you run the tool in, then next to the brief file. The checks then fail a clip rendered without that overlay.
-- `overlays/` is not part of the repository, and travels in "My data".
+- `overlays/` is not part of the code repository, and is synced with your other computers ("My data").
 
 ## Plain parts
 

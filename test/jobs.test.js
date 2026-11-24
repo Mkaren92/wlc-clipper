@@ -11,6 +11,13 @@ async function running(marker) {
   return stdout.split('\n').some((line) => line.includes(marker) && !line.includes('ps -eo'));
 }
 
+describe('a time limit with a fraction', () => {
+  it('is taken as the next whole millisecond, not refused', async () => {
+    const { run } = await import('../src/run.js');
+    await expect(run('node', ['-e', 'process.stdout.write("ok")'], { timeout: 20000.5 })).resolves.toMatchObject({ stdout: 'ok' });
+  });
+});
+
 describe('a program that can be stopped', () => {
   it('runs as before when nothing asks it to stop', async () => {
     const stopper = new AbortController();

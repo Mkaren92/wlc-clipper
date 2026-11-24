@@ -32,7 +32,7 @@ const PAGES = [
   { id: 'compilations', name: 'Compilations', icon: 'layers', title: 'Compilations', about: 'Put videos and cards in order and make one video out of them, with credits and a description file.' },
   { id: 'download', name: 'Download', icon: 'download', title: 'Download', about: 'Bring part of a YouTube video, a whole one, or the moments a finished stream\'s chat exploded into your videos, from a channel that has agreed.' },
   { id: 'sources', name: 'Sources', icon: 'link', title: 'Sources', about: 'The channels that have agreed to let you use their videos.' },
-  { id: 'data', name: 'My data', icon: 'box', title: 'My data', about: 'Everything you have made or added here, as one file to take to another computer, and the place to load such a file.' },
+  { id: 'data', name: 'My data', icon: 'box', title: 'My data', about: 'Your channels, clubs, logos, sounds and briefs, kept the same on every computer through your private GitHub repository.' },
 ];
 const isPage = (id) => PAGES.some((known) => known.id === id);
 const page = ref(isPage(location.hash.slice(1)) ? location.hash.slice(1) : 'clips');

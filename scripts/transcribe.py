@@ -1,15 +1,11 @@
 """Transcribe one audio file with faster-whisper and print JSON to stdout.
 
-Usage: transcribe.py <audio file> <language> <model size> [batched | filtered]
+Usage: transcribe.py <audio file> <language> <model size> [batched]
 
 With "batched", the speech is cut into pieces where it pauses and several pieces are
 transcribed at once (faster-whisper's BatchedInferencePipeline). That is for a whole
 video's transcript, which "Suggested moments" reads; a clip's captions use the plain way,
 which they were measured with.
-
-With "filtered", it is the plain way with the voice-activity filter on. A clip's captions
-ask for it only as a second pass, to fill the stretches where the plain pass heard nothing
-(src/transcribe/fill.js).
 
 A whole video's transcript ("batched") uses an NVIDIA graphics card when there is one that
 works, and the processor otherwise; captions always use the processor, as they were measured.
@@ -23,7 +19,6 @@ import sys
 
 path, lang, model_size = sys.argv[1], sys.argv[2], sys.argv[3]
 batched = len(sys.argv) > 4 and sys.argv[4] == "batched"
-filtered = len(sys.argv) > 4 and sys.argv[4] == "filtered"
 
 
 def nvidia_lib_dirs():
@@ -56,6 +51,34 @@ if lib_dirs:
         os.execve(sys.executable, [sys.executable] + sys.argv, env)
 
 from faster_whisper import BatchedInferencePipeline, WhisperModel  # noqa: E402
+from faster_whisper.audio import decode_audio  # noqa: E402
+
+PIECE_SECONDS = 10.0
+# How far from the 10-second mark the end of a piece may be moved to find a quiet moment.
+PIECE_SLACK = 1.5
+
+
+def pieces_of(sound, rate):
+    """The start and end, in seconds, of each piece a clip's sound is listened to in."""
+    import numpy as np
+
+    total = len(sound) / rate
+    frame = int(rate * 0.05)  # loudness is measured 20 times a second
+    count = len(sound) // frame
+    if count == 0:
+        return [(0.0, total)]
+    loud = np.sqrt(np.mean(sound[: count * frame].reshape(count, frame).astype(np.float64) ** 2, axis=1))
+    pieces = []
+    start = 0.0
+    while total - start > PIECE_SECONDS + PIECE_SLACK:
+        low = int((start + PIECE_SECONDS - PIECE_SLACK) / 0.05)
+        high = int((start + PIECE_SECONDS + PIECE_SLACK) / 0.05)
+        end = round((low + int(np.argmin(loud[low:high]))) * 0.05 + 0.025, 2)
+        pieces.append((start, end))
+        start = end
+    pieces.append((start, round(total, 2)))
+    return pieces
+
 
 # Measured on the owner's machine (16 cores under WSL) on 2026-11-21, 116 s of speech: plain with
 # faster-whisper's own 4 threads 48 s, plain with 12 threads 228 s (more threads made it slower),
@@ -91,28 +114,28 @@ if batched:
             segments = None
     if segments is None:
         segments, info = batched_on("cpu")
-elif filtered:
-    model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=threads)
-    # The second pass for captions: the filter on, for what the plain pass skipped (2026-11-23).
-    segments, info = model.transcribe(path, language=lang, word_timestamps=True, vad_filter=True)
 else:
     # No voice-activity filter for captions (2026-11-22). Under loud game sound it dropped
     # whole sentences and put words up to 6.7 s before they were said; without it, a clip of
     # shouting gave 42 words instead of 4. Without it the model also writes "You" on silence
     # or noise; hallucination_silence_threshold removed that in every sample tried.
     model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=threads)
-    segments, info = model.transcribe(
-        path, language=lang, word_timestamps=True, vad_filter=False, hallucination_silence_threshold=2.0
-    )
+    # The sound is listened to in short pieces, each on its own (2026-11-24). Given a whole clip, the
+    # recogniser skips stretches of it: on a 46-second clip of a loud stream it wrote words for 18 of
+    # the seconds; given the same sound in pieces of about 10 seconds, for 37. Each piece ends at the
+    # quietest moment near its end, so a word is not cut in two.
+    sound = decode_audio(path, sampling_rate=16000)
+    segments = []
+    for start, end in pieces_of(sound, 16000):
+        heard, info = model.transcribe(
+            sound, language=lang, word_timestamps=True, vad_filter=False, hallucination_silence_threshold=2.0,
+            clip_timestamps=[start, end],
+        )
+        segments.extend(heard)
 
 words = []
 for segment in segments:
     for word in segment.words or []:
-        entry = {"text": word.word.strip(), "start": round(word.start, 2), "end": round(word.end, 2)}
-        # How sure the recogniser is of the word (0 to 1). Only the second pass is asked for it:
-        # its words are taken only when it is sure enough.
-        if filtered:
-            entry["p"] = round(word.probability, 2)
-        words.append(entry)
+        words.append({"text": word.word.strip(), "start": round(word.start, 2), "end": round(word.end, 2)})
 
 print(json.dumps({"language": info.language, "device": device, "words": words}))

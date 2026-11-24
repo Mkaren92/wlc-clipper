@@ -354,7 +354,7 @@ const percent = (t) => `${(Math.min(Math.max(t ?? 0, 0), duration.value || 1) / 
 // Keys are told apart by their place on the keyboard, not by the letter they
 // type, so they work the same on a keyboard set to another alphabet.
 const KEYS = [
-  ['Space', 'play or pause'], ['← →', '1 second'], ['Shift + ← →', '0.1 second'],
+  ['Space', 'play or pause'], ['← →', '1 second'], ['Shift + ← →', '0.1 second'], ['J L', '5 seconds'],
   ['I', 'set start'], ['O', 'set end'], ['P', 'play the range'],
 ];
 function onKey(event) {
@@ -370,6 +370,9 @@ function onKey(event) {
     KeyK: toggle,
     ArrowLeft: () => nudge(-step),
     ArrowRight: () => nudge(step),
+    // Five seconds back and on, beside K for play and pause, as on YouTube's player.
+    KeyJ: () => nudge(-5),
+    KeyL: () => nudge(5),
     KeyI: markStart,
     KeyO: markEnd,
     KeyP: playRange,
@@ -477,10 +480,12 @@ async function cut() {
           </button>
           <span class="time numbers">{{ clock(time) }} <span class="muted">/ {{ clock(duration) }}</span></span>
           <span class="steps" role="group" aria-label="Step through the video">
+            <button class="small" @click="nudge(-5)">−5 s</button>
             <button class="small" @click="nudge(-1)">−1 s</button>
             <button class="small" @click="nudge(-0.1)">−0.1 s</button>
             <button class="small" @click="nudge(0.1)">+0.1 s</button>
             <button class="small" @click="nudge(1)">+1 s</button>
+            <button class="small" @click="nudge(5)">+5 s</button>
           </span>
           <button class="small" @click="playRange"><Icon name="refresh" /> Play the range</button>
         </div>

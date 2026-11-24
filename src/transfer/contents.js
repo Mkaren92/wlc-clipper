@@ -12,11 +12,15 @@
 //   stay local   source videos, parts, clips, combinations, compilations,
 //                matches and their cards
 //
-// This is the one place that says so. A new kind of saved data is added
-// here, to what is sent (listTransfer) and to what is taken back
-// (acceptEntry), only when the owner has said it should travel.
+// This is the one place that says so, and sync (src/sync/) sends and takes
+// back exactly this. A new kind of saved data is added here, to what is sent
+// (listTransfer) and to what is taken back (acceptEntry), only when the
+// owner has said it should travel.
 //
-// Never in a data file, whatever is asked:
+// Until 2026-11-24 the same list also made a data file to download and load
+// by hand; the owner had it removed once sync worked on both machines.
+//
+// Never sent, whatever is asked:
 //   .env            the AI key lives only there
 //   data/backups    copies of this machine's own lists
 //   data/youtube-cookies.txt   the YouTube sign-in, a password (acceptEntry refuses it)

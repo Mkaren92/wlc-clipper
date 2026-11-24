@@ -122,7 +122,12 @@ export function createSync({ folders, codeDir, anyAddress = false, pause = async
       else await copyFile(source.file, target);
     }
     if (how !== 'exact') return;
-    for (const name of await inside()) if (!files.has(name)) await rm(inMirror(name), { force: true });
+    // A file this machine no longer has is removed from the mirror, but only if it is of a kind
+    // this version knows. A kind added by a newer version on the other machine is left alone:
+    // not having it here does not mean it was removed here.
+    for (const name of await inside()) {
+      if (!files.has(name) && (acceptEntry(name) || isLogo(name))) await rm(inMirror(name), { force: true });
+    }
   }
 
   async function commit(message) {

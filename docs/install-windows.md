@@ -28,7 +28,7 @@ If a Windows step behaves differently from what is written here, the [Troublesho
 | Rights | An administrator account, for step 2 only |
 | Processor | Virtualization switched on in the BIOS/UEFI (it is on most computers sold in the last years) |
 | Disk | About 10 GB free, plus room for your videos. A one-hour 1080p video is several GB. |
-| Internet | Needed for the install, for captions the first time (a 460 MB download), and for fetching from YouTube |
+| Internet | Needed for the install, for captions the first time (a 1.6 GB download), and for fetching from YouTube |
 | Browser | Chrome. The dashboard has only been tried in Chrome. |
 
 What gets installed, and the versions it was built and measured with:
@@ -41,7 +41,7 @@ What gets installed, and the versions it was built and measured with:
 | Node.js | 24 (22.12 or later is required) | nvm, step 5 |
 | Project packages | as listed in `package-lock.json` | `npm install`, step 6 (about 150 MB) |
 | faster-whisper and yt-dlp | 1.2.1 and the newest | `npm run setup`, step 7 (about 520 MB) |
-| Speech model | Whisper `small` | downloaded on the first clip with captions (about 460 MB) |
+| Speech model | Whisper `large-v3-turbo` for captions, `small` for whole-video transcripts | downloaded when first used (about 1.6 GB and 460 MB) |
 
 **Use Ubuntu 22.04, not a newer one.** Ubuntu 22.04 gives exactly ffmpeg 4.4.2 and Python 3.10, which is what every measurement in `docs/decisions.md` was taken on. Ubuntu 24.04 gives ffmpeg 6 and Python 3.12; the project has not been run there.
 
@@ -183,7 +183,7 @@ This takes two to three minutes and uses every processor core.
 
 ```
  Test Files  25 passed (25)
-      Tests  602 passed (602)
+      Tests  592 passed (592)
 ```
 
 The numbers grow as the project grows. What matters is that everything passed. If a test fails, see [Troubleshooting](#troubleshooting) before going on.
@@ -245,7 +245,7 @@ To see the clip, open the project folder in Windows Explorer (note the dot at th
 explorer.exe .
 ```
 
-**About captions:** the first clip you cut *with* captions (that is, without `--no-captions`, from a video with speech) downloads the speech model, about 460 MB, into `~/.cache/huggingface`. That happens once.
+**About captions:** the first clip you cut *with* captions (that is, without `--no-captions`, from a video with speech) downloads the speech model, about 1.6 GB, into `~/.cache/huggingface`. That happens once.
 
 ## Step 9: Start the dashboard
 
@@ -363,9 +363,7 @@ ssh -T git@github.com
 
 It must greet you by your GitHub name. Then, in the dashboard, open "My data", paste the address of your private data repository, press "Check this address", and choose "Take GitHub's data onto this computer".
 
-**With one file** is the same page, lower down. On the old computer press "Download my data". The file lands in the old computer's Downloads folder; copy it to this one. Then, in the dashboard here, open "My data", choose that file under "Load my data", check what it shows, and press "Load it". It carries your channels and their clubs, your leagues and clubs with logos, your sounds, your overlay images and your briefs; videos, clips, combinations, compilations and matches stay on the old computer. See "My data" in the [README](../README.md).
-
-**By hand**, the same thing is copying these from the old computer into the same places in `~/wlc-clipper` on the new one:
+**By hand**, for what sync does not carry (videos, clips, compilations, matches) or without GitHub, copy these from the old computer into the same places in `~/wlc-clipper` on the new one:
 
 | Copy | Why |
 |---|---|

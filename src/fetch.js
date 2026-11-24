@@ -51,7 +51,9 @@ const BYTES_PER_SECOND = 1_500_000;
  * @param {number} seconds   the length asked for
  */
 export function downloadTimeout(seconds) {
-  return Math.max(30 * 60, 1.2 * seconds + 15 * 60) * 1000;
+  // A whole number: a video's own length is not one (3502.8 s on 2026-11-24), and a time limit
+  // with a fraction is refused outright, which failed the fast download and the slow one alike.
+  return Math.ceil(Math.max(30 * 60, 1.2 * seconds + 15 * 60) * 1000);
 }
 
 // Reading a chat replay goes from the start, piece by piece: an 11-hour stream with 54,000

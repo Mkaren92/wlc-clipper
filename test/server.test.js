@@ -890,65 +890,6 @@ describe('sync with a repository', () => {
   });
 });
 
-describe('my data', () => {
-  const upload = (bytes, headers = {}) => fetch(`${base}/api/transfer/upload`, { method: 'PUT', body: bytes, headers });
-
-  it('downloads the data as one file, and loads such a file in two steps', async () => {
-    await api('/api/sources', { method: 'PUT', body: [{ id: 'a', name: 'Agreed Channel', url: 'https://www.youtube.com/@agreed', clubs: ['Barcelona'] }] });
-    const info = (await api('/api/transfer')).data;
-    expect(info.waiting).toBeNull();
-    expect(info.here).toMatchObject({ channels: 1, channelsWithClub: 1 });
-
-    // The file: a tar, as long as it said, named by what it is and the day.
-    const got = await fetch(`${base}/api/transfer/download`);
-    const bytes = Buffer.from(await got.arrayBuffer());
-    expect([got.status, got.headers.get('content-type'), Number(got.headers.get('content-length'))]).toEqual([200, 'application/x-tar', bytes.length]);
-    expect(got.headers.get('content-disposition')).toMatch(/^attachment; filename="wlc-clipper-data-\d{4}-\d\d-\d\d\.tar"$/);
-    expect(bytes.length).toBe(info.file.bytes);
-    expect(bytes.includes('"Agreed Channel"')).toBe(true);
-    // The videos in the project stay local: the file is far smaller than the one video here.
-    expect(bytes.length).toBeLessThan((await stat(path.join(dir, 'in', 'game.mp4'))).size);
-
-    // Only this machine's own pages may take the data out, or put any in.
-    expect((await fetch(`${base}/api/transfer/download`, { headers: { Origin: 'https://example.com' } })).status).toBe(403);
-    expect((await upload(bytes, { Origin: 'https://example.com' })).status).toBe(403);
-    expect((await api('/api/transfer/apply', { method: 'POST', headers: { Origin: 'https://example.com' } })).status).toBe(403);
-
-    // A file that is not one of ours is refused, and nothing is left waiting.
-    const bad = await upload(Buffer.alloc(4096, 1));
-    expect([bad.status, (await bad.json()).error]).toEqual([400, expect.stringMatching(/not a data file made by this tool/)]);
-    expect((await api('/api/transfer')).data.waiting).toBeNull();
-    expect((await api('/api/transfer/apply', { method: 'POST' })).status).toBe(400);
-
-    // Step 1 changes nothing here; the list is changed meanwhile, so the file is the older one.
-    await api('/api/sources/a/clubs', { method: 'PUT', body: { clubs: ['Arsenal'] } });
-    const taken = await upload(bytes);
-    expect(taken.status).toBe(201);
-    expect(await taken.json()).toMatchObject({ holds: { channels: 1 }, replaces: ['data/sources.json'] });
-    expect((await api('/api/sources')).data.sources[0].clubs).toEqual(['Arsenal']);
-    expect((await api('/api/transfer')).data.waiting).toMatchObject({ replaces: ['data/sources.json'] }); // still there after a reload of the page
-
-    // Cancel throws it away; taken in again and loaded, the file's list is in place and the one from here is kept aside.
-    expect((await api('/api/transfer/waiting', { method: 'DELETE' })).status).toBe(200);
-    expect((await api('/api/transfer')).data.waiting).toBeNull();
-    await upload(bytes);
-    const loaded = await api('/api/transfer/apply', { method: 'POST' });
-    expect(loaded.data).toMatchObject({ replaced: 1, kept: expect.stringMatching(/^backups\/before-load-/) });
-    expect((await api('/api/sources')).data.sources[0].clubs).toEqual(['Barcelona']);
-    const aside = JSON.parse(await readFile(path.join(dir, 'data', loaded.data.kept, 'data', 'sources.json'), 'utf8'));
-    expect(aside[0].clubs).toEqual(['Arsenal']);
-    expect((await api('/api/transfer')).data.waiting).toBeNull();
-
-    // Not while a video is being made: files must not change under a download or a load.
-    const cut = await api('/api/cut', { method: 'POST', body: { video: 'game.mp4', start: 0, end: 4, layout: 'blur', hook: 'Busy now' } });
-    expect((await fetch(`${base}/api/transfer/download`)).status).toBe(409);
-    expect((await upload(bytes)).status).toBe(409);
-    await api(`/api/jobs/${cut.data.id}/stop`, { method: 'POST' });
-    await finished(cut.data.id);
-    await api('/api/sources', { method: 'PUT', body: [] });
-  }, 120_000);
-});
-
 describe('stopping a job', () => {
   it('stops a cut that is running and one that is waiting, and leaves nothing of either', async () => {
     const before = (await api('/api/clips')).data.map((clip) => clip.name);

@@ -25,7 +25,6 @@ import { HttpError } from './http.js';
 import { createJobs } from './jobs.js';
 import { addSourceRoutes } from './sources.js';
 import { addSyncRoutes } from './sync.js';
-import { addTransferRoutes } from './transfer.js';
 
 const VIDEO_TYPES = new Set(['.mp4', '.mov', '.mkv', '.webm', '.m4v', '.avi']);
 // A clip's folder name: its hook turned into a slug, or clip-NNN. Letters,
@@ -484,10 +483,9 @@ export function createApp({ inDir, outDir, briefsDir, partsDir, dataDir, soundsD
   addSourceRoutes(app, { dataDir, inDir, jobs, downloader, pictureDownload, cacheDir: path.join(outDir, '.cache'), transcriber: () => transcriber ?? getTranscriber() });
   addChatRoutes(app, { dataDir, outDir, inDir, jobs, videoPath, ai, ...(downloader ? { downloader } : {}) });
 
-  // --- My data: download and load (server/transfer.js) -------------------------
+  // --- The owner's data that travels between machines (src/transfer/contents.js) ---
 
   const travelling = { data: dataDir, sounds: soundsDir, briefs: briefsDir, overlays: overlaysDir };
-  addTransferRoutes(app, { folders: travelling, jobs });
 
   // --- Sync with a private GitHub repository (server/sync.js) ---------------------
 

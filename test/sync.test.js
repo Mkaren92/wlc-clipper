@@ -318,6 +318,24 @@ describe('syncing two machines', () => {
     expect((await clubsOf(home)).two).toBe('Benfica');
   });
 
+  it('leaves alone a kind of file it does not know, which a newer version on the other machine may have added', async () => {
+    const hand = path.join(root, 'newer');
+    await sh(['clone', '-q', github, hand]);
+    await mkdir(path.join(hand, 'data', 'something-new'), { recursive: true });
+    await writeFile(path.join(hand, 'data', 'something-new', 'x.bin'), 'from a newer version');
+    await sh(['-C', hand, 'add', '-A']);
+    await sh(['-C', hand, '-c', 'user.name=x', '-c', 'user.email=x@x', 'commit', '-q', '-m', 'a kind this version does not know']);
+    await sh(['-C', hand, 'push', '-q', 'origin', 'main']);
+    // Both machines sync, change something and sync again: the unknown file is neither taken nor removed.
+    await office.sync.sync();
+    await setSourceClubs(office.folders.data, 'one', ['Sevilla']);
+    expect(await office.sync.sync()).toMatchObject({ state: 'synced', sent: true });
+    await home.sync.sync();
+    expect(await onGithub()).toContain('data/something-new/x.bin');
+    expect(await has(office, 'data/something-new/x.bin')).toBeNull();
+    expect((await clubsOf(home)).one).toBe('Sevilla');
+  });
+
   it('refuses to run when its copy of the data is not a repository of its own, so it can never act on the code\'s', async () => {
     const lost = machine('lost');
     await saveSources(lost.folders.data, [channel('x')]);

@@ -52,7 +52,8 @@ export function run(command, args, options = {}) {
 
     const child = spawn(command, args, {
       cwd: options.cwd,
-      timeout: options.timeout,
+      // Node refuses a time limit that is not a whole number of milliseconds.
+      timeout: options.timeout === undefined ? undefined : Math.ceil(options.timeout),
       env: options.env ? { ...process.env, ...options.env } : undefined,
       stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });

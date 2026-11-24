@@ -9,8 +9,7 @@ import { fasterWhisper } from './fasterWhisper.js';
  * @typedef {object} Transcriber
  * @property {string} name
  * @property {() => Promise<boolean>} isInstalled
- * @property {(audioFile: string, options: { lang: string, seconds?: number }) => Promise<Transcript>} transcribe
- *   `seconds` is the length of the sound
+ * @property {(audioFile: string, options: { lang: string }) => Promise<Transcript>} transcribe
  */
 
 /** @returns {Transcriber} */

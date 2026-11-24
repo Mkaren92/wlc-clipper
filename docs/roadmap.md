@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated 2026-11-23. Update this file when something here changes.
+Last updated 2026-11-24. Update this file when something here changes.
 
 ## Built
 
@@ -22,8 +22,7 @@ Version 1 of the spec is complete: all three "evenings".
 - A list of leagues and clubs (name, colour, logo) to fill a match's teams from, starting with La Liga and the Premier League as of 2026–27, a "Europe" league of leading Italian, French, German and Portuguese clubs, and the 36 clubs of the 2026–27 Champions League
 - The club a streamer supports, chosen from the owner's clubs, saved as it is chosen and shown as a logo on the row
 - Backups: a copy of the channels list and of the clubs list is kept before every change (`data/backups/`)
-- My data: one file to download with what the owner chose to carry (channels with clubs, pictures and counts, leagues and clubs with logos, sounds, briefs, overlay images), and a two-step load on another machine that never deletes
-- Sync with GitHub: the same data kept the same on every computer by itself, through a private repository of the owner's; connected on the first machine on 2026-11-23
+- Sync with GitHub: the same data kept the same on every computer by itself, through a private repository of the owner's; connected on the first machine on 2026-11-23, working between both of the owner's PCs since 2026-11-24, when the older "Download my data" and "Load my data" were removed
 - Who is live: channels in the list that are broadcasting are marked LIVE, listed first and counted in the side column
 - A Stop button for anything waiting or running, in "Activity"
 - A sources list and `fetch`: part of a YouTube video or a whole one, each up to 3 hours (parts were capped at 20 minutes until 2026-11-21), from a channel in the list (the owner adds a channel only once it has agreed)
@@ -36,7 +35,7 @@ Version 1 of the spec is complete: all three "evenings".
 - Blur boxes: a part of the frame blurred or blacked out for some seconds, drawn on the cutting screen or with `--blur`
 - A logo overlay for the whole clip: a logo in a corner or a full-frame picture, chosen on the cutting screen, with `--overlay`, or set by a brief (checked)
 - Swear words covered in the captions and the hook (`F*CK`, `SH*T`), and the voice muffled for the length of each such word; two boxes on the cutting screen, both on unless unticked (2026-11-23); the muffle covers the middle 60% of the word
-- Captions where the recogniser first heard nothing: a second pass with its voice filter fills long silences with the words it is sure of (2026-11-23)
+- Captions under loud game sound (2026-11-24): the larger speech model `large-v3-turbo` for captions, heard in pieces of about 10 seconds, because given a whole clip it skips stretches of it (a second pass over silent stretches was tried for a day and removed: it wrote lines nobody said)
 - Faster "Suggest moments" (2026-11-23): a whole video's transcript runs on an NVIDIA card where there is one (a 38-minute video in 52 s instead of about 4 minutes on the home PC's GTX 1660 Ti), and can be made straight after a download so it is ready when the video is opened; a hook's range is transcribed the same fast way (46 s of a stream in 5 s instead of 26 s)
 - Suggested moments hear the streamer: "Use where the streamer gets loud" tells the AI where the voice is much louder than usual (2026-11-23), up to 20 moments can be asked for, and videos up to 3 hours (60 minutes before)
 - Clips from a part: "Cut clips from this part" puts a part under Videos (the same file, linked) and opens it on the cutting screen (2026-11-23)
@@ -46,7 +45,7 @@ Version 1 of the spec is complete: all three "evenings".
 - Clips from a stream's chat are 1 minute (30 s before and after) since 2026-11-22, and "Skip parts already suggested" gives new parts when asking a stream again
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-602 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
+592 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
 
 ## Waiting on the owner
 
@@ -54,7 +53,6 @@ Version 1 of the spec is complete: all three "evenings".
 - **The Stitch brief.** Stitch is a second campaign: the spec lists "two real brief files (ForgeGUI and Stitch)" and gives no rules for it.
 - **The ForgeGUI logo.** The spec's example refers to `assets/forgegui-logo.png`, which was never supplied, so the example brief has no `image` line and its end card is plain.
 - **A verdict on caption timing** in continuous speech, judged by eye on real clips. Word starts after pauses were measured, and since 2026-11-22 starts under game sound (the clip "what-just-happened-here", rendered again with the fix): watch it and say whether the captions now land with the shouts.
-- **Whether the `small` speech model is accurate enough.** A larger model needs about 1.5 GB more disk and is slower.
 - **How to keep two downloader runs from rewriting the YouTube sign-in at once.** yt-dlp writes the cookies file back when it ends, and the live check runs beside a fetch or a chat download, so two can write it at the same moment and spoil it. Ways out: run downloader calls one at a time (the live check would then wait behind a long fetch), or hand each call a copy of the file (the rules say never to copy it). Found in review on 2026-11-22; not yet seen to happen.
 
 - **Pull the new code on every PC before adding the first Twitch channel.** A PC with older code cannot read a channels list that has a Twitch address, so its sync would stop with a message until it is updated.
@@ -80,9 +78,8 @@ Found in a review on 2026-11-22. They are in the pages, which need driving in a 
 - The Combine page in the owner's hands. It was driven by script: a whole run on generated test videos with a frame counter, and a preview of two of the owner's own videos (a fetched part and a phone recording), which played in step within about 0.03 s. Lining up a real reaction by eye and ear is the owner's to judge.
 - How a combined video sounds. Levels were measured, not listened to.
 - The LIVE mark on one of the owner's own channels: none was live when it was built.
-- Sync between two real computers. Against the real GitHub only the first send and a stand-in for the home PC in a scratch folder were run; changes going both ways, a clash and a removal were run between scratch machines with a repository in a folder. The home PC also needs its own SSH key on GitHub.
+- Sync beyond what has happened so far. Between the owner's two PCs it has carried changes from home to the first PC (channels, among them the first Twitch row, and pictures; 2026-11-24), and the owner reports it works at home. A clash (the same channel changed on both before a sync) and a removal have only been run between scratch machines with a repository in a folder.
 - Why the first real connect lost its copy's `.git` folder halfway (nothing was sent; the second try worked). Sync actions now run one at a time, which is the likely cause but was not proven.
-- "Load my data" on a second real computer. The round trip was run between two scratch dashboards on this machine, with a copy of the owner's real lists; loading on Windows inside WSL was not tried. The browser round trip was run before the contents were narrowed to what the owner chose; after that the engine and server tests were run again, and the download was checked on the real dashboard.
 - The clubs set on 45 of the owner's channels on 2026-11-20. They were worked out from each channel's own description, tags and recent titles after the owner's own marks were lost; five were told to the owner as less certain, ten channels were left without a club, and the owner has not yet confirmed them.
 - Stop pressed on a fast fetch from the page. A stop was tried through the engine (`fetchVideo`); the owner has fetched from the page (a whole video of about 1.5 hours in about 20 s, 2026-11-21) but has not pressed Stop on one. The owner's first dashboard fetch with it fell back to the slow way for a reason that was not recorded; retries and a visible reason were added after it, and have not yet been seen on a real dashboard fetch.
 - Clips from a stream's chat after the change to reactions and comments, pressed from the page; the choice was replayed on the 11-hour stream's saved chat and comments, and the clips were not watched.
@@ -94,7 +91,8 @@ Found in a review on 2026-11-22. They are in the pages, which need driving in a 
 - Twitch for real beyond one past broadcast: a 1-minute part, the live check, the picture and the follower count were run through the engine on 2026-11-23. A whole broadcast, a broadcast still being recorded, a subscriber-only one, a real TwitchDownloader file and clips from a real Twitch chat were not tried.
 - How long Twitch's web interface keeps answering without a sign-in. If it stops, the LIVE mark, pictures and follower counts for Twitch rows say they could not be had; downloads also depend on it, through the downloader.
 - How YouTube treats a muffled swear word. Its guidelines name only bleeping and muting as obscured. The owner listened to a muffled "What the fuck" on 2026-11-23 and liked it; the rest was measured (see `docs/decisions.md`).
-- The second recogniser pass, beyond the one clip it was built on: whether it ever fills a real silence with words that were not said, and how much longer cuts take.
+- Telling the streamer's voice from game characters' voices: five ways were measured on 2026-11-24 and none was kept (see `docs/decisions.md`); captions write every voice, and the owner removes lines on the clip page.
+- Captions with the larger speech model beyond three of the owner's clips: how often it still writes a game character's line, and how often it mishears shouting.
 - The word list for covering and muffling, in long use: which words it misses, and whether it ever covers a name.
 - A hook suggestion from the real AI service, with the streamer's name, the loud stretches and chat's reactions. Only a stand-in answered in the tests; the button was looked at on the dashboard, not pressed, and the "use chat's reactions" checkbox was only built.
 - The channel tag box on the cutting screen and the "Skip parts already suggested" checkbox on the Download page, driven in a browser (both pages were built only); and a clip with a channel tag and covered swear words together (each is tested alone).
@@ -122,7 +120,6 @@ The owner was told about the rest on 2026-11-19 and accepted them as they are, a
 
 Nothing is decided. Ideas the owner has been offered:
 
-- Removing "Download my data" and "Load my data", or folding them under one line, once the home PC has synced (the owner agreed on 2026-11-23 to keep them until then)
 - Refreshing an open Sources page by itself when a sync brings a change; now it shows the older list until reloaded, and refuses "Save the list"
 - Covering swear words in `post.txt` titles too, where YouTube is strictest; and turning the cover or the muffle on or off for a clip that is already made
 - On the Combine page: a delay before the second video comes in, and removing the older "Show another video beside it" option from Compilations if the page replaces it
@@ -136,7 +133,9 @@ Nothing is decided. Ideas the owner has been offered:
 - A screen for creating and editing briefs, so the JSON is not edited by hand
 - An option to keep the source's frame rate (60 fps) in clips and compilations, offered after the quality check of 2026-11-19 (see `docs/decisions.md`)
 - Cutting several ranges in one go
-- A larger local speech model, if caption mistakes prove a problem (about 1.5 GB more disk)
+- Captions on the home PC's graphics card with the larger speech model; a minute of sound takes about 45 s to transcribe on the first PC
+- Deleting a whole caption line with one click on the clip page
+- Separating the streamer's voice from the game sound before recognition, if the larger model still misses words
 - AI word fixes from the command line; they exist only in the dashboard
 - Moments from the chat, and clips from a stream's chat, on the command line; they exist only in the dashboard
 - A time range for clips from chat, and a faster chat download: asking the chat replay from a point in the stream (needs the owner's decision: it calls YouTube's own interface, not the downloader), or at least stopping once past the range's end

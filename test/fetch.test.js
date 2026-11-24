@@ -50,6 +50,10 @@ describe('videoUrl', () => {
 describe('downloadTimeout', () => {
   it('gives a long part time to come even the slow way, at about half playback speed', () => {
     expect(downloadTimeout(60)).toBe(30 * 60 * 1000);
+    // A video's own length is not a whole number of seconds, and the program runner refuses a time
+    // limit with a fraction: on 2026-11-24 that failed a whole-video download both ways.
+    expect(Number.isInteger(downloadTimeout(3502.7999999999997))).toBe(true);
+    expect(downloadTimeout(3502.7999999999997)).toBe(5103360);
     // 3 hours the slow way took about 100 minutes by the measured rate (11 minutes for 20).
     expect(downloadTimeout(3 * 3600)).toBeGreaterThan(3 * 3600 * (11 / 20) * 1000 * 1.5);
   });

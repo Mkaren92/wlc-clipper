@@ -77,17 +77,6 @@ export const api = {
   syncConnect: (address, wins) => request('/api/sync/connect', { method: 'POST', body: { address, wins } }),
   syncNow: () => request('/api/sync/now', { method: 'POST' }),
   syncOff: () => request('/api/sync', { method: 'DELETE' }),
-  // My data: what a download would hold, the file itself, and loading one (two steps).
-  transfer: () => request('/api/transfer'),
-  dataFileUrl: () => '/api/transfer/download',
-  async takeInData(file) {
-    const response = await fetch('/api/transfer/upload', { method: 'PUT', body: file });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error ?? `The server answered ${response.status}.`);
-    return data;
-  },
-  loadData: () => request('/api/transfer/apply', { method: 'POST' }),
-  discardData: () => request('/api/transfer/waiting', { method: 'DELETE' }),
   sources: () => request('/api/sources'),
   // `version` is the mark the list came with; the server refuses the save when the list has changed since.
   saveSources: (sources, version) => request('/api/sources', { method: 'PUT', body: sources, headers: version ? { 'X-List-Version': version } : {} }),
