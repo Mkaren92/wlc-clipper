@@ -1,7 +1,15 @@
-// The dashboard's colours are worked out from five per palette. These tests
-// hold every palette that ships to the contrast a person needs to read it.
+// The dashboard's colours are worked out from the palette's five. These tests
+// hold the palette that ships to the contrast a person needs to read it, and two
+// light sets that once shipped (removed on 2026-11-24), so the arithmetic for a
+// light page and for a strong tint stays right for whoever changes the five values.
 import { describe, expect, it } from 'vitest';
-import { buildTokens, contrast, DEFAULT_PALETTE, luminance, mix, PALETTES } from '../web/src/theme.js';
+import { buildTokens, contrast, luminance, mix, PALETTE } from '../web/src/theme.js';
+
+const SETS = {
+  shipped: PALETTE,
+  'light, pale tint': { background: '#f4fefe', surface: '#cff6f6', highlight: '#bbeb95', primary: '#005974', ink: '#140f6a' },
+  'light, strong tint': { background: '#e6e4e0', surface: '#9b806e', highlight: '#ec7a1c', primary: '#90462c', ink: '#44443b' },
+};
 
 describe('colour arithmetic', () => {
   it('mixes two colours by a share', () => {
@@ -19,11 +27,11 @@ describe('colour arithmetic', () => {
 
   it('refuses a colour that is not #rrggbb', () => {
     expect(() => mix('teal', '#ffffff', 0.5)).toThrow(/#rrggbb/);
-    expect(() => buildTokens({ ...PALETTES[DEFAULT_PALETTE], primary: '#0af' })).toThrow(/#rrggbb/);
+    expect(() => buildTokens({ ...PALETTE, primary: '#0af' })).toThrow(/#rrggbb/);
   });
 });
 
-describe.each(Object.entries(PALETTES))('the %s palette', (id, palette) => {
+describe.each(Object.entries(SETS))('the %s palette', (id, palette) => {
   const t = buildTokens(palette);
   const fills = ['--bg', '--panel', '--soft'];
 
@@ -83,22 +91,15 @@ describe.each(Object.entries(PALETTES))('the %s palette', (id, palette) => {
   });
 });
 
-describe('palettes', () => {
-  it('has the default, and five colours and a name in each', () => {
-    expect(PALETTES[DEFAULT_PALETTE]).toBeDefined();
-    for (const palette of Object.values(PALETTES)) {
-      expect(Object.keys(palette).sort()).toEqual(['background', 'highlight', 'ink', 'name', 'primary', 'surface']);
-    }
-  });
-
-  it('keeps the owner\'s two sets of five colours', () => {
-    expect(PALETTES.lagoon).toMatchObject({ background: '#f4fefe', surface: '#cff6f6', highlight: '#bbeb95', primary: '#005974', ink: '#140f6a' });
-    expect(Object.values(PALETTES.clay).filter((value) => value.startsWith('#')).sort()).toEqual(['#44443b', '#90462c', '#9b806e', '#e6e4e0', '#ec7a1c']);
+describe('the palette', () => {
+  it('is the one dark set, five colours and nothing else', () => {
+    expect(PALETTE).toEqual({ background: '#0d1b24', surface: '#16303d', highlight: '#bbeb95', primary: '#6fd3e6', ink: '#e9f8f8' });
+    expect(buildTokens(PALETTE)['--scheme']).toBe('dark');
   });
 
   it('leaves a pale tint alone and thins a strong one', () => {
-    expect(buildTokens(PALETTES.lagoon)['--soft']).toBe('#cff6f6');
-    expect(buildTokens(PALETTES.night)['--soft']).toBe(PALETTES.night.surface);
-    expect(buildTokens(PALETTES.clay)['--soft']).not.toBe('#9b806e');
+    expect(buildTokens(SETS['light, pale tint'])['--soft']).toBe('#cff6f6');
+    expect(buildTokens(PALETTE)['--soft']).toBe(PALETTE.surface);
+    expect(buildTokens(SETS['light, strong tint'])['--soft']).not.toBe('#9b806e');
   });
 });

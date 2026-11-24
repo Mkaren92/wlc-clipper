@@ -22,24 +22,27 @@ const SOLID_BACKGROUND = `fill="${BACKGROUND}"/>`;
 // How much of the card's dark background stays when a video plays behind it:
 // enough to keep the words readable, little enough to see the video.
 const SEE_THROUGH = 0.45;
+// How dark the plate behind the intro card's score is. With the see-through background over it,
+// about a fifth of the video still shows through there.
+const PLATE = 0.7;
 
 /**
  * Draw any card.
  *
  * @param {{ match: object, card: object, size: 'landscape' | 'portrait', clear?: boolean }} options
  *   `clear` draws the card to lie over a video: its background is see-through,
- *   and everything else is the same.
+ *   the intro card's score (or "V") stands on a dark plate, and everything else is the same.
  * @returns {string} SVG
  */
 export function renderCard({ match, card, size, clear = false }) {
   const draw = { intro: introCard, goal: goalCard, red: redCard, fulltime: fullTimeCard }[card.type];
   if (!draw) throw new Error(`Unknown kind of card: ${card.type}`);
-  const svg = draw({ match, card, size });
+  const svg = draw({ match, card, size, clear });
   return clear ? svg.replace(SOLID_BACKGROUND, `fill="${BACKGROUND}" fill-opacity="${SEE_THROUGH}"/>`) : svg;
 }
 
 /** The opening card: the two clubs, each with its icon and name, and "V" or the score between them. */
-export function introCard({ match, card, size }) {
+export function introCard({ match, card, size, clear = false }) {
   const c = canvas(size);
   const middle = card.showScore ? `${card.homeScore ?? 0} – ${card.awayScore ?? 0}` : 'V';
   const parts = [header(c, match)];
@@ -50,11 +53,22 @@ export function introCard({ match, card, size }) {
     parts.push(icon(c, match, side, { x, y, size: c.introIcon }));
     parts.push(team(c, match, side, { x, y: y + c.introIcon / 2 + c.teamSize * 1.25, anchor: 'middle', width: c.introNameWidth }));
   }
-  parts.push(text(middle, {
-    x: c.w / 2, y: c.introMiddleY, anchor: 'middle', fill: card.showScore ? TEXT : MUTED,
-    size: fitSize(middle, card.showScore ? c.scoreSize : c.scoreSize * 0.8, c.introMiddleWidth),
-  }));
+  const middleSize = fitSize(middle, card.showScore ? c.scoreSize : c.scoreSize * 0.8, c.introMiddleWidth);
+  // Over a video the middle gets a dark plate. The ordinary card is drawn exactly as before.
+  if (clear) parts.push(plate(c, { x: c.w / 2, y: c.introMiddleY, width: textWidth(middle, middleSize), size: middleSize }));
+  parts.push(text(middle, { x: c.w / 2, y: c.introMiddleY, anchor: 'middle', fill: card.showScore ? TEXT : MUTED, size: middleSize }));
   return frame(c, parts);
+}
+
+/**
+ * A dark plate behind a line of text whose baseline is at `y`, so the text reads whatever a
+ * video behind the card shows there (asked for on 2026-11-24: a white score over a white ball).
+ * Only the card that lies over a video has one.
+ */
+function plate(c, { x, y, width, size }) {
+  const pad = size * 0.3;
+  const top = y - size * 0.72 - pad; // digits and capitals stand 0.72 of the font size above the baseline
+  return `<rect x="${round(x - width / 2 - pad * 1.4)}" y="${round(top)}" width="${round(width + pad * 2.8)}" height="${round(size * 0.72 + pad * 2)}" rx="${round(28 * c.u)}" fill-opacity="${PLATE}" fill="${BACKGROUND}"></rect>`;
 }
 
 export function goalCard({ match, card, size }) {

@@ -85,15 +85,15 @@ CLIPPER_PORT=4600 npm run dashboard
 
 ### Colours
 
-The dashboard's colours come from a palette of five: the page, a tint, a highlight, a primary colour and the text colour. Three palettes come with it: Clay, which a browser starts with, Lagoon and Night. Choose one under "Colours" at the bottom of the left column; the choice is remembered in that browser.
+The dashboard has one look, a dark one. Its colours come from a palette of five: the page, a tint, a highlight, a primary colour and the text colour. (Two light palettes and a chooser in the left column were removed on 2026-11-24.)
 
-To add your own, add one entry to `PALETTES` in `web/src/theme.js`:
+To change the look, change the five values of `PALETTE` in `web/src/theme.js`:
 
 ```js
-sunset: { name: 'Sunset', background: '#fff8f1', surface: '#ffe3c8', highlight: '#ffd166', primary: '#9c3d00', ink: '#3b1d0f' },
+export const PALETTE = { background: '#0d1b24', surface: '#16303d', highlight: '#bbeb95', primary: '#6fd3e6', ink: '#e9f8f8' };
 ```
 
-Everything else (borders, quiet text, hover colours, the text on buttons) is worked out from those five, and moved where needed so that text stays readable. The tint may be a strong colour: it is thinned with the page colour until text reads on it. The highlight marks step numbers, counts and "this one". Results (passed, failed, waiting) are always green, red and amber, whatever the palette, so a palette with an orange highlight does not make "passed" look like a warning. Set `DEFAULT_PALETTE` in the same file to change what a new browser starts with. `npm test` checks every palette for readable contrast.
+Everything else (borders, quiet text, hover colours, the text on buttons) is worked out from those five, and moved where needed so that text stays readable. A light page works too. The tint may be a strong colour: it is thinned with the page colour until text reads on it. The highlight marks step numbers, counts and "this one". Results (passed, failed, waiting) are always green, red and amber, whatever the palette, so an orange highlight does not make "passed" look like a warning. `npm test` checks the palette for readable contrast.
 
 Three things keep their own colours whatever the palette: match cards, which use the teams' colours, the crop window drawn over the video, which has to show on any footage, and the black behind a video player.
 
@@ -164,7 +164,7 @@ Every card in a compilation has a sound under it, and is shown exactly as long a
 - **The built-in sounds are made by the tool**: the voice is the computer voice inside ffmpeg with its vowel stretched, and the other two are plain tones. They are not recordings, so nothing is downloaded and nobody's rights are involved. They are also only stand-ins: listen to them, and use your own where you want the real thing.
 - **Your own sounds, the easy way:** put a file named `intro`, `goal`, `red` or `fulltime` in the project's `sounds/` folder (for example `goal.mp3`, a recording of yourself shouting it). Every card of that kind left on "Automatic" then uses it, with nothing to choose.
 - **Your own sounds, card by card:** any other audio file in `sounds/` (`.mp3`, `.wav`, `.m4a`, `.aac`, `.ogg`, `.opus`, `.flac`) can be chosen on a card after a reload. Use only sounds you are allowed to use. The folder is not part of the repository.
-- **A video as a moving background:** a video file in `sounds/` (`.mp4`, `.mov`, `.mkv`, `.webm`, `.m4v`) can be put under a card too. Its sound plays, and its picture moves behind the card, dimmed a little so the words stay readable. Named after a kind of card, such as `intro.mp4`, it is used for every card of that kind, ahead of a sound file of the same name. The card maker's preview still shows the plain background; the video appears in the compilation. After adding the first video, open the match in the card maker and press "Save match and cards" once, so each card gets the see-through picture this needs.
+- **A video as a moving background:** a video file in `sounds/` (`.mp4`, `.mov`, `.mkv`, `.webm`, `.m4v`) can be put under a card too. Its sound plays, and its picture moves behind the card, dimmed a little so the words stay readable; on the intro card the score (or "V") also stands on a dark plate. Named after a kind of card, such as `intro.mp4`, it is used for every card of that kind, ahead of a sound file of the same name. The card maker's preview still shows the plain background; the video appears in the compilation. After adding the first video, open the match in the card maker and press "Save match and cards" once, so each card gets the see-through picture this needs.
 - **The card's length follows the sound.** Leave "Shown for" empty and the card lasts as long as its sound, or 3 seconds with no sound. Type a number to fix the length yourself: a longer sound is then faded out as the card ends, and after a shorter one the rest of the card is silent. The sound never carries on into the next clip.
 - **Loudness is levelled**, a little under the clips, so a quiet file and a loud one come out alike. The soft whistle is played quieter still.
 - **Compilations made before this** get the automatic sounds the next time you press "Generate the video". Their cards keep the 3 seconds they were saved with; empty the "Shown for" box to make a card follow its sound.

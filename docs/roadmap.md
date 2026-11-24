@@ -13,7 +13,7 @@ Version 1 of the spec is complete: all three "evenings".
 - Beyond the spec: `--trim`, `--crop-width` (a wider crop over a blurred copy), `keepFullFrame`, `replacements`, the `work/` subfolder, a hook time setting, clip folders named after the hook, deleting clips and videos from the dashboard, and plain parts (`extract`)
 - A dashboard in the browser (`npm run dashboard`): cut with a visual range and crop, view clips with their checks and post text, fix caption words
 - Two more dashboard pages: a card maker (goal, red card and full-time cards, saved per match, exported as PNG in two sizes) and a compilation builder (videos and cards in order, credits, one final video with a description file)
-- A redesigned dashboard on a five-colour palette that can be swapped (`web/src/theme.js`), with a palette chooser, keys for the player, and the cut button always in view
+- A redesigned dashboard on a five-colour palette that can be swapped (`web/src/theme.js`), one dark look since 2026-11-24 (two light palettes and the chooser were removed at the owner's word), keys for the player, and the cut button always in view
 - Sounds under the cards of a compilation, each card shown as long as its sound: a computer voice saying "Goool", a tragic chord and a soft whistle made by the tool, or the owner's own files from `sounds/`
 - An intro card for a match: both clubs with their icons and names and "V" or the score, with the owner's intro sound under it
 - A video behind a card: a video file in `sounds/` gives the card its sound and a moving background

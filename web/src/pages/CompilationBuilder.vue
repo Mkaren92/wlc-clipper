@@ -597,8 +597,9 @@ async function generate() {
 .joined select { border-radius: var(--radius) 0 0 var(--radius); min-width: 0; }
 .joined button { flex: none; border-left: 0; border-radius: 0 var(--radius) var(--radius) 0; white-space: nowrap; }
 .narrow { flex: 0 1 150px; }
-.result video { width: 100%; max-height: 60vh; background: black; border-radius: var(--radius); display: block; }
-.result video.portrait { max-width: 300px; }
+/* The player is the video's own shape, so no black bars stand beside the picture. */
+.result video { width: auto; height: auto; max-width: 100%; max-height: 60vh; aspect-ratio: 16 / 9; background: black; border-radius: var(--radius); display: block; }
+.result video.portrait { max-width: 300px; aspect-ratio: 9 / 16; }
 .download { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0 16px; }
 a.button {
   display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 14px; border-radius: var(--radius);

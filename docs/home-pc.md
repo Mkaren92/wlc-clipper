@@ -35,6 +35,11 @@ If the project is in another folder, `cd` there instead. Then open http://127.0.
 - **The cutting screen has "−5 s" and "+5 s" buttons**, and the keys J and L do the same.
 - **Fetching a whole video works again.** It failed on some videos with "The download failed".
 - "Cover swear words (F*CK)" and "Muffle them in the voice" are two checkboxes on the cutting screen, as before.
+- **Hook suggestions read like a viewer reacting** ("you did NOT just do that to a spotless car"), not like a report of what the streamer did.
+- **The dashboard has one look, the dark one.** The "Colours" chooser at the bottom of the left column is gone.
+- **The intro card's score stands on a dark box** when a video plays behind the card. Card pictures do not sync, so on the home PC open **Cards**, choose each match and press **Save match and cards** once; then generate the compilation again.
+- **A new intro video and a new goal sound arrive by sync** (`sounds/intro.mp4`, `sounds/goal.wav`). The home PC's own older files of those names are moved to `data/backups/sync/`.
+- **The result player on the Compilations page has no black bars** beside the picture any more.
 
 Tried on the office PC on 2026-11-24 and removed the same day, so the home PC never gets it and needs nothing for it: a "Drop game voices" checkbox and a voice sample for each channel. One voice sample that was uploaded then is still in the data repository (`data/source-voices/`, two files). Nothing uses it and it is not copied to the home PC.
 

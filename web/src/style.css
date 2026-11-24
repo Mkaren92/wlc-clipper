@@ -10,8 +10,8 @@
  *   --accent  --accent-hover  --accent-text  --accent-tint   what you press, and what is chosen
  *   --highlight  --highlight-text            marks that draw the eye: step numbers, counts, "this one"
  *   --good  --bad  --warn  (each with -bg)   results, and --bad-text for words on --bad.
- *                                            A result never borrows --highlight: in one palette
- *                                            that is green, in the next it is orange.
+ *                                            A result never borrows --highlight: change the
+ *                                            palette and it may be green one day, orange the next.
  *   --shadow
  */
 

@@ -15,7 +15,6 @@ import { clock, fileSize } from './format.js';
 import { describe, isActive, jobs, refresh as refreshJobs, visibleJobs } from './jobs.js';
 import { liveCount, stopWatchingLive, watchLive } from './live.js';
 import { stopWatchingSync, sync, syncNeedsALook, watchSync } from './sync.js';
-import { applyPalette, PALETTES, savedPalette } from './theme.js';
 
 const videos = ref([]);
 const clips = ref([]);
@@ -55,10 +54,6 @@ watch([page, view], () => {
   const where = page.value === 'clips' ? view.value.name ?? 'Clips' : current.value.name;
   document.title = `${where} · WLC Clipper`;
 }, { immediate: true });
-
-// The colours. The choice is remembered on this computer.
-const palette = ref(savedPalette());
-watch(palette, (id) => applyPalette(id));
 
 async function refresh() {
   try {
@@ -309,12 +304,6 @@ onMounted(async () => {
         </section>
       </div>
 
-      <div class="foot">
-        <label for="palette"><Icon name="palette" /> Colours</label>
-        <select id="palette" v-model="palette">
-          <option v-for="(set, id) in PALETTES" :key="id" :value="id">{{ set.name }}</option>
-        </select>
-      </div>
     </aside>
 
     <main :class="page">
@@ -424,9 +413,6 @@ h3 { display: flex; align-items: center; gap: 6px; padding: 0 4px; }
 .activity .text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
 .activity .buttons { flex: 1 1 100%; display: flex; gap: 6px; justify-content: flex-end; }
 
-.foot { margin-top: auto; padding: 12px 4px 0; border-top: 1px solid var(--line); }
-.foot label { display: flex; align-items: center; gap: 6px; color: var(--text); }
-
 main { padding: 24px 28px 40px; min-width: 0; }
 main.cards, main.compilations { max-width: 1600px; }
 main.sources { max-width: 1250px; }
@@ -444,8 +430,6 @@ main.clips { max-width: 1500px; }
   nav button { width: auto; }
   /* The lists scroll in a box of their own, so the page itself starts near the top. */
   .lists { max-height: 250px; overflow-y: auto; padding-right: 4px; }
-  .foot { display: flex; align-items: center; gap: 12px; margin-top: 0; }
-  .foot label { margin: 0; flex: none; }
   main { padding: 16px 14px 32px; }
 }
 </style>

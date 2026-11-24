@@ -99,10 +99,31 @@ describe('card templates', () => {
       const solid = renderCard({ match, card, size: 'landscape' });
       const clear = renderCard({ match, card, size: 'landscape', clear: true });
       expect(solid).not.toContain('fill-opacity');
-      expect((clear.match(/fill-opacity="0\.\d+"/g) ?? []).length).toBe(1);
+      // The intro card has one more see-through thing: the plate behind its score.
+      const plates = clear.match(/<rect [^>]*rx="[^>]*><\/rect>/g) ?? [];
+      expect(plates.length).toBe(card.type === 'intro' ? 1 : 0);
+      expect((clear.match(/fill-opacity="0\.\d+"/g) ?? []).length).toBe(1 + plates.length);
       // Nothing else differs: the words and where they sit are the same.
       expect(texts(clear)).toEqual(texts(solid));
-      expect(clear.replace(/ fill-opacity="[^"]*"/, '')).toBe(solid);
+      expect(clear.replace(plates[0] ?? '', '').replace(/ fill-opacity="[^"]*"/, '')).toBe(solid);
+    }
+  });
+
+  it('puts a dark plate behind the intro card\'s score when a video plays behind it, wide enough for the score', () => {
+    for (const size of ['landscape', 'portrait']) {
+      for (const card of [intro, { ...intro, showScore: true, homeScore: 3, awayScore: 1 }, { ...intro, showScore: true, homeScore: 10, awayScore: 12 }]) {
+        const svg = renderCard({ match, card, size, clear: true });
+        const [, x, y, width, height] = /<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx=/.exec(svg).map(Number);
+        const middle = card.showScore ? `${card.homeScore} – ${card.awayScore}` : 'V';
+        const [, textX, textY, fontSize] = new RegExp(`<text x="([\\d.]+)" y="([\\d.]+)" font-size="([\\d.]+)"[^>]*>${middle}</text>`).exec(svg).map(Number);
+        // Centred on the text, around its glyphs, and drawn before it.
+        expect(x + width / 2).toBeCloseTo(textX, 0);
+        expect(y).toBeLessThan(textY - fontSize * 0.72);
+        expect(y + height).toBeGreaterThan(textY);
+        expect(svg.indexOf('<rect x=')).toBeLessThan(svg.indexOf(`>${middle}</text>`));
+        // In the wide card it stays between the two club icons (each 400 wide, 560 from the middle).
+        if (size === 'landscape') expect(width / 2).toBeLessThan(560 - 200);
+      }
     }
   });
 

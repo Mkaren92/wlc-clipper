@@ -1,16 +1,18 @@
 // The dashboard's colours.
 //
-// A palette is five colours. Every other colour on the pages (borders, muted
+// The palette is five colours. Every other colour on the pages (borders, muted
 // text, hover fills, the text on a button) is worked out from those five in
-// buildTokens, so adding a palette means adding five values to PALETTES and
+// buildTokens, so changing the look means changing five values in PALETTE and
 // nothing else. The pages never name a colour; they use the tokens.
+//
+// There is one palette. Two light ones (Lagoon, Clay) and the chooser in the
+// side column were removed on 2026-11-24, at the owner's word.
 //
 // Not themed, on purpose: the match cards (their colours are the teams'), and
 // the crop window drawn over the video, which has to show on any footage.
 
 /**
  * @typedef {object} Palette
- * @property {string} name        shown in the colour chooser
  * @property {string} background  the page behind everything
  * @property {string} surface     a tint for the side column, chosen rows and quiet fills.
  *   A strong colour is fine here: it is thinned with the background until text reads on it.
@@ -19,18 +21,8 @@
  * @property {string} ink         text
  */
 
-/** @type {Record<string, Palette>} */
-export const PALETTES = {
-  lagoon: { name: 'Lagoon', background: '#f4fefe', surface: '#cff6f6', highlight: '#bbeb95', primary: '#005974', ink: '#140f6a' },
-  clay: { name: 'Clay', background: '#e6e4e0', surface: '#9b806e', highlight: '#ec7a1c', primary: '#90462c', ink: '#44443b' },
-  night: { name: 'Night', background: '#0d1b24', surface: '#16303d', highlight: '#bbeb95', primary: '#6fd3e6', ink: '#e9f8f8' },
-};
-export const DEFAULT_PALETTE = 'clay';
-
-// Where a browser keeps the palette someone chose. An earlier version wrote
-// the default under 'clipper-palette' on every start, chosen or not, so that
-// name holds no real choices and is no longer read.
-const STORE_KEY = 'clipper-palette-choice';
+/** @type {Palette} */
+export const PALETTE = { background: '#0d1b24', surface: '#16303d', highlight: '#bbeb95', primary: '#6fd3e6', ink: '#e9f8f8' };
 
 // --- Colour arithmetic --------------------------------------------------------
 
@@ -173,38 +165,12 @@ function tabIcon(fill, mark) {
   link.href = `data:image/svg+xml,${encodeURIComponent(picture)}`;
 }
 
-/** The palette chosen on this computer, or the default. */
-export function savedPalette() {
-  try {
-    const id = localStorage.getItem(STORE_KEY);
-    return id && PALETTES[id] ? id : DEFAULT_PALETTE;
-  } catch {
-    return DEFAULT_PALETTE; // storage can be switched off; the page still works
-  }
-}
-
-/**
- * Put a palette's colours on the page.
- *
- * @param {string} id   a key of PALETTES
- * @param {boolean} [remember]   keep it as this computer's choice. Left off when the
- *   page only starts up, so someone who never chose follows DEFAULT_PALETTE when it changes.
- * @returns {string} the id that was applied
- */
-export function applyPalette(id, remember = true) {
-  const chosen = PALETTES[id] ? id : DEFAULT_PALETTE;
-  const { '--scheme': scheme, ...tokens } = buildTokens(PALETTES[chosen]);
+/** Put the palette's colours on the page. */
+export function applyPalette() {
+  const { '--scheme': scheme, ...tokens } = buildTokens(PALETTE);
   const root = document.documentElement;
   for (const [name, value] of Object.entries(tokens)) root.style.setProperty(name, value);
   // Tells the browser which colours to use for its own parts: scroll bars, date pickers, the file button.
   root.style.colorScheme = scheme;
   tabIcon(tokens['--accent'], tokens['--highlight']);
-  if (remember) {
-    try {
-      localStorage.setItem(STORE_KEY, chosen);
-    } catch {
-      // Not remembered, but applied.
-    }
-  }
-  return chosen;
 }
