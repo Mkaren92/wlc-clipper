@@ -329,6 +329,11 @@ describe('hook suggestions', () => {
     const [request] = asked;
     expect(request.user).toBe('[0.2-1.4] He really did that.\n[2.0-2.6] No way!');
     expect(request.system).toContain('at most 60 characters');
+    // More are asked for than are shown, in a viewer's voice and about this clip (2026-11-24).
+    expect(request.system).toContain('Write 8 different hooks');
+    expect(request.system).toContain('Only the first 3 are shown');
+    expect(request.system).toContain('would it fit a hundred other clips?');
+    expect(request.system).not.toContain('Name them in at least two');
     // Nothing that names a file or a folder leaves the machine.
     expect(request.user + request.system).not.toContain('secret-name');
     expect(request.user + request.system).not.toContain(dir);
@@ -374,6 +379,7 @@ describe('hook suggestions', () => {
     const result = await suggestHooks({ source: loudSource, start: 1, end: 5, streamer: '@Keerk', chat, cacheDir: path.join(dir, 'none3'), transcriber, ai: ai({ hooks: ['Keerk loses it'] }) });
     const [request] = asked;
     expect(request.system).toContain('The streamer is called Keerk.');
+    expect(request.system).toContain('Use it in at most one of the first three');
     expect(request.user).toMatch(/^Transcript:\n\[0\.2-1\.4\] He really did that\./);
     // The shout is at 1-2 s on the clip's clock.
     expect(request.user).toMatch(/\n\[1\.0-2\.0\] \d+ dB louder than usual/);
@@ -381,6 +387,12 @@ describe('hook suggestions', () => {
     expect(request.user).toContain("Chat's reactions to this clip (messages counted by kind): laughing 2, shock 1, fail 1.");
     expect(request.user + request.system).not.toMatch(/LMAOOO|KEKW|secret words|points|author/);
     expect(result.used).toEqual({ loud: 1, chat: 3 });
+  }, 60_000);
+
+  it('shows the first three of the hooks the model sent, in its order', async () => {
+    const eight = ['One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'];
+    const result = await suggestHooks({ source, start: 1, end: 4, cacheDir: path.join(dir, 'none4'), transcriber, ai: ai({ hooks: eight }) });
+    expect(result.hooks.map((hook) => hook.text)).toEqual(['One', 'Two', 'Three']);
   }, 60_000);
 
   it('says what is missing, in its own words', async () => {

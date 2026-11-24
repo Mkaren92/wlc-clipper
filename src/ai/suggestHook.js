@@ -27,6 +27,8 @@ import { fitHook, keptTranscript, transcriptLines } from './suggest.js';
 /** @typedef {import('../brief/schema.js').Brief} Brief */
 
 export const HOOK_COUNT = 3;
+// More are asked for than are shown: the model orders them best first, and the first three that are fit to show are kept.
+const HOOK_ASKED = 8;
 // A clip longer than this is not a clip; it would also make a long request.
 const MAX_SECONDS = 600;
 
@@ -120,19 +122,26 @@ function cleanName(name) {
 
 function instructions(brief, streamer = null) {
   const lines = [
-    'You write the hook of a short vertical video clip from a live stream: one line shown on screen at the start, over the video, to make people keep watching.',
-    `Write ${HOOK_COUNT} different hooks for the clip described below.`,
-    `Each at most ${HOOK_MAX_CHARS} characters, plain text, no hashtags, no emoji, no quotation marks around it.`,
-    'A hook is about the moment and how the streamer feels, not a quote: the reaction (losing it, raging, panicking, in disbelief, overjoyed), what is at stake, or how it ends. Do not just repeat or quote what is said.',
+    'You write the hook of a short vertical video clip from a live stream: one line shown on screen at the start, over the video, to make people stop scrolling and keep watching.',
+    `Write ${HOOK_ASKED} different hooks for the clip described below, the best first. Only the first ${HOOK_COUNT} are shown, so make those three the strongest and each of a different kind.`,
+    `Each at most ${HOOK_MAX_CHARS} characters, and shorter is better: a hook is read in a second. Plain text, no hashtags, no emoji, no quotation marks around it.`,
+    'Write in the voice of a viewer who just watched it and cannot believe it, or of the person who posts it and teases what is coming. Never the voice of a narrator: a line that only reports what someone does or did ("<name> wins the fight", "<name> gets angry at his team") is a summary, not a hook, and is wrong.',
+    'First work out, for yourself, the one thing this clip is about: what happens or goes wrong, what is at stake, the turn nobody expected, the line that lands. Every hook must point at that thing, with a word or two that belong to this clip only (the car, the last kill, the door, the 1 HP, the teammate).',
+    'The test for each hook: would it fit a hundred other clips? Then it is wrong. "There is no way" alone fits any clip. "No way that jump just worked" fits one.',
+    'Kinds of hook that work, as shapes only (write your own words every time, and never reuse the examples in this message): disbelief at the specific thing; a question the clip answers; a warning or a tease of what is coming; the stakes just before it happens; the moment it all goes wrong; the one thing nobody saw coming.',
+    'Make them loud, not calm: the energy of someone grabbing a friend by the arm to show them this. At least one of the first three is the raw reaction a viewer blurts out (shock, disbelief, laughing, panic) with the specific thing inside it, and at least one is a question or a tease.',
+    'Tease, do not tell: point at what happens without giving away how it ends.',
+    'At most one of the first three may speak as the streamer (I, we, my); the others are the viewer speaking.',
+    'Do not just repeat or quote what is said. A few of the clip\'s own words inside a hook are fine when they are what makes it this clip.',
     'Read the feeling from how things are said, from the sound and from chat, as well as from the words. Shouting, screaming and laughing are usually missing from the transcript, so a loud part with few or no words is usually a reaction.',
+    'The transcript may also hold the game\'s characters and other people; work out from the words who is who, and what is the streamer\'s own reaction.',
     'Each must be true to the clip: do not invent events, names or numbers. Say something happened only if the clip shows it; the feeling can be read, the facts cannot be made up.',
-    'Make them different from each other: one about the reaction, one about the stakes or a tease of what comes, and one question.',
     'Each transcript line starts with its start and end time in seconds, in square brackets.',
   ];
   if (streamer) {
     lines.push(
-      `The streamer is called ${streamer}. Name them in at least two of the hooks, the way a viewer would talk about them: for example "${streamer} loses it after finishing the mission" or "This is the end for ${streamer}".`,
-      `Use the name rather than he or she, unless the transcript makes clear how ${streamer} is referred to.`,
+      `The streamer is called ${streamer}. Most hooks need no name at all. Use it in at most one of the first three, and only the way a viewer would say it, never as the start of a report of what ${streamer} did.`,
+      `Do not write he or she for ${streamer} unless the transcript makes clear which is right; a hook can speak of "this", "that", "they", or of nobody.`,
     );
   }
   if (brief) {
