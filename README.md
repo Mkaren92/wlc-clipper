@@ -30,7 +30,7 @@ npm run setup
 
 `npm run setup` creates a `.venv` folder in the project and installs two things into it: faster-whisper, which turns speech into text for captions, and yt-dlp, the downloader behind [`fetch`](#sources-and-fetching). The speech model for captions (about 1.6 GB) is downloaded to `~/.cache/huggingface` the first time a clip is transcribed; a smaller one (about 460 MB) the first time a whole video is, for "Suggested moments". Captions use the larger model because the small one loses a voice under loud game sound; `CLIPPER_CAPTION_MODEL=small` in `.env` goes back to the small, faster one.
 
-On a PC with an NVIDIA graphics card (one that `nvidia-smi` finds), it also installs NVIDIA's libraries for it (about 2 GB). A whole video's transcript for "Suggest moments" then runs on the card: on a GTX 1660 Ti, a 38-minute video took 52 seconds instead of about 4 minutes. Without a card, or if the card fails, it runs on the processor as before. Captions always use the processor. To keep the card out of it, set `CLIPPER_TRANSCRIBE_DEVICE=cpu`.
+On a PC with an NVIDIA graphics card (one that `nvidia-smi` finds), it also installs NVIDIA's libraries for it (about 2 GB). Transcripts then run on the card: on a GTX 1660 Ti, a whole 38-minute video for "Suggest moments" took 52 seconds instead of about 4 minutes, and a 60-second clip's captions with the larger model about 9 seconds instead of 80 (the whole clip 28 seconds instead of 99). Without a card, or if the card fails, they run on the processor as before. To keep the card out of it, set `CLIPPER_TRANSCRIBE_DEVICE=cpu`.
 
 Running it again leaves faster-whisper and the NVIDIA libraries as they are and brings yt-dlp up to date.
 
@@ -605,7 +605,7 @@ node src/cli.js check out/barca-wants-who --brief briefs/other.json
 - The font is Liberation Sans Bold, bundled in `assets/fonts` so clips look the same on every machine.
 - Line widths are known for the letters A to Z, digits and a few signs. Other letters are treated as very wide, so captions in another alphabet come out smaller than they need to be.
 
-A clip's picture is made on an NVIDIA graphics card when ffmpeg can use one (checked once, by itself), which makes it about twice as fast for the center and facecam layouts; the file is about 1.8 times larger at the same quality. Without a card, or if it fails, the processor makes it as before; `CLIPPER_ENCODER=cpu` keeps the card out. On the home PC a 30-second blur clip with captions took 32 s on the card and 41 s on the processor (over a minute before the blurred background was made faster on 2026-11-23).
+A clip's picture is made on an NVIDIA graphics card when ffmpeg can use one (checked once, by itself), which makes it about twice as fast for the center and facecam layouts; the file is about 1.8 times larger at the same quality. Without a card, or if it fails, the processor makes it as before; `CLIPPER_ENCODER=cpu` keeps the card out. On the home PC a 30-second blur clip with captions took 32 s on the card and 41 s on the processor (over a minute before the blurred background was made faster on 2026-11-23); with the larger caption model transcribed on the card too (2026-11-24), a 60-second clip took 28 s in all.
 
 Transcription uses the Whisper `small` model. A clip's captions are always transcribed on the processor: about 5 seconds for a 30-second clip. A whole video's transcript for suggestions uses an NVIDIA card when there is one (see the setup section). A 30-second clip takes about 30 to 40 seconds in all on the home PC.
 

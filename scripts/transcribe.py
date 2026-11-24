@@ -7,8 +7,8 @@ transcribed at once (faster-whisper's BatchedInferencePipeline). That is for a w
 video's transcript, which "Suggested moments" reads; a clip's captions use the plain way,
 which they were measured with.
 
-A whole video's transcript ("batched") uses an NVIDIA graphics card when there is one that
-works, and the processor otherwise; captions always use the processor, as they were measured.
+Both use an NVIDIA graphics card when there is one that works, and the processor otherwise
+(a whole video's transcript since 2026-11-23, captions since 2026-11-24, after measuring).
 
 Output: {"language": "en", "device": "cuda", "words": [{"text": "He", "start": 0.32, "end": 0.48}, ...]}
 Times are seconds from the start of the audio file. "device" says where it ran.
@@ -36,10 +36,12 @@ def nvidia_lib_dirs():
     return dirs
 
 
-# The card is tried only for a whole video's transcript, and only when CLIPPER_TRANSCRIBE_DEVICE
-# is not "cpu". Measured on the owner's GTX 1660 Ti on 2026-11-23, 5 minutes of a stream:
-# processor 32.8 s, card 5.6 to 6.2 s with int8_float16 (float16 took 12.3 s), the same words.
-want_card = batched and os.environ.get("CLIPPER_TRANSCRIBE_DEVICE", "auto") != "cpu"
+# The card is tried whenever CLIPPER_TRANSCRIBE_DEVICE is not "cpu". Measured on the owner's
+# GTX 1660 Ti: a whole video's transcript (2026-11-23), 5 minutes of a stream, processor 32.8 s,
+# card 5.6 to 6.2 s with int8_float16 (float16 12.3 s), the same words. Captions on large-v3-turbo
+# (2026-11-24), 60 s and 46 s of two streams: processor 80.2 and 64.4 s, card 9.3 and 9.2 s with
+# int8_float16 (float16 36.7 s), 95 and 97% of words the same, starts the same in the median.
+want_card = os.environ.get("CLIPPER_TRANSCRIBE_DEVICE", "auto") != "cpu"
 lib_dirs = nvidia_lib_dirs() if want_card else []
 if lib_dirs:
     # The libraries are found by the system's loader, which reads LD_LIBRARY_PATH only when a
@@ -99,39 +101,46 @@ def batched_on(device):
     return list(segments), info
 
 
-device = "cpu"
-if batched:
-    segments = None
-    if lib_dirs:
-        try:
-            import ctranslate2
-
-            if ctranslate2.get_cuda_device_count() > 0:
-                segments, info = batched_on("cuda")
-                device = "cuda"
-        except Exception as error:  # any failure of the card: the processor does it, as before
-            print(f"The graphics card could not be used ({type(error).__name__}); using the processor.", file=sys.stderr)
-            segments = None
-    if segments is None:
-        segments, info = batched_on("cpu")
-else:
+def captions_on(device):
+    """A clip's captions on one device, read to the end (a failure shows while reading)."""
+    if device == "cuda":
+        model = WhisperModel(model_size, device="cuda", compute_type="int8_float16")
+    else:
+        model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=threads)
     # No voice-activity filter for captions (2026-11-22). Under loud game sound it dropped
     # whole sentences and put words up to 6.7 s before they were said; without it, a clip of
     # shouting gave 42 words instead of 4. Without it the model also writes "You" on silence
     # or noise; hallucination_silence_threshold removed that in every sample tried.
-    model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=threads)
     # The sound is listened to in short pieces, each on its own (2026-11-24). Given a whole clip, the
     # recogniser skips stretches of it: on a 46-second clip of a loud stream it wrote words for 18 of
     # the seconds; given the same sound in pieces of about 10 seconds, for 37. Each piece ends at the
     # quietest moment near its end, so a word is not cut in two.
     sound = decode_audio(path, sampling_rate=16000)
-    segments = []
+    heard_all, info = [], None
     for start, end in pieces_of(sound, 16000):
         heard, info = model.transcribe(
             sound, language=lang, word_timestamps=True, vad_filter=False, hallucination_silence_threshold=2.0,
             clip_timestamps=[start, end],
         )
-        segments.extend(heard)
+        heard_all.extend(list(heard))
+    return heard_all, info
+
+
+make = batched_on if batched else captions_on
+device = "cpu"
+segments = None
+if lib_dirs:
+    try:
+        import ctranslate2
+
+        if ctranslate2.get_cuda_device_count() > 0:
+            segments, info = make("cuda")
+            device = "cuda"
+    except Exception as error:  # any failure of the card: the processor does it, as before
+        print(f"The graphics card could not be used ({type(error).__name__}); using the processor.", file=sys.stderr)
+        segments = None
+if segments is None:
+    segments, info = make("cpu")
 
 words = []
 for segment in segments:

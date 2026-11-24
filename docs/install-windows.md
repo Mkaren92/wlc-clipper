@@ -196,7 +196,7 @@ This step is needed for captions (speech turned into text) and for fetching YouT
 npm run setup
 ```
 
-It creates a folder `.venv` in the project and downloads about 520 MB into it. It takes a few minutes. On a PC with an NVIDIA graphics card it also downloads NVIDIA's libraries for it, about 2 GB more, so that a whole video's transcript for "Suggest moments" runs on the card; it says so ("Found ... installing NVIDIA's libraries"). Without a card it prints "No NVIDIA graphics card found" and the transcripts use the processor.
+It creates a folder `.venv` in the project and downloads about 520 MB into it. It takes a few minutes. On a PC with an NVIDIA graphics card it also downloads NVIDIA's libraries for it, about 2 GB more, so that transcripts (captions, and a whole video's for "Suggest moments") run on the card; it says so ("Found ... installing NVIDIA's libraries"). Without a card it prints "No NVIDIA graphics card found" and the transcripts use the processor.
 
 **It should end with:**
 

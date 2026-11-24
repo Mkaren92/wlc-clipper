@@ -39,6 +39,7 @@ Version 1 of the spec is complete: all three "evenings".
 - Faster "Suggest moments" (2026-11-23): a whole video's transcript runs on an NVIDIA card where there is one (a 38-minute video in 52 s instead of about 4 minutes on the home PC's GTX 1660 Ti), and can be made straight after a download so it is ready when the video is opened; a hook's range is transcribed the same fast way (46 s of a stream in 5 s instead of 26 s)
 - Suggested moments hear the streamer: "Use where the streamer gets loud" tells the AI where the voice is much louder than usual (2026-11-23), up to 20 moments can be asked for, and videos up to 3 hours (60 minutes before)
 - Clips from a part: "Cut clips from this part" puts a part under Videos (the same file, linked) and opens it on the cutting screen (2026-11-23)
+- Captions on the graphics card (2026-11-24): the larger model in pieces, 60 s of a stream in about 9 s instead of 80 on the home PC; a whole 60-second clip in 28 s instead of 99
 - Faster clips (2026-11-23): the picture made on an NVIDIA card where there is one, and the blurred background made about 6 times faster on every PC; a 30-second blur clip in about 32 s on the home PC, over a minute before
 - Hook suggestions: "Suggest" beside the hook box proposes three hooks for the clip being set up, about the moment and the feeling rather than the words (2026-11-22): it is given the streamer's name, where the voice is loud, and, when ticked, counts of chat's reactions; written in a viewer's voice about what happens in the clip, not as a report of what the streamer did (2026-11-24)
 - A channel tag: the streamer's channel (`@theburntpeanut`) drawn at the top for all the footage, with the hook just under it; `--tag`, or the box on the cutting screen, which offers the handle of a fetched video's channel (2026-11-22)
@@ -55,6 +56,7 @@ Version 1 of the spec is complete: all three "evenings".
 - **A verdict on caption timing** in continuous speech, judged by eye on real clips. Word starts after pauses were measured, and since 2026-11-22 starts under game sound (the clip "what-just-happened-here", rendered again with the fix): watch it and say whether the captions now land with the shouts.
 - **How to keep two downloader runs from rewriting the YouTube sign-in at once.** yt-dlp writes the cookies file back when it ends, and the live check runs beside a fetch or a chat download, so two can write it at the same moment and spoil it. Ways out: run downloader calls one at a time (the live check would then wait behind a long fetch), or hand each call a copy of the file (the rules say never to copy it). Found in review on 2026-11-22; not yet seen to happen.
 
+- **For the work PC, from the home PC (2026-11-24).** After `git pull`, nothing needs installing: with no NVIDIA card, transcripts (captions, whole videos, hooks) and the clip's picture are made on the processor, exactly as before. If `nvidia-smi --query-gpu=name --format=csv` does find a card there, run `npm run setup` once to get the card's libraries. On the home PC captions now run on its card (see "Captions on the graphics card" in `docs/decisions.md`): a word can start up to about 0.3 s apart between a clip made there and one made here, so compare caption timing between the two PCs with that in mind. The card code in `scripts/transcribe.py` and `src/render.js` can only be tried on the home PC: keep its fallback to the processor when changing those files, and leave a note here if it needs trying there.
 - **Pull the new code on every PC before adding the first Twitch channel.** A PC with older code cannot read a channels list that has a Twitch address, so its sync would stop with a message until it is updated.
 - **TwitchDownloader**, if Twitch chat is wanted: a free program to save a past broadcast's chat as JSON. It is the owner's to install.
 
@@ -133,7 +135,6 @@ Nothing is decided. Ideas the owner has been offered:
 - A screen for creating and editing briefs, so the JSON is not edited by hand
 - An option to keep the source's frame rate (60 fps) in clips and compilations, offered after the quality check of 2026-11-19 (see `docs/decisions.md`)
 - Cutting several ranges in one go
-- Captions on the home PC's graphics card with the larger speech model; a minute of sound takes about 45 s to transcribe on the first PC
 - Deleting a whole caption line with one click on the clip page
 - Separating the streamer's voice from the game sound before recognition, if the larger model still misses words
 - AI word fixes from the command line; they exist only in the dashboard

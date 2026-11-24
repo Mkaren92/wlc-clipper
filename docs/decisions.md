@@ -573,6 +573,16 @@ Asked for on 2026-11-23. Measured on 30 s of the owner's 1080p60 AV1 stream at 2
 - **Not changed:** compilations, combinations and parts. Their encoding is part of their recipes and kept segments, and the owner did not ask.
 - **Not verified:** the look of a full clip made on the card judged by the owner; the work PC (no card, so it gets the faster blur only).
 
+## Captions on the graphics card
+
+Asked for on 2026-11-24, after the captions moved to large-v3-turbo in pieces (see above) and became the slowest part of a clip. The work PC's notes listed it as not done. Measured on the home PC (GTX 1660 Ti), on 60 s of a Peanut stream at 24:22 and 46 s of a Boeshi stream at 1:22:23:
+
+- **Transcription alone**: processor (int8, 4 threads) 80.2 and 64.4 s; card int8_float16 9.3 and 9.2 s; card float16 36.7 s. The model loads in about 4 s either way.
+- **The words**: 52 of 55 and 67 of 69 the same; the processor gives exactly the same words and times on every run, the card differs from it in a few.
+- **The timing, in the finished clips' `work/transcript.json`** (after the word starts are moved onto the voice): the median start the same (0.00 to 0.01 s); leaving out words repeated in a row, whose pairing in the comparison is a guess ("shoot, shoot, shoot", where the card heard one more), 90% within 0.08 s on one clip and 0.28 s on the other. The largest single gap (2.68 s) was a "Thank you." the model writes on noise in the last half-second, placed differently by each. Which device is nearer the voice cannot be told from this; the owner judges by watching.
+- **Whole cuts**: 28 s instead of 99 s, and 24 s instead of 69 s.
+- So captions use the card where there is one, with the processor as the fallback and `CLIPPER_TRANSCRIBE_DEVICE=cpu` to choose it.
+
 ## Clip folder
 
 - **A clip folder is named after its hook**, at the owner's request: numbers said nothing about what a clip was. The hook is lower-cased and everything that is not a letter or a digit becomes a dash, cut at a word to 50 characters; a taken name gets `-2`, `-3`. With no hook, or a hook with nothing usable in it, the folder is the next free `clip-NNN` as before. Older numbered folders keep working. The dashboard lists clips newest first by the folder's creation time, since the names no longer sort by age, and it accepts a clip name made only of letters, digits and dashes.

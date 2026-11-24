@@ -42,7 +42,7 @@ if (!installed) {
 // NVIDIA's libraries let a whole video's transcript (for "Suggested moments") run on the
 // graphics card: on the owner's GTX 1660 Ti, 5 minutes took 6 s instead of 33 s (2026-11-23).
 // About 2 GB, so only on a PC where nvidia-smi finds a card. Pinned to the versions measured,
-// so running this again changes nothing. Captions never use the card. Without the libraries,
+// so running this again changes nothing. Captions use it too since 2026-11-24. Without the libraries,
 // or if the card fails, the transcript is made on the processor as before.
 const card = spawnSync('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], { encoding: 'utf8' });
 if (card.status === 0 && card.stdout.trim()) {
