@@ -109,3 +109,33 @@ export function checkFetchRange(start, end) {
   }
   return end - start;
 }
+
+/** How long the owner's own name in front of a fetched file's name may be. */
+export const MAX_FILE_LABEL = 40;
+
+/**
+ * The owner's own name for a fetched file, made fit for a file name: letters and digits of any
+ * script, with everything else turned into single dashes. Empty when there is nothing usable.
+ *
+ * It goes in front of the name the tool makes, with one space between (`fetchVideo`). A space
+ * is the one thing neither part can hold, so the two can always be told apart again.
+ *
+ * @param {unknown} text
+ * @returns {string}
+ */
+export function fileLabel(text) {
+  if (typeof text !== 'string') return '';
+  return text.normalize('NFC').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, MAX_FILE_LABEL).replace(/-+$/, '');
+}
+
+/**
+ * A video's name without the owner's own name in front of it: the name the tool made for a
+ * fetched file, which begins with its channel. A name with no space in it is returned as it is.
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+export function madeName(name) {
+  const space = name.indexOf(' ');
+  return space === -1 ? name : name.slice(space + 1);
+}

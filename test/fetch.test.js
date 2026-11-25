@@ -5,8 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildDescription } from '../src/compilation/description.js';
-import { downloadTimeout, fastFailure, fetchVideo, leadInOf, removeHiddenLeadIn, videoUrl } from '../src/fetch.js';
+import { fetchedOrigin } from '../src/chat/chatStore.js';
+import { downloadTimeout, fastFailure, fetchVideo, filePrefix, leadInOf, removeHiddenLeadIn, videoUrl } from '../src/fetch.js';
 import * as fetchLink from '../src/fetchLink.js';
+import { fileLabel, madeName, MAX_FILE_LABEL } from '../src/fetchLink.js';
 import { checkStreamUrl, startRangeRelay } from '../src/rangeRelay.js';
 import { run } from '../src/run.js';
 import { channelAddress, checkPictureUrl, creditPictures, fetchPicture, fetchPictures, listPictures, listSubscribers, PICTURE_PIXELS, pictureFile, removeOtherPictures, syncSource } from '../src/pictures.js';
@@ -309,7 +311,8 @@ describe('sources', () => {
       { kind: 'video', seconds: 5, credit: 'northstand' },
       { kind: 'video', seconds: 5, credit: 'Terrace Talk' },
     ], creditLinks(sources));
-    expect(text).toContain('- northstand: https://www.youtube.com/@northstandtv\n- Terrace Talk\n');
+    // An agreed channel is written as its address; a credit that is not one goes by its name alone.
+    expect(text).toContain('\n\nhttps://www.youtube.com/@northstandtv\nTerrace Talk\n');
   });
 });
 
@@ -345,6 +348,32 @@ describe('fetchVideo', () => {
     // The same part again gets its own name.
     expect((await ask({})).name).toBe('northstand_dQw4w9WgXcQ_1h02m00s-1h05m00s_2.mp4');
     expect((await readdir(dir)).sort()).toEqual(['northstand_dQw4w9WgXcQ_1h02m00s-1h05m00s.mp4', 'northstand_dQw4w9WgXcQ_1h02m00s-1h05m00s_2.mp4']);
+  }, 60_000);
+
+  it('puts the owner\'s own name in front of the name it makes, and can still read the made name back', async () => {
+    // Letters and digits of any script are kept; anything else, a path among it, becomes a dash.
+    expect(fileLabel('  Barca first goal!  ')).toBe('Barca-first-goal');
+    expect(fileLabel('../../etc/passwd')).toBe('etc-passwd');
+    expect(fileLabel('Գոլ 1 / «հաղթանակ»')).toBe('Գոլ-1-հաղթանակ');
+    expect(fileLabel('a_b c.mp4')).toBe('a-b-c-mp4');
+    expect(fileLabel('x'.repeat(100)).length).toBe(MAX_FILE_LABEL);
+    for (const nothing of ['', '   ', '!!!', undefined, null, 7]) expect(fileLabel(nothing)).toBe('');
+
+    const fetched = await ask({ label: ' Barca first goal! ' });
+    expect(fetched.name).toBe('Barca-first-goal northstand_dQw4w9WgXcQ_1h02m00s-1h05m00s.mp4');
+    expect(await readdir(dir)).toContain(fetched.name);
+    // The same part with the same name again gets its own number, as without a name.
+    expect((await ask({ label: 'Barca first goal' })).name).toBe('Barca-first-goal northstand_dQw4w9WgXcQ_1h02m00s-1h05m00s_2.mp4');
+    // A name with nothing usable in it is no name: the file is named as it always was.
+    expect((await ask({ label: ' !!! ' })).name).not.toContain(' ');
+
+    // The made name never holds a space, so everything after the first one is it: the channel is
+    // still found at its start, and the video and the range are still read from its end.
+    expect(madeName(fetched.name)).toBe('northstand_dQw4w9WgXcQ_1h02m00s-1h05m00s.mp4');
+    expect(madeName('northstand_dQw4w9WgXcQ_1h02m00s-1h05m00s.mp4')).toBe('northstand_dQw4w9WgXcQ_1h02m00s-1h05m00s.mp4');
+    expect(madeName(fetched.name).startsWith(`${filePrefix('Northstand')}_`)).toBe(true);
+    expect(fetchedOrigin(fetched.name)).toEqual(fetchedOrigin('northstand_dQw4w9WgXcQ_1h02m00s-1h05m00s.mp4'));
+    expect(fetchedOrigin(fetched.name)).toMatchObject({ videoId: 'dQw4w9WgXcQ', offset: 3720, end: 3900 });
   }, 60_000);
 
   it('names the file from the id checked in the link, whatever the downloader reports', async () => {

@@ -8,7 +8,9 @@ import { createHash } from 'node:crypto';
 import { access, mkdir, readFile, readdir, rename, rm, stat, statfs, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CARD_SIZES, LOGO_SWING } from '../cards/config.js';
 import { cardPngPath, readMatch } from '../cards/match.js';
+import { movingLogo } from '../cards/templates.js';
 import { cleanOverlayText, FONT_NAME } from '../captions/ass.js';
 import { OUT_FPS } from '../layout.js';
 import { probe } from '../probe.js';
@@ -126,9 +128,13 @@ export async function buildCompilation({ timeline, dataDir: givenDataDir, resolv
     if (entry.startsWith('seg_') && !used.has(entry.replace(/\.[^.]+$/, '').replace(/\.partial$/, ''))) await rm(path.join(workDir, entry), { force: true });
   }
 
-  // Chapter times come from the lengths the segments really have.
-  const description = buildDescription(items, links);
+  // Chapter times come from the lengths the segments really have. What they were worked out
+  // from is kept beside them (made.json), so the page can write the text again when the owner
+  // changes their own part of it, and can say when the timeline has changed since.
+  const made = items.map(({ kind, seconds, credit, title }) => ({ kind, seconds, ...(kind === 'video' ? { credit: credit ?? '' } : { title }) }));
+  const description = buildDescription(made, links, timeline.post);
   await writeFile(path.join(dir, 'description.txt'), description);
+  await writeFile(path.join(dir, 'made.json'), `${JSON.stringify({ from: timeline.items, items: made }, null, 2)}\n`);
   const final = await probe(path.join(dir, 'final.mp4'));
   return {
     file: path.join(dir, 'final.mp4'),
@@ -148,22 +154,56 @@ async function planCard(item, timeline, dataDir, soundsDir) {
   if (!card) throw new Error('its card was deleted from the match. Remove it from the timeline.');
   // What plays under the card: the sound for its kind, another one, a file, or nothing.
   const sound = await resolveSound({ choice: item.sound ?? 'auto', cardType: card.type, soundsDir });
-  // A video gives the card a moving background too, and then the card's
-  // see-through picture is the one laid over it.
-  const overVideo = Boolean(sound?.hasPicture);
-  const png = cardPngPath(dataDir, item.matchId, item.cardId, timeline.preset, overVideo);
+  const png = cardPngPath(dataDir, item.matchId, item.cardId, timeline.preset);
   const file = await stat(png).catch(() => {
-    throw new Error(overVideo
-      ? 'the card has no see-through picture yet, which it needs to lie over its video. Open its match in the card maker and press Save.'
-      : 'the card has no picture yet. Open its match in the card maker and press Save.');
+    throw new Error('the card has no picture yet. Open its match in the card maker and press Save.');
   });
   // With no length given, the card is shown exactly as long as its sound
   // plays, rounded up to a whole frame. A silent card gets the usual length.
   const fitted = sound ? Math.min(Math.max(Math.ceil(sound.seconds * OUT_FPS) / OUT_FPS, 0.5), 60) : DEFAULT_CARD_SECONDS;
   const seconds = item.seconds ?? fitted;
+  const recipe = ['card', png, file.size, Math.round(file.mtimeMs), seconds, sound?.recipe ?? 'silent', sound?.quieter ?? 0];
+  // On a goal and a red card the logo moves, when the card maker has saved the two pieces
+  // that needs. A card without them is planned and made exactly as before.
+  const swing = await planSwing({ card, item, timeline, dataDir, seconds, since: file.mtimeMs });
+  if (swing) recipe.push(...swing.recipe);
+  return { item, png, seconds, title: cardTitle(match, card), sound, swing, recipe };
+}
+
+/**
+ * How a card's logo moves (asked for on 2026-11-25): it leans to the right, then as far to the
+ * left, a few times over, and then stands straight (`LOGO_SWING` in src/cards/config.js).
+ *
+ * The moving logo is its own picture, turned by ffmpeg and laid over the card's picture without
+ * that logo. The card maker saves both beside the ordinary picture. Where the logo goes comes
+ * from the card's own drawing (`movingLogo`), not from anything saved.
+ *
+ * @returns {Promise<null | { still: string, logo: string, x: number, y: number, side: number, angle: string, recipe: Array }>}
+ *   null when nothing moves: another kind of card, the pieces not saved yet or older than the
+ *   card's picture (saved by a page from before this), or a card too short to lean in.
+ */
+async function planSwing({ card, item, timeline, dataDir, seconds, since }) {
+  const box = movingLogo({ card, size: timeline.preset });
+  if (!box) return null;
+  const still = cardPngPath(dataDir, item.matchId, item.cardId, timeline.preset, 'still');
+  const logo = cardPngPath(dataDir, item.matchId, item.cardId, timeline.preset, 'logo');
+  const files = await Promise.all([still, logo].map((file) => stat(file).catch(() => null)));
+  if (files.some((file) => !file || file.mtimeMs < since)) return null;
+  // Every lean fits inside the card: a shorter card leans faster, and one with no room does not lean.
+  const each = Math.min(LOGO_SWING.seconds, (seconds - LOGO_SWING.after - 0.1) / LOGO_SWING.times);
+  if (each < 0.25) return null;
+  const end = LOGO_SWING.after + LOGO_SWING.times * each;
+  const radians = (LOGO_SWING.degrees * Math.PI) / 180;
+  // The card's picture is brought to the compilation's size, so the logo and its place are too.
+  const scale = PRESETS[timeline.preset].width / CARD_SIZES[timeline.preset].width;
+  const side = Math.round(box.room * scale);
   return {
-    item, png, seconds, title: cardTitle(match, card), sound,
-    recipe: ['card', png, file.size, Math.round(file.mtimeMs), seconds, sound?.recipe ?? 'silent', sound?.quieter ?? 0],
+    still, logo, side,
+    x: Math.round(box.x * scale - side / 2),
+    y: Math.round(box.y * scale - side / 2),
+    // A positive angle turns clockwise: the top of the logo goes to the right first.
+    angle: `if(between(t,${LOGO_SWING.after},${end.toFixed(3)}),${radians.toFixed(5)}*sin(2*PI*(t-${LOGO_SWING.after})/${each.toFixed(3)}),0)`,
+    recipe: ['swing-1', ...files.flatMap((file) => [file.size, Math.round(file.mtimeMs)]), box.x, box.y, box.room, LOGO_SWING.degrees, LOGO_SWING.times, each, LOGO_SWING.after],
   };
 }
 
@@ -229,7 +269,10 @@ async function makeSegment(plan, { name, size, workDir }) {
   let args;
 
   if (plan.png) {
-    const card = ['-loop', '1', '-framerate', String(OUT_FPS), '-t', length, '-i', plan.png];
+    // With a moving logo the card's picture is the one without that logo.
+    const card = ['-loop', '1', '-framerate', String(OUT_FPS), '-t', length, '-i', plan.swing?.still ?? plan.png];
+    // The logo is one more picture, the last input, turned a little each frame and laid on last.
+    const logo = plan.swing ? ['-loop', '1', '-framerate', String(OUT_FPS), '-t', length, '-i', plan.swing.logo] : [];
     const silence = ['-f', 'lavfi', '-t', length, '-i', SILENCE];
     // The card's length is already decided. A sound that would run past it
     // is faded out at the card's end, and one that stops early is followed
@@ -243,24 +286,20 @@ async function makeSegment(plan, { name, size, workDir }) {
     }
     const sound = `${steps.join(',')},apad`;
 
-    if (plan.sound?.hasPicture) {
-      // A video behind the card. It is made to fill the frame, at the output
-      // frame rate first as everywhere else, and its last frame is held if
-      // the card is shown for longer than it runs. The card's see-through
-      // picture lies over it. The video's path is its own argument: nothing
-      // a person named is inside the graph.
-      const hold = Math.max(0, plan.seconds - plan.sound.seconds) + 0.5;
+    if (plan.swing) {
+      // The logo is laid on while the card is still in full colour, and the result is brought
+      // to the video's colours by the very steps a card without a moving logo goes through.
+      // Measured: everything outside the logo is then identical to that card, and the logo at
+      // rest too (66 dB). Converting first, or leaving the conversion to ffmpeg's own choice in
+      // a graph (a different scaler), shifted the stripes' colour by three levels of blue.
       const graph = [
-        `[0:v:0]fps=${OUT_FPS},scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,tpad=stop_mode=clone:stop_duration=${hold.toFixed(3)}[back]`,
-        `[1:v]scale=${width}:${height},setsar=1[card]`,
-        '[back][card]overlay=0:0,format=yuv420p[v]',
-      ];
-      args = ['-i', plan.sound.file, ...card];
-      if (plan.sound.hasSound) {
-        args.push('-filter_complex', `${graph.join(';')};[0:a:0]${sound}[a]`, '-map', '[v]', '-map', '[a]');
-      } else {
-        args.push(...silence, '-filter_complex', graph.join(';'), '-map', '[v]', '-map', '2:a');
-      }
+        `[0:v]fps=${OUT_FPS},scale=${width}:${height}:flags=bicubic[card]`,
+        `[2:v]fps=${OUT_FPS},scale=${plan.swing.side}:${plan.swing.side},format=rgba,rotate=a='${plan.swing.angle}':c=none[logo]`,
+        `[card][logo]overlay=${plan.swing.x}:${plan.swing.y}:format=rgb,scale=${width}:${height}:flags=bicubic,setsar=1,format=yuv420p[v]`,
+      ].join(';');
+      args = plan.sound
+        ? [...card, '-i', plan.sound.file, ...logo, '-filter_complex', graph, '-map', '[v]', '-af', sound, '-map', '1:a:0']
+        : [...card, ...silence, ...logo, '-filter_complex', graph, '-map', '[v]', '-map', '1:a'];
     } else {
       const picture = ['-vf', `scale=${width}:${height},setsar=1,fps=${OUT_FPS},format=yuv420p`];
       args = plan.sound

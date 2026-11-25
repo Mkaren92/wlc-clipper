@@ -25,6 +25,28 @@ If the project is in another folder, `cd` there instead. Then open http://127.0.
 - `git status` should say `nothing to commit, working tree clean`. If it lists changed files, or says `Your branch is ahead of 'origin/main'`, there is work on the home PC that was never pushed. Do not delete the folder or clone again. Open Claude Code in that folder and write: **"I have work here that was never pushed. Get the latest main from GitHub, put it together with my work here, run the tests, and commit-push."**
 - `npm run setup` is **not** needed. Nothing new has to be installed.
 
+## Do these once after the pull of 2026-11-25
+
+This pull changes the cards, removes the intro and adds the thumbnail, the title and description, and the leaning logo. Things made at home before it need a little care, once.
+
+1. **Run the tests once.** They were not all run before this push (only the ones for what changed).
+
+   ```bash
+   cd ~/wlc-clipper
+   npm test
+   ```
+
+   It should end with `Tests  604 passed`. If anything fails, open Claude Code in that folder and write: **"npm test fails after the pull of 2026-11-25. Show me what fails and fix it."**
+2. **Save every match once.** Open **Cards**, choose a match, press **Save match and cards**; do it for each match. This redraws its cards in the new look and saves the two extra pictures the leaning logo needs. A match that had an intro card opens without it. Until a match is saved, its cards in a compilation are the old pictures and its logos stand still.
+3. **Look through each compilation's timeline.**
+   - An item that was an **intro card** now says its card was deleted from the match. Remove that item.
+   - A card whose sound was a **video** (such as `intro.mp4`) says the video behind a card was removed. Choose another sound for it.
+   - Press **Generate the video** once. That also gives the compilation its chapter times for the description.
+4. **Tidy the sounds folder if needed.** Sync moves `intro.mp3` out of `sounds/` into `data/backups/sync/` by itself. A video there (`sounds/intro.mp4`) is no longer anything the tool knows, so sync leaves it where it is: nothing uses it, and you can delete or move it by hand. The goal, red card and full-time sounds arrive shortened to 3.0 seconds; the home PC's longer ones go to `data/backups/sync/`.
+5. **The title and description text is typed per PC.** Compilations do not sync, so the sentences typed on the office PC (under "YouTube title and description") are not on the home PC. Type them once there too; new compilations then start with them.
+
+Nothing new has to be installed, and nothing in this pull uses the graphics card differently. The leaning logo was measured with ffmpeg 4.4.2 on the office PC; if a goal or red card fails to generate at home, check `ffmpeg -version` and tell Claude Code what the page said.
+
 ## What is different after this pull (code of 2026-11-25)
 
 - **Captions use a larger speech model.** The first clip cut with captions downloads it once: about 1.6 GB, a few minutes. Check there is room first with `df -h ~`. Later clips do not download anything.
@@ -37,11 +59,15 @@ If the project is in another folder, `cd` there instead. Then open http://127.0.
 - "Cover swear words (F*CK)" and "Muffle them in the voice" are two checkboxes on the cutting screen, as before.
 - **Hook suggestions read like a viewer reacting** ("you did NOT just do that to a spotless car"), not like a report of what the streamer did.
 - **The dashboard has one look, the dark one.** The "Colours" chooser at the bottom of the left column is gone.
-- **The intro card's score stands on a dark box** when a video plays behind the card. Card pictures do not sync, so on the home PC open **Cards**, choose each match and press **Save match and cards** once; then generate the compilation again.
-- **A new intro video and a new goal sound arrive by sync** (`sounds/intro.mp4`, `sounds/goal.wav`). The home PC's own older files of those names are moved to `data/backups/sync/`.
+- **A new goal sound arrived by sync** (`sounds/goal.wav`). The home PC's own older file of that name was moved to `data/backups/sync/`.
 - **The result player on the Compilations page has no black bars** beside the picture any more.
 - **The three sounds "made by the tool" are gone** from a card's sound list. Cards use your own files in `sounds/`, which sync.
-- **The cards look different** (2026-11-25): goal, red and full-time cards show both clubs' logos with the score between them, and every card has the dark green, white and lime of the channel's artwork. Card pictures do not sync and are drawn again only when a match is saved, so on the home PC open **Cards**, choose each match and press **Save match and cards** once; then generate the compilation again.
+- **The cards look different** (2026-11-25): goal, red and full-time cards show both clubs' logos with the score between them, and every card has the dark green, the pitch stripes, the white and the lime of the channel's artwork. In a compilation the logo of the club that scored, or had a player sent off, leans right and left three times; that needs each match saved once: open **Cards**, choose the match and press **Save match and cards**, then generate the compilation again. Card pictures do not sync. Card pictures do not sync and are drawn again only when a match is saved, so on the home PC open **Cards**, choose each match and press **Save match and cards** once; then generate the compilation again.
+- **The intro card is gone, and so is a video behind a card** (2026-11-25). A compilation starts straight with a goal or a red card. Sync removes `sounds/intro.mp4` and `sounds/intro.mp3` from the home PC's `sounds/` folder and keeps them in `data/backups/sync/` there. A match that had an intro card opens without it.
+- **A compilation has a YouTube thumbnail** (2026-11-25), under the timeline on the **Compilations** page: download it with "JPG 1280×720".
+- **The goal, red card and full-time sounds are shorter** (3.0 s each, cut on 2026-11-25) and arrive by sync.
+- **A compilation has a "YouTube title and description" panel** (2026-11-25), under the thumbnail: the chapter times and the fan channels are written for you, your own sentences are typed once, and there are title ideas, hashtags and tags worked out from the match. For chapters like `BAR 1-0 RMA`, type each team's short name on the **Cards** page.
+- **A download can have your own name** (2026-11-25): "Your own name for the file" on the **Download** page puts it in front of the file's name. The link, the times and the name stay in their boxes after a download.
 
 Tried on the office PC on 2026-11-24 and removed the same day, so the home PC never gets it and needs nothing for it: a "Drop game voices" checkbox and a voice sample for each channel. One voice sample that was uploaded then is still in the data repository (`data/source-voices/`, two files). Nothing uses it and it is not copied to the home PC.
 

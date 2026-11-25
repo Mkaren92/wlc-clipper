@@ -29,9 +29,10 @@ export async function loadCardFont() {
  * @param {string} svg   from src/cards/templates.js
  * @param {number} width
  * @param {number} height
- * @returns {Promise<Blob>} a PNG
+ * @param {'image/png' | 'image/jpeg'} [type] a JPG only for a picture with nothing see-through in it
+ * @returns {Promise<Blob>} the picture, a PNG unless asked otherwise
  */
-export async function cardPng(svg, width, height) {
+export async function cardPng(svg, width, height, type = 'image/png') {
   const face = `<style>@font-face{font-family:'${CARD_FONT}';font-weight:bold;src:url(data:font/ttf;base64,${await fontAsBase64()}) format('truetype');}</style>`;
   const url = URL.createObjectURL(new Blob([svg.replace(/^(<svg[^>]*>)/, `$1${face}`)], { type: 'image/svg+xml' }));
   try {
@@ -46,7 +47,7 @@ export async function cardPng(svg, width, height) {
     canvas.width = width;
     canvas.height = height;
     canvas.getContext('2d').drawImage(image, 0, 0, width, height);
-    return await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    return await new Promise((resolve) => canvas.toBlob(resolve, type, 0.92));
   } finally {
     URL.revokeObjectURL(url);
   }

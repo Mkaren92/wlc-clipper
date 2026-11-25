@@ -7,7 +7,7 @@ describe('what counts as the owner\'s data', () => {
   it('takes what the owner chose to carry: the lists, pictures, sounds and briefs', () => {
     for (const name of [
       'data/sources.json', 'data/clubs.json', 'data/source-subscribers.json', 'data/source-pictures/north-stand.png',
-      'sounds/goal.mp3', 'sounds/intro.mp4', 'briefs/mine.json', 'overlays/kreek-logo.webp', 'overlays/logo.png',
+      'sounds/goal.mp3', 'sounds/red.wav', 'briefs/mine.json', 'overlays/kreek-logo.webp', 'overlays/logo.png',
     ]) expect(acceptEntry(name), name).toBe(true);
   });
 

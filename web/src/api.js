@@ -40,8 +40,8 @@ export const api = {
   createMatch: (match) => request('/api/matches', { method: 'POST', body: match }),
   saveMatch: (match) => request(`/api/matches/${enc(match.id)}`, { method: 'PUT', body: match }),
   deleteMatch: (id) => request(`/api/matches/${enc(id)}`, { method: 'DELETE' }),
-  saveCardPng: (matchId, cardId, size, png, clear = false) =>
-    request(`/api/matches/${enc(matchId)}/cards/${enc(cardId)}/png/${size}${clear ? '?clear=1' : ''}`, { method: 'PUT', body: png }),
+  saveCardPng: (matchId, cardId, size, png, part = 'card') =>
+    request(`/api/matches/${enc(matchId)}/cards/${enc(cardId)}/png/${size}${part === 'card' ? '' : `?part=${part}`}`, { method: 'PUT', body: png }),
   cardPngUrl: (matchId, cardId, size) => `/media/cards/${enc(matchId)}/${enc(cardId)}/${size}`,
   compilations: () => request('/api/compilations'),
   createCompilation: (timeline) => request('/api/compilations', { method: 'POST', body: timeline }),

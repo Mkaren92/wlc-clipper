@@ -17,6 +17,13 @@ export const RED_TYPES = [
 ];
 
 /**
+ * How a club's logo moves on a goal and a red card in a compilation (asked for on 2026-11-25):
+ * it leans to the right by `degrees`, then as far to the left, `times` times over, each lean
+ * to both sides taking `seconds`, starting `after` seconds into the card, and then stands straight.
+ */
+export const LOGO_SWING = { degrees: 10, times: 3, seconds: 0.6, after: 0.4 };
+
+/**
  * A club icon as it is stored with a match: a small PNG written out as text.
  * The page shrinks whatever picture the owner chooses to this before saving,
  * so nothing but a plain PNG of modest size ever reaches a card.
@@ -24,6 +31,9 @@ export const RED_TYPES = [
 export const ICON_PIXELS = 320;
 const ICON_PATTERN = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
 export const isIcon = (value) => typeof value === 'string' && value.length <= 400_000 && ICON_PATTERN.test(value);
+
+/** The size of the picture shown for a video on YouTube, which the match's thumbnail is exported in. */
+export const THUMBNAIL_SIZE = { width: 1280, height: 720 };
 
 /** The two sizes a card is exported in. */
 export const CARD_SIZES = {

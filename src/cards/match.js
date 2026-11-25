@@ -8,6 +8,7 @@
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { movingLogo } from './templates.js';
 import { CARD_SIZES, GOAL_TYPES, goalType, isIcon, minuteLabel, RED_TYPES } from './config.js';
 
 const ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
@@ -22,11 +23,6 @@ const side = z.enum(['home', 'away']);
 // A club icon: nothing, or a small PNG as text (see ICON in config.js).
 const icon = z.string().refine((value) => value === '' || isIcon(value), 'an icon is a PNG picture of modest size').default('');
 
-const introCard = z.strictObject({
-  id, type: z.literal('intro'),
-  // With the score off, the card shows "V" between the two clubs.
-  showScore: z.boolean().default(false), homeScore: score.default(0), awayScore: score.default(0),
-});
 const goalCard = z.strictObject({
   id, type: z.literal('goal'), team: side, scorer: name, assist: name.default(''),
   minute, added: added.default(null),
@@ -50,9 +46,12 @@ export const matchSchema = z.strictObject({
   competition: name.default(''),
   date: name.default(''),
   colours: z.strictObject({ home: colour, away: colour }),
+  // A short name for each team, such as GER and NED, for the chapter list of a compilation.
+  // Only what the owner typed: with none, the full name is used.
+  short: z.strictObject({ home: z.string().trim().max(12).default(''), away: z.string().trim().max(12).default('') }).default({ home: '', away: '' }),
   // Chosen by the owner from their own files. Matches saved before icons existed have none.
   icons: z.strictObject({ home: icon, away: icon }).default({ home: '', away: '' }),
-  cards: z.array(z.discriminatedUnion('type', [introCard, goalCard, redCard, fullTimeCard])).max(100).default([]),
+  cards: z.array(z.discriminatedUnion('type', [goalCard, redCard, fullTimeCard])).max(100).default([]),
 }).superRefine((match, ctx) => {
   const seen = new Set();
   for (const card of match.cards) {
@@ -64,13 +63,15 @@ export const matchSchema = z.strictObject({
 /** @typedef {z.infer<typeof matchSchema>} Match */
 
 /**
- * On 2026-11-25 a card could be saved with a `layout`, one of six. The owner kept one drawing
- * the same day, so the field means nothing now. It is dropped here, before the strict check,
- * so a match saved that day still opens, and is written without it the next time it is saved.
+ * What older matches hold that no longer exists, dropped here before the strict check so such
+ * a match still opens, and is written without it the next time it is saved:
+ *   - intro cards. A compilation began with one until the owner had the intro removed on
+ *     2026-11-25: a video now starts straight with a goal or a red card.
+ *   - a card's `layout`, one of six for a day (2026-11-25), until the owner kept one drawing.
  */
-function withoutLayouts(data) {
+function withoutWhatIsGone(data) {
   if (!Array.isArray(data?.cards)) return data;
-  const cards = data.cards.map((card) => {
+  const cards = data.cards.filter((card) => card?.type !== 'intro').map((card) => {
     if (!card || typeof card !== 'object' || !('layout' in card)) return card;
     const { layout, ...rest } = card;
     return rest;
@@ -79,7 +80,7 @@ function withoutLayouts(data) {
 }
 
 export function parseMatch(data) {
-  const result = matchSchema.safeParse(withoutLayouts(data));
+  const result = matchSchema.safeParse(withoutWhatIsGone(data));
   if (!result.success) throw new Error(`The match is not valid:\n${z.prettifyError(result.error)}`);
   return result.data;
 }
@@ -88,13 +89,14 @@ export const isId = (value) => typeof value === 'string' && ID.test(value);
 export const isCardSize = (value) => Object.hasOwn(CARD_SIZES, value);
 
 const matchDir = (dataDir, matchId) => path.join(dataDir, 'matches', matchId);
-/**
- * Where a card's picture is kept. Each card has two in each size: the
- * ordinary one, and a `clear` one with a see-through background, which is
- * laid over a video when the card has one behind it.
- */
-export const cardPngPath = (dataDir, matchId, cardId, size, clear = false) =>
-  path.join(matchDir(dataDir, matchId), 'cards', `${cardId}-${size}${clear ? '-clear' : ''}.png`);
+/** Where a card's picture is kept, in each size, and the two pieces of a card whose logo moves. */
+export const cardPngPath = (dataDir, matchId, cardId, size, part = 'card') =>
+  path.join(matchDir(dataDir, matchId), 'cards', pngName(cardId, size, part));
+
+// Besides its own picture, a goal or red card keeps two pieces for a compilation, where its
+// logo moves: `still`, the card without that logo, and `logo`, the logo by itself.
+const PARTS = ['card', 'still', 'logo'];
+const pngName = (cardId, size, part) => `${cardId}-${size}${part === 'card' ? '' : `-${part}`}.png`;
 
 /** Every saved match, newest name first is not needed: sorted by team names. */
 export async function listMatches(dataDir) {
@@ -125,7 +127,9 @@ export async function saveMatch(dataDir, data) {
   const dir = matchDir(dataDir, match.id);
   await mkdir(path.join(dir, 'cards'), { recursive: true });
   await writeFile(path.join(dir, 'match.json'), `${JSON.stringify(match, null, 2)}\n`);
-  const kept = new Set(match.cards.flatMap((card) => Object.keys(CARD_SIZES).flatMap((size) => [`${card.id}-${size}.png`, `${card.id}-${size}-clear.png`])));
+  // Anything else in the folder goes: the pictures of removed cards, and the see-through
+  // pictures (`-clear.png`) kept while a video could play behind a card.
+  const kept = new Set(match.cards.flatMap((card) => Object.keys(CARD_SIZES).flatMap((size) => PARTS.map((part) => pngName(card.id, size, part)))));
   for (const file of await readdir(path.join(dir, 'cards'))) {
     if (!kept.has(file)) await rm(path.join(dir, 'cards', file), { force: true });
   }
@@ -141,19 +145,23 @@ export async function deleteMatch(dataDir, matchId) {
  * Save a card's picture. It must be a PNG of exactly the size it claims.
  *
  * @param {Buffer} png
- * @param {boolean} [clear]   the picture with the see-through background
+ * @param {'card' | 'still' | 'logo'} [part] the card's own picture, or a piece of a card whose logo moves
  */
-export async function saveCardPng(dataDir, matchId, cardId, size, png, clear = false) {
+export async function saveCardPng(dataDir, matchId, cardId, size, png, part = 'card') {
   const match = await readMatch(dataDir, matchId);
   if (!match.cards.some((card) => card.id === cardId)) throw new Error('No such card in this match.');
   if (!isCardSize(size)) throw new Error('A card is "landscape" or "portrait".');
-  const { width, height } = CARD_SIZES[size];
+  if (!PARTS.includes(part)) throw new Error('A card has no piece of that name.');
+  // The place and the size of a moving logo are worked out here, from the card, never taken from the page.
+  const logo = part === 'card' ? null : movingLogo({ card: match.cards.find((card) => card.id === cardId), size });
+  if (part !== 'card' && !logo) throw new Error('No logo moves on this kind of card.');
+  const { width, height } = part === 'logo' ? { width: logo.room, height: logo.room } : CARD_SIZES[size];
   const isPng = png.length > 24 && png.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   // A PNG states its width and height right after its first header.
   if (!isPng || png.readUInt32BE(16) !== width || png.readUInt32BE(20) !== height) {
     throw new Error(`The ${size} picture must be a PNG of ${width}x${height}.`);
   }
-  const file = cardPngPath(dataDir, matchId, cardId, size, clear);
+  const file = cardPngPath(dataDir, matchId, cardId, size, part);
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, png);
 }

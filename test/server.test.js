@@ -349,14 +349,14 @@ describe('compilations', () => {
     // The sounds folder is made beside the data folder, for the owner to put files in.
     const first = (await api('/api/sounds')).data;
     // The tool has no sounds of its own: with an empty folder every kind of card is silent.
-    expect(first).toEqual({ files: [], automatic: { intro: 'none', goal: 'none', red: 'none', fulltime: 'none' }, lengths: {} });
+    expect(first).toEqual({ files: [], automatic: { goal: 'none', red: 'none', fulltime: 'none' }, lengths: {} });
     const soundsDir = path.join(dir, 'sounds');
     await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440', '-t', '0.3', path.join(soundsDir, 'horn.wav')]);
     await writeFile(path.join(soundsDir, 'notes.txt'), 'not a sound');
     expect((await api('/api/sounds')).data).toMatchObject({ files: ['horn.wav'], lengths: { 'file:horn.wav': expect.closeTo(0.3, 1) } });
     // A file named after a kind of card is that kind's sound. How long each plays is given too, for a card that lasts as long as its sound.
     await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=500', '-t', '0.4', path.join(soundsDir, 'goal.wav')]);
-    expect((await api('/api/sounds')).data.automatic).toEqual({ intro: 'none', goal: 'file:goal.wav', red: 'none', fulltime: 'none' });
+    expect((await api('/api/sounds')).data.automatic).toEqual({ goal: 'file:goal.wav', red: 'none', fulltime: 'none' });
 
     const heard = async (address) => {
       const response = await fetch(`${base}${address}`);
@@ -401,7 +401,20 @@ describe('compilations', () => {
 
     const after = (await api('/api/compilations/goal-reactions')).data;
     expect(after.final.size).toBeGreaterThan(1000);
-    expect(after.description).toBe('Credits:\n- Ana\n\nChapters:\n0:00 Start\n');
+    const text = (channel, post = made.data.post) => ['TIMESTAMP', '00:00 START', '', '----------------', 'FAN CHANNELS IN THE VIDEO 🎥', post.fanText, '', channel, '', '----------------', post.callToAction, ''].join('\n');
+    expect(after.description).toBe(text('Ana'));
+    // What the chapter times were worked out from comes with it, for the page to write the text as the owner types.
+    expect(after.made.from).toEqual(saved.data.items);
+    expect(after.made.items.map((item) => [item.kind, Math.round(item.seconds), item.credit])).toEqual([['video', 1, 'Ana'], ['video', 1, '']]);
+    // The owner's own text is saved with the compilation, and the file beside the video follows it at once.
+    // The page sends back `made` with everything else; it is not part of what is stored.
+    const typed = await api('/api/compilations/goal-reactions', { method: 'PUT', body: { ...after, post: { ...after.post, title: 'A TITLE', callToAction: 'Like for more!', hashtags: '#One #Two' } } });
+    expect(typed.status).toBe(200);
+    expect(typed.data.post).toMatchObject({ title: 'A TITLE', hashtags: '#One #Two', fanText: after.post.fanText });
+    expect(typed.data.description).toBe(['TIMESTAMP', '00:00 START', '', '----------------', 'FAN CHANNELS IN THE VIDEO 🎥', after.post.fanText, '', 'Ana', '', '----------------', 'Like for more!', 'A TITLE', '', '----------------', '#One #Two', ''].join('\n'));
+    expect(JSON.parse(await readFile(path.join(dir, 'data', 'compilations', 'goal-reactions', 'timeline.json'), 'utf8')).made).toBeUndefined();
+    expect((await api('/api/compilations/goal-reactions', { method: 'PUT', body: { ...after, post: { ...after.post, nonsense: 'x' } } })).status).toBe(400);
+    await api('/api/compilations/goal-reactions', { method: 'PUT', body: after });
     const media = await fetch(`${base}/media/compilations/goal-reactions/final.mp4?v=${after.final.version}`, { headers: { Range: 'bytes=0-9' } });
     expect(media.status).toBe(206);
     await media.arrayBuffer();
@@ -413,7 +426,7 @@ describe('compilations', () => {
     const again = await finished((await api('/api/compilations/goal-reactions/generate', { method: 'POST' })).data.id);
     expect(again).toMatchObject({ status: 'done' });
     expect(again.result.items.map((item) => item.reused)).toEqual([false, true]);
-    expect((await api('/api/compilations/goal-reactions')).data.description).toBe('Credits:\n- Ana: https://www.youtube.com/@agreed\n\nChapters:\n0:00 Start\n');
+    expect((await api('/api/compilations/goal-reactions')).data.description).toBe(text('https://www.youtube.com/@agreed'));
     await api('/api/sources', { method: 'PUT', body: [] });
 
     expect((await api('/api/compilations/goal-reactions', { method: 'DELETE' })).status).toBe(200);

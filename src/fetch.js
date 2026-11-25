@@ -15,7 +15,7 @@ import { probe } from './probe.js';
 import { startRangeRelay } from './rangeRelay.js';
 import { isStopped, run } from './run.js';
 import { agreedSourceOf, channelKey } from './sources.js';
-import { checkFetchRange, checkWholeLength, MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoLink, videoUrl } from './fetchLink.js';
+import { checkFetchRange, checkWholeLength, fileLabel, MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoLink, videoUrl } from './fetchLink.js';
 import { twitchChannel } from './twitch.js';
 import { formatClock } from './time.js';
 
@@ -74,6 +74,7 @@ const diskFree = (dir) => statfs(dir).then((disk) => disk.bavail * disk.bsize, (
  * @param {number} [options.start]    seconds into the video; not used with `whole`
  * @param {number} [options.end]
  * @param {boolean} [options.whole]   the whole video, up to MAX_WHOLE_SECONDS
+ * @param {string} [options.label]    the owner's own name for the file, put in front of the name the tool makes
  * @param {Source[]} options.sources
  * @param {string} options.outDir   the videos folder
  * @param {Downloader} [options.downloader]
@@ -83,7 +84,7 @@ const diskFree = (dir) => statfs(dir).then((disk) => disk.bavail * disk.bsize, (
  * @returns {Promise<{ name: string, file: string, seconds: number, early: number, source: Source, title: string, slow: string | null }>}
  *   `early` is how many seconds before the asked start the file begins; `slow` says why it came the slow way, if it did
  */
-export async function fetchVideo({ url, start, end, whole = false, sources, outDir, downloader = ytDlp(), onStep = () => {}, freeSpace = diskFree }) {
+export async function fetchVideo({ url, start, end, whole = false, label = '', sources, outDir, downloader = ytDlp(), onStep = () => {}, freeSpace = diskFree }) {
   const checked = videoLink(url);
   const link = checked.url;
   const site = checked.site === 'twitch' ? 'Twitch' : 'YouTube';
@@ -127,8 +128,10 @@ export async function fetchVideo({ url, start, end, whole = false, sources, outD
   }
 
   // Named by the tool from the channel, the video's id and the range. The id
-  // is the one checked in the link, not the one the downloader reports.
-  const base = `${filePrefix(source.name)}_${checked.fileId}_${rangeStamp(start)}-${rangeStamp(end)}`;
+  // is the one checked in the link, not the one the downloader reports. The
+  // owner's own name, if one was given, goes in front, after a space.
+  const own = fileLabel(label);
+  const base = `${own ? `${own} ` : ''}${filePrefix(source.name)}_${checked.fileId}_${rangeStamp(start)}-${rangeStamp(end)}`;
   const taken = await readdir(dir);
   let name = base;
   for (let n = 2; taken.includes(`${name}.mp4`); n++) name = `${base}_${n}`;

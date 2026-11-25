@@ -108,7 +108,6 @@ These dashboard pages are for "goal reaction" compilations: streamers' reaction 
 1. Press "New match". Choose a league and then the home and away club from your list (see [Leagues and clubs](#leagues-and-clubs)): that fills in each team's name, colour and logo, and the competition. Or type the two teams and pick their colours yourself. You can change anything for this match afterwards, and optionally add a date. These are shared by every card of the match.
 2. Optionally add a club icon for each team: a picture from your own computer, which is shrunk and kept with the match. The tool does not fetch crests. Icons are shown on every card; a team without one gets its first letter on its colour.
 3. Add cards:
-   - **Intro:** the opening card. It shows both clubs with their icons and names, and "V" between them, or the score if you switch it on. A team without an icon gets its first letter on its colour.
    - **Goal:** scoring team, scorer, assist, minute (with added time, such as 45+2), goal type, and the score after the goal. The assist is left out for a penalty and an own goal. The card shows both clubs' icons with the score between them (under them on the tall card).
    - **Red card:** player, team, minute, straight red or second yellow, and optionally the score. With the score it shows both clubs' icons, without it only the player's club.
    - **Full time:** the final score between the two clubs' icons, and each club's scorers under it. The lists are filled in from the goal cards; you can edit them, and "Fill from the goal cards" refreshes them.
@@ -117,7 +116,7 @@ These dashboard pages are for "goal reaction" compilations: streamers' reaction 
 
 Every match and every card has a trash icon. It asks once, then deletes for good. Deleting a card of a saved match takes effect straight away, without pressing Save; deleting a match removes its cards and their pictures with it.
 
-Cards are text with team colours as plain blocks, on the dark green of your channel's artwork, with its white and its lime ("FULL TIME" and the intro card's "V" are lime). Those colours are the five lines at the top of `src/cards/templates.js`. The only pictures are the club icons you add yourself: no league logos or photos, and nothing fetched. A match saved before 2026-11-25 keeps its older card pictures until you open it and press "Save match and cards" once; then generate the compilation again (that match's cards are made again, the videos are reused). Club crests belong to the clubs, so whether to use one is your call. Cards are drawn with the font bundled in `assets/fonts`, so they look the same on every machine.
+Cards are text with team colours as plain blocks, on the dark green of your channel's artwork, mown in stripes like the pitch of its banner, with its white and its lime ("FULL TIME" is lime). Those colours are the lines at the top of `src/cards/templates.js`. The only pictures are the club icons you add yourself: no league logos or photos, and nothing fetched. A match saved before 2026-11-25 keeps its older card pictures until you open it and press "Save match and cards" once; then generate the compilation again (that match's cards are made again, the videos are reused). Club crests belong to the clubs, so whether to use one is your call. Cards are drawn with the font bundled in `assets/fonts`, so they look the same on every machine.
 
 To add a goal type, add a line to `GOAL_TYPES` in `src/cards/config.js`.
 
@@ -137,11 +136,11 @@ To add a goal type, add a line to `GOAL_TYPES` in `src/cards/config.js`.
 
 1. Press "New compilation", name it, and choose the size: 1920×1080 or 1080×1920, both 30 fps.
 2. Add videos. Anything already in the project (`in/`, your parts, your clips, and the videos made on the [Combine page](#combine-two-videos)) is added without copying. You can also choose files from your computer or drop them on the page; those are copied into `in/`, so they take that much more disk space.
-3. Add cards from a saved match. A card plays a sound while it is shown (see [Sounds under cards](#sounds-under-cards)).
+3. Add cards from a saved match. A card plays a sound while it is shown (see [Sounds under cards](#sounds-under-cards)). On a goal card the logo of the club that scored, and on a red card the logo of the player's club, leans to the right and to the left three times as the card appears, and then stands straight (see [The leaning logo](#the-leaning-logo)).
 4. Put the items in order by dragging them, or with "Up" and "Down". For each video you can set a start and end in seconds, [a second video shown beside it](#a-second-video-beside-a-reaction), and a credit, the streamer, chosen from the channels on the [Sources page](#sources-and-fetching). The channel's picture and name are shown in the bottom left corner for the whole clip, on a dark plate with a pale edge and a soft shadow so they stand out on any footage. A channel with no picture yet shows its name only; press sync on its row in Sources to get the picture. For each card you choose its sound and, if you want, how long it is shown (by default, as long as its sound). The total length is shown under the list.
 5. Press "Generate the video". Each item shows its progress. When it is done the video plays on the page, with a download link.
 
-Next to the video, `description.txt` lists the credits (each streamer once, in order, with the channel's address when the name matches a channel in your [sources list](#sources-and-fetching)) and chapter times taken from where the cards fall, starting at 0:00. Players usually want at least three chapters of ten seconds or more before they show them.
+Next to the video, `description.txt` holds the text for the video's page: see [The YouTube title and description](#the-youtube-title-and-description).
 
 Each compilation in the list has a trash icon, which deletes it with its final video and description after asking once. The trash icon on a timeline item only takes that item out of the timeline.
 
@@ -157,13 +156,55 @@ A video in the timeline can have another video shown beside it, for a streamer's
 
 Both videos are files already in the project: put the goal footage in `in/` like any other video.
 
+#### The YouTube title and description
+
+Under the thumbnail on the Compilations page is the text for the video's page, written as you type and saved with the compilation ("Save"). "Copy" beside the title and beside the description puts each on the clipboard.
+
+The description has these parts, in this order, with a line of dashes between them. A part with nothing in it is left out.
+
+| Part | Where it comes from |
+|------|---------------------|
+| **TIMESTAMP**: a chapter for each card, such as `00:00 BAR 1-0 RMA` | Worked out when the video is generated, from the lengths it really has. A goal is the score after it, a red card the player and his club, full time the final score. |
+| **FAN CHANNELS IN THE VIDEO**: your sentence, then the channels | The channels are worked out: every streamer credited in the timeline, once, in order, as the channel's address from Sources (YouTube shows an address as the channel's name). A credit that is not a channel in Sources goes by its name alone. The sentence is yours. |
+| **SOURCE GOAL FOOTAGE**: your sentence, then the sources | Typed, one source a line. The tool does not know where a goal clip came from. With no sources the whole part is left out. |
+| The call to action, then the title | Typed. |
+| A keywords line, the hashtags, a music credit | Typed. "Add from the match" adds hashtags worked out from the match (the two clubs, the competition, the fixture and a few about fans reacting) to what is in the box, never over it. |
+
+The description is counted in bytes, as YouTube counts it (5000 at most; an emoji or a letter outside the Latin alphabet is more than one).
+
+- **The chapter times need a generate.** Before the video is first made the description has none, and the page says so. When you change the timeline afterwards, the page says the times may be wrong until you generate again; generating again reuses every segment that did not change.
+- **YouTube shows chapters only** when the first is at 00:00, there are at least three, and each lasts at least 10 seconds. The page tells you when your list would not qualify (a full-time card at the very end makes a last chapter of a few seconds).
+- **Short team names.** For chapters like `BAR 1-0 RMA`, type a short name for each team on the Cards page, under the team names. Left empty, the full names are used; the tool never guesses one.
+- **Title.** YouTube takes up to 100 characters, and the page counts them. "Title ideas" lists a few starting points worked out from the match and its score on your computer (nothing is sent anywhere): a heavy defeat, a narrow win and a draw each get their own wording. Click one, then make it yours.
+- **Hashtags.** YouTube shows up to three of them by the title and ignores all of them when a video has more than 60; the page counts them.
+- **Tags, for the upload form.** A box of its own, not part of the description: YouTube's upload form has a "Tags" box under "Show more". "Add from the match" adds tags worked out from the match, the score and the streamers credited (the fixture both ways round, each club with "fans" and "reaction", the competition, a few general ones), as many as fit in the 500 characters YouTube takes, and "Copy" puts them on the clipboard. YouTube itself says tags matter little and help most for names people often misspell; the title, the thumbnail and the description matter more.
+- **The sentences that are the same under every video** (the two sentences, the call to action, the keywords line, the music credit) are typed once: a new compilation starts with those of the compilation that is open. They are kept with the compilation, on this computer; compilations do not travel.
+
+#### The YouTube thumbnail
+
+Under the timeline on the Compilations page is a picture for the video's page on YouTube. It is not part of the video and needs no saving; "JPG 1280×720" downloads it (the size YouTube asks for, far under its 2 MB limit).
+
+- **The two halves** are the clubs' own bright colours, the home club on the left, each with its logo zoomed in, blurred and faint inside it. A club without an icon has its colour alone.
+- **In front** are both logos, the club names and the score, like the full-time card without its title and scorers. The names are black or white, whichever reads on the club's colour.
+- **The match is the one of the timeline's first card.** The score is that match's full-time card's, or the one after its last goal; with neither it shows "V". To change the score, change the card on the Cards page.
+- **Across the top are the streamers' pictures**: each channel's round picture in a white ring, without its name (the name stays on the credit in the video). They are the credits of the videos in the timeline, in that order, each once. The pictures keep one size whether there is one streamer or several; when a line is full they go on to the next, and with very many they all get a little smaller so the last one still shows. A credit that is not a channel in Sources has no picture and is shown as a dark disc with its first letter. Change a credit and the thumbnail follows.
+
+#### The leaning logo
+
+In a compilation, a goal card's logo of the scoring club (for an own goal, the club given the goal) and a red card's logo of the sent-off player's club move: 0.4 seconds after the card appears the logo leans 10 degrees to the right, then 10 degrees to the left, three times, each time taking 0.6 seconds, and then stands straight for the rest of the card. The other logo, the words and the score stay still. A club without an icon leans its letter on its colour. The full-time card does not move.
+
+- **Save the match once first.** The movement needs two more pictures of the card, which the card maker saves with the others: open **Cards**, choose the match and press "Save match and cards". A match saved before the leaning logo existed has none, and its cards are shown still until then, with no error.
+- **It is only in the video.** The preview on the Cards page and the exported PNG show the card at rest.
+- **A short card leans faster**, so all three still fit; a card shorter than about 1.3 seconds does not lean.
+- **To change it**, the four numbers are `LOGO_SWING` in `src/cards/config.js`: the degrees, how many times, the seconds each takes, and the wait before it starts. Generate the compilation again afterwards.
+
 #### Sounds under cards
 
 A card in a compilation can have a sound under it, and is then shown exactly as long as that sound plays. The sounds are your own files; the tool has none of its own (it once made three, a computer voice and two tones, which were removed on 2026-11-24). A card with no sound is silent and shown for 3 seconds. On each card in the timeline you can choose a sound or "No sound", and "Listen" plays it before you generate.
 
-- **Your own sounds, the easy way:** put a file named `intro`, `goal`, `red` or `fulltime` in the project's `sounds/` folder (for example `goal.mp3`, a recording of yourself shouting it). Every card of that kind left on "Automatic" then uses it, with nothing to choose.
+- **Your own sounds, the easy way:** put a file named `goal`, `red` or `fulltime` in the project's `sounds/` folder (for example `goal.mp3`, a recording of yourself shouting it). Every card of that kind left on "Automatic" then uses it, with nothing to choose.
 - **Your own sounds, card by card:** any other audio file in `sounds/` (`.mp3`, `.wav`, `.m4a`, `.aac`, `.ogg`, `.opus`, `.flac`) can be chosen on a card after a reload. Use only sounds you are allowed to use. The folder is not part of the repository.
-- **A video as a moving background:** a video file in `sounds/` (`.mp4`, `.mov`, `.mkv`, `.webm`, `.m4v`) can be put under a card too. Its sound plays, and its picture moves behind the card, dimmed a little so the words stay readable; on the intro card the score (or "V") also stands on a dark plate. Named after a kind of card, such as `intro.mp4`, it is used for every card of that kind, ahead of a sound file of the same name. The card maker's preview still shows the plain background; the video appears in the compilation. After adding the first video, open the match in the card maker and press "Save match and cards" once, so each card gets the see-through picture this needs.
+- **No video behind a card.** Until 2026-11-25 a video file in `sounds/` could play behind a card (it was built for the intro card, which is gone too: a compilation now starts straight with a goal or a red card). A compilation saved with a video as a card's sound still opens; generating it stops at that card and says to choose another sound.
 - **The card's length follows the sound.** Leave "Shown for" empty and the card lasts as long as its sound, or 3 seconds with no sound. Type a number to fix the length yourself: a longer sound is then faded out as the card ends, and after a shorter one the rest of the card is silent. The sound never carries on into the next clip.
 - **Loudness is levelled**, a little under the clips, so a quiet file and a loud one come out alike. The soft whistle is played quieter still.
 - **Compilations made before this** get the automatic sounds the next time you press "Generate the video". Their cards keep the 3 seconds they were saved with; empty the "Shown for" box to make a card follow its sound.
@@ -218,6 +259,8 @@ The **Download** page (its own button in the left column) brings a part of a You
 
 The file is named after the channel, the video and the range, such as `channel-name_<video id>_1h02m00s-1h05m00s.mp4`; a whole video is named from 0 to its length, such as `channel-name_<video id>_0m00s-1h31m10s.mp4`. It then works like any other video in `in/`. When you add it to a compilation, its credit is filled in with the channel's name, and `description.txt` lists that channel's link next to the credit.
 
+**Your own name for the file.** On the Download page, "Your own name for the file (optional)" puts a name of yours in front of that name, so you can tell your downloads apart wherever videos are listed: typing `barca first goal` gives `barca-first-goal channel-name_<video id>_1h02m00s-1h05m00s.mp4`. Letters and digits are kept (of any alphabet), anything else becomes a dash, and it is cut at 40 characters. The tool's own part of the name stays as it is, after one space, so the credit, the chat and the skipping of parts already downloaded still work. The link, the times and this name stay in their boxes after a download, until you leave the page.
+
 **Clips from a stream's chat**, the second section of the Download page, works the other way round: paste the link of a **finished live stream**, optionally a few words (`goal, penalty`), and how many clips you want (6), and press "Get the clips". The tool reads the stream's chat and its top comments (not the video), finds its best moments, and downloads only those parts: 30 seconds before to 30 seconds after each one, so 1-minute clips (15 and 15 at first, 20 and 20 for 40-second clips, then 30 and 30 on 2026-11-22). Change the seconds under "Seconds before and after".
 
 A best moment is found two ways:
@@ -253,6 +296,7 @@ From the command line:
 ```bash
 node src/cli.js fetch "https://www.youtube.com/watch?v=..." --start 1:02:00 --end 1:05:00
 node src/cli.js fetch "https://www.youtube.com/watch?v=..." --whole
+node src/cli.js fetch "https://www.youtube.com/watch?v=..." --start 1:02:00 --end 1:05:00 --label "barca first goal"
 node src/cli.js fetch "https://www.twitch.tv/videos/..." --start 1:00:00 --end 1:01:00
 ```
 
@@ -296,7 +340,7 @@ The public repository holds the code. What you have made or added stays on the c
 
 - your channels, with the club each streamer supports, their pictures and subscriber counts
 - your leagues and clubs, with all their logos
-- your sound files, among them a video used behind the intro card
+- your sound files
 - your overlay images (the logos in `overlays/`)
 - your briefs
 

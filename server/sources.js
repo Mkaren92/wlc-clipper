@@ -22,7 +22,7 @@ const time = z.union([z.number().nonnegative(), z.string().min(1)]).transform((v
 });
 // A part (start and end), or the whole video.
 // `transcribe`: make the whole transcript for "Suggest moments" straight after, as a job of its own.
-const fetchRequest = z.strictObject({ url: z.string().min(1).max(300), start: time.optional(), end: time.optional(), whole: z.boolean().optional(), transcribe: z.boolean().optional() })
+const fetchRequest = z.strictObject({ url: z.string().min(1).max(300), start: time.optional(), end: time.optional(), whole: z.boolean().optional(), transcribe: z.boolean().optional(), label: z.string().max(200).optional() })
   .refine((ask) => ask.whole === true || (ask.start !== undefined && ask.end !== undefined), { message: 'Give the start and the end of the part, or ask for the whole video.' });
 
 /**
@@ -147,10 +147,10 @@ export function addSourceRoutes(app, { dataDir, inDir, jobs, downloader = ytDlp(
   app.post('/api/fetch', async (req, res) => {
     const parsed = fetchRequest.safeParse(req.body);
     if (!parsed.success) throw new HttpError(400, z.prettifyError(parsed.error));
-    const { url, start, end, whole = false, transcribe = false } = parsed.data;
+    const { url, start, end, whole = false, transcribe = false, label = '' } = parsed.data;
     const sources = await readSources(dataDir);
     const job = jobs.add('fetch', whole ? 'the whole of a video' : `${formatClock(start)}–${formatClock(end)} of a video`, async (onStep) => {
-      const fetched = await fetchVideo({ url, start, end, whole, sources, outDir: inDir, downloader, onStep });
+      const fetched = await fetchVideo({ url, start, end, whole, label, sources, outDir: inDir, downloader, onStep });
       // The transcript is a job of its own, after this one, so it shows in Activity and can be stopped
       // without losing the download. "Suggest moments" then finds it made.
       const transcript = transcribe && cacheDir && transcriber

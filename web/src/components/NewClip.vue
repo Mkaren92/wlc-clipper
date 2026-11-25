@@ -2,6 +2,7 @@
 // Cut a new clip from one source video: choose the range, the layout and the
 // text, then start the job and wait for it.
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { madeName } from '../../../src/fetchLink.js';
 import { api } from '../api.js';
 import { clock } from '../format.js';
 import { describe, isActive, jobs, track } from '../jobs.js';
@@ -103,7 +104,8 @@ const tagIdea = ref('');
 // The channel's name from the sources list, which suggested hooks use to say who.
 const sourceName = ref('');
 api.sources().then(({ sources, prefixes }) => {
-  const source = sources.find((one) => prefixes[one.id] && props.video.startsWith(`${prefixes[one.id]}_`));
+  // The owner's own name in front of a fetched file's name is stepped over first.
+  const source = sources.find((one) => prefixes[one.id] && madeName(props.video).startsWith(`${prefixes[one.id]}_`));
   if (!source) return;
   sourceName.value = source.name;
   const handle = /\/(@[\w.-]+)\/?$/.exec(source.url)?.[1];

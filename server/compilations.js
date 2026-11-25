@@ -1,10 +1,11 @@
 // Compilations: a timeline of videos and cards, rendered into one video
 // (src/compilation/).
 import { createWriteStream } from 'node:fs';
-import { mkdir, readFile, rename, rm, stat, statfs } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { buildCompilation } from '../src/compilation/build.js';
+import { buildDescription } from '../src/compilation/description.js';
 import { automaticSounds, isSoundFileName, listSoundFiles, soundSeconds } from '../src/compilation/sounds.js';
 import { compilationDir, deleteCompilation, listCompilations, newCompilationId, readTimeline, saveTimeline } from '../src/compilation/timeline.js';
 import { probe } from '../src/probe.js';
@@ -38,12 +39,33 @@ export function addCompilationRoutes(app, { dataDir, inDir, soundsDir, jobs, res
       // The file keeps its address when generated again; the page adds this number to get the new one.
       final: final ? { version: Math.round(final.mtimeMs), size: final.size } : null,
       description: final ? await readText(path.join(dir, 'description.txt')) : null,
+      // What the chapter times were worked out from when the video was last made: each item's
+      // real length, and the timeline as it was. The page writes the description from it as the
+      // owner types, and says when the timeline has changed since.
+      made: final ? await readMade(dir) : null,
     };
   }
 
-  // The page gets `final` and `description` with a timeline and sends the
-  // whole thing back when saving; those two are not part of what is stored.
-  const timelineFrom = ({ final: _final, description: _description, ...timeline } = {}) => timeline;
+  const readMade = async (dir) => {
+    try {
+      const made = JSON.parse(await readFile(path.join(dir, 'made.json'), 'utf8'));
+      return Array.isArray(made?.items) && Array.isArray(made?.from) ? made : null;
+    } catch {
+      return null; // a video made before this was kept: its chapters come back with the next Generate
+    }
+  };
+
+  // The page gets `final`, `description` and `made` with a timeline and sends the whole
+  // thing back when saving; those three are not part of what is stored.
+  const timelineFrom = ({ final: _final, description: _description, made: _made, ...timeline } = {}) => timeline;
+
+  /** description.txt follows the owner's own text: it is written again when a made compilation is saved. */
+  async function refreshDescription(timeline) {
+    const dir = compilationDir(dataDir, timeline.id);
+    const made = await readMade(dir);
+    if (!made) return;
+    await writeFile(path.join(dir, 'description.txt'), buildDescription(made.items, creditLinks(await readSources(dataDir)), timeline.post));
+  }
 
   app.get('/api/compilations', async (req, res) => {
     res.json(await Promise.all((await listCompilations(dataDir)).map(withResult)));
@@ -61,7 +83,9 @@ export function addCompilationRoutes(app, { dataDir, inDir, soundsDir, jobs, res
 
   app.put('/api/compilations/:id', async (req, res) => {
     await readTimeline(dataDir, req.params.id).catch(asHttp);
-    res.json(await withResult(await saveTimeline(dataDir, { ...timelineFrom(req.body), id: req.params.id }).catch(asHttp)));
+    const saved = await saveTimeline(dataDir, { ...timelineFrom(req.body), id: req.params.id }).catch(asHttp);
+    await refreshDescription(saved);
+    res.json(await withResult(saved));
   });
 
   app.delete('/api/compilations/:id', async (req, res) => {

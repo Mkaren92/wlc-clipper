@@ -4,7 +4,7 @@
 // this page runs the same link and range checks first (src/fetchLink.js), so a
 // mistake shows while typing instead of after the job starts.
 import { computed, onMounted, ref } from 'vue';
-import { checkFetchRange, MAX_FETCH_SECONDS, MAX_WHOLE_SECONDS, videoLink } from '../../../src/fetchLink.js';
+import { checkFetchRange, fileLabel, MAX_FETCH_SECONDS, MAX_FILE_LABEL, MAX_WHOLE_SECONDS, videoLink } from '../../../src/fetchLink.js';
 import { formatClock, parseTime } from '../../../src/time.js';
 import { api } from '../api.js';
 import Icon from '../components/Icon.vue';
@@ -18,6 +18,9 @@ const loaded = ref(false);
 const loadError = ref('');
 const channels = ref([]); // the saved channels that may be fetched from
 const link = ref('');
+// The owner's own name for the file, put in front of the name the tool gives it.
+const label = ref('');
+const ownName = computed(() => fileLabel(label.value));
 const start = ref('');
 const end = ref('');
 // The whole video instead of a part. Its length is known only once the site is asked, so the engine checks it.
@@ -105,8 +108,9 @@ async function download() {
   startError.value = '';
   try {
     const where = whole.value ? { whole: true } : { start: range.value.from, end: range.value.to };
-    const job = await api.fetchVideo({ url: checkedLink.value.url, ...where, transcribe: transcribeAfter.value });
-    link.value = '';
+    const job = await api.fetchVideo({ url: checkedLink.value.url, ...where, transcribe: transcribeAfter.value, ...(ownName.value ? { label: ownName.value } : {}) });
+    // The link and the name stay in their boxes, like the start and the end, so the next part of
+    // the same video needs only new times (asked for on 2026-11-25). They go when the page is left.
     // The side column announces it too, so it is not missed after moving to another page.
     // How it ended is shown below from the job itself, so the promise's own error is not needed here.
     await track(job).catch(() => {});
@@ -234,6 +238,17 @@ async function stopClips() {
           <Icon name="download" /> Download
         </button>
       </div>
+
+      <div class="row own-name">
+        <div class="wide">
+          <label for="dl-name">Your own name for the file (optional)</label>
+          <input id="dl-name" v-model="label" type="text" :maxlength="MAX_FILE_LABEL * 2" placeholder="for example: barca first goal" autocomplete="off" spellcheck="false" />
+        </div>
+      </div>
+      <p class="hint">
+        It goes in front of the name the tool gives the file, so you can tell your downloads apart wherever videos are listed:
+        <code>{{ ownName || 'barca-first-goal' }} channel_videoid_0m48s-1m17s.mp4</code>. Letters and digits are kept, anything else becomes a dash.
+      </p>
 
       <p v-if="checkedLink.error" class="error" role="alert">{{ checkedLink.error }}</p>
       <p v-else-if="liveChannel" class="notice">
@@ -405,6 +420,7 @@ async function stopClips() {
 .wide { flex: 3 1 320px; }
 .narrow { flex: 0 1 150px; }
 .go { align-self: flex-end; }
+.own-name { margin-top: 12px; }
 .whole { align-self: flex-end; min-height: 36px; }
 .length { margin: 8px 0 0; }
 .after { margin-top: 10px; }

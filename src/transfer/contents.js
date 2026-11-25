@@ -5,8 +5,7 @@
 //
 //   travel       the channels list (with the club each streamer supports),
 //                the channels' pictures and subscriber counts, the leagues
-//                and clubs with their logos, the owner's sound files (among
-//                them the video played behind the intro card), and briefs;
+//                and clubs with their logos, the owner's sound files, and briefs;
 //                and, since 2026-11-21, the overlay images (campaign logos),
 //                which briefs name
 //   stay local   source videos, parts, clips, combinations, compilations,

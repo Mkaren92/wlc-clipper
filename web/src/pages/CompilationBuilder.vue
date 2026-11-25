@@ -1,8 +1,12 @@
 <script setup>
 // Put videos and cards in order and render them into one video.
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
-import { minuteLabel } from '../../../src/cards/config.js';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { minuteLabel, THUMBNAIL_SIZE } from '../../../src/cards/config.js';
+import { matchScore, thumbnail } from '../../../src/cards/templates.js';
+import { buildDescription, chapterProblem, chaptersOf, countHashtags, creditsOf, MAX_DESCRIPTION_BYTES, MAX_HASHTAGS, MAX_TAGS_LENGTH, MAX_TITLE, STANDING_POST, suggestHashtags, suggestTags, tagsLength, tagsOf, titleIdeas } from '../../../src/compilation/description.js';
+import { madeName } from '../../../src/fetchLink.js';
 import { api } from '../api.js';
+import { cardPng, download, loadCardFont } from '../cardPng.js';
 import { clock } from '../format.js';
 import Icon from '../components/Icon.vue';
 import TrashButton from '../components/TrashButton.vue';
@@ -36,13 +40,22 @@ const lastResult = ref(null);
 
 // What the open compilation looked like when it was last saved or opened, to tell when it has changes.
 const savedText = ref('');
-const draft = (value) => JSON.stringify({ name: value.name, preset: value.preset, items: value.items });
+const draft = (value) => JSON.stringify({ name: value.name, preset: value.preset, items: value.items, post: value.post });
 const unsaved = computed(() => current.value !== null && draft(current.value) !== savedText.value);
 
 let onScreen = true;
+// The typed text for the video's page waits for Save, so the browser asks before a reload or a
+// closed tab would lose it.
+const askBeforeLeaving = (event) => {
+  if (!unsaved.value) return;
+  event.preventDefault();
+  event.returnValue = '';
+};
+window.addEventListener('beforeunload', askBeforeLeaving);
 onUnmounted(() => {
   onScreen = false;
   stopHearing();
+  window.removeEventListener('beforeunload', askBeforeLeaving);
 });
 
 const copy = (value) => JSON.parse(JSON.stringify(value));
@@ -71,7 +84,8 @@ async function load() {
   }
 }
 onMounted(async () => {
-  await load();
+  // The thumbnail's words are in the cards' font, which the page has to be given.
+  await Promise.all([load(), loadCardFont().catch(() => {})]);
   if (compilations.value.length > 0) open(compilations.value[0]);
 });
 
@@ -89,7 +103,11 @@ function open(saved) {
 
 async function create() {
   try {
-    const made = await api.createCompilation({ name: 'New compilation', preset: 'landscape', items: [] });
+    // A new compilation starts with the standing text of the one that is open, or of the last
+    // one in the list, so the sentences that are the same under every video are typed once.
+    const before = current.value ?? compilations.value.at(-1);
+    const post = before?.post ? Object.fromEntries(STANDING_POST.map((key) => [key, before.post[key]])) : {};
+    const made = await api.createCompilation({ name: 'New compilation', preset: 'landscape', items: [], post });
     await load();
     open(made);
   } catch (e) {
@@ -123,7 +141,8 @@ async function learnLength(item) {
 // A credit is chosen from the channels on the Sources page. It is matched on the
 // name whatever its capitals, as the engine matches it for the link and the picture.
 const creditSource = (credit) => sources.value.find((source) => source.name.toLowerCase() === (credit ?? '').trim().toLowerCase()) ?? null;
-const creditFor = (name) => sources.value.find((source) => name.startsWith(`${prefixes.value[source.id]}_`))?.name ?? '';
+// The owner's own name in front of a fetched file's name is stepped over first.
+const creditFor = (name) => sources.value.find((source) => madeName(name).startsWith(`${prefixes.value[source.id]}_`))?.name ?? '';
 
 // --- A second video beside the first ---------------------------------------------
 
@@ -229,7 +248,6 @@ function onDrop(event) {
 const pickedMatch = computed(() => matches.value.find((m) => m.id === pick.match));
 
 function cardLabel(card) {
-  if (card.type === 'intro') return 'Intro';
   if (card.type === 'goal') return `Goal: ${minuteLabel(card.minute, card.added)} ${card.scorer}`.trim();
   if (card.type === 'red') return `Red card: ${minuteLabel(card.minute, card.added)} ${card.player}`.trim();
   return `Full time ${card.homeScore}–${card.awayScore}`;
@@ -287,13 +305,112 @@ async function save() {
   }
 }
 
-// The credits and chapters, ready to paste under the video where it is posted.
-const copied = ref(false);
-async function copyDescription() {
+// --- The thumbnail --------------------------------------------------------------
+// The picture for the video's page on YouTube. It is drawn from what the timeline already
+// holds: the match of its first card, and the streamers credited on its videos, in order,
+// each once. Nothing about it is saved, and it is not part of the video.
+const thumbMatch = computed(() => {
+  for (const item of current.value?.items ?? []) {
+    const found = item.kind === 'card' ? matches.value.find((m) => m.id === item.matchId) : null;
+    if (found) return found;
+  }
+  return null;
+});
+// A channel's picture as text, by channel and the number that changes with its picture. A
+// picture drawn from SVG cannot load one from an address, so it is written into the SVG.
+const faces = reactive({});
+const credited = computed(() => {
+  const seen = new Set();
+  const list = [];
+  for (const item of current.value?.items ?? []) {
+    const name = item.kind === 'video' ? (item.credit ?? '').trim() : '';
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    const source = creditSource(name);
+    const version = source ? pictures.value[source.id] : null;
+    list.push({ name: source?.name ?? name, id: source?.id, version, face: source && version ? `${source.id}:${version}` : '' });
+  }
+  return list;
+});
+watch(credited, async (list) => {
+  for (const { id, version, face } of list) {
+    if (!face || face in faces) continue;
+    faces[face] = ''; // asked for; filled in when it arrives
+    try {
+      const blob = await (await fetch(api.sourcePictureUrl(id, version))).blob();
+      faces[face] = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      // Without its picture the streamer is listed by name alone.
+    }
+  }
+}, { immediate: true });
+const thumb = computed(() => (thumbMatch.value
+  ? thumbnail({ match: thumbMatch.value, streamers: credited.value.map(({ name, face }) => ({ name, picture: faces[face] ?? '' })) })
+  : ''));
+
+/** Hand the thumbnail to the browser to save: a JPG, which stays well under YouTube's 2 MB. */
+async function exportThumbnail() {
   try {
-    await navigator.clipboard.writeText(current.value.description ?? '');
-    copied.value = true;
-    setTimeout(() => (copied.value = false), 2000);
+    const { width, height } = THUMBNAIL_SIZE;
+    const file = `${current.value.name} thumbnail`.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').toLowerCase();
+    download(await cardPng(thumb.value, width, height, 'image/jpeg'), `${file || 'thumbnail'}.jpg`);
+  } catch (e) {
+    error.value = e.message;
+  }
+}
+
+// --- The title and the description ---------------------------------------------------
+// The text for the video's page, ready to paste. The chapter times come from the video as it
+// was last made; the fan channels from the credits in the timeline as it stands; the rest is
+// the owner's own text, saved with the compilation. One function writes it, here and in
+// description.txt (src/compilation/description.js).
+const channelLinks = computed(() => Object.fromEntries(sources.value.map((source) => [source.name.toLowerCase(), source.url])));
+const made = computed(() => current.value?.made ?? null);
+// The timeline has changed since the video was made, so the chapter times may be wrong.
+const madeIsOld = computed(() => Boolean(made.value) && JSON.stringify(made.value.from) !== JSON.stringify(current.value.items));
+const description = computed(() => (current.value
+  ? buildDescription(made.value?.items ?? [], channelLinks.value, current.value.post, creditsOf(current.value.items))
+  : ''));
+// YouTube counts a description in bytes, not in characters.
+const descriptionBytes = computed(() => new TextEncoder().encode(description.value).length);
+const chapterNote = computed(() => (made.value ? chapterProblem(chaptersOf(made.value.items)) : ''));
+const hashtagCount = computed(() => countHashtags(current.value?.post.hashtags));
+const ideas = computed(() => (thumbMatch.value ? titleIdeas(thumbMatch.value, matchScore(thumbMatch.value)) : []));
+const showIdeas = ref(false);
+
+/** Hashtags worked out from the match: put in an empty box, or added to what is there, never over it. */
+function addHashtags() {
+  const have = new Set((current.value.post.hashtags.match(/#[\p{L}\p{N}_]+/gu) ?? []).map((tag) => tag.toLowerCase()));
+  const fresh = suggestHashtags(thumbMatch.value).split(' ').filter((tag) => !have.has(tag.toLowerCase()));
+  current.value.post.hashtags = [current.value.post.hashtags.trim(), fresh.join(' ')].filter(Boolean).join(' ');
+}
+
+/** Tags for the upload form, worked out from the match and the streamers: added to what is in the box, never over it. */
+const tagRoom = computed(() => tagsLength(current.value?.post.tags));
+function addTags() {
+  const have = tagsOf(current.value.post.tags);
+  const known = new Set(have.map((tag) => tag.toLowerCase()));
+  const fresh = suggestTags(thumbMatch.value, matchScore(thumbMatch.value), creditsOf(current.value.items)).filter((tag) => !known.has(tag.toLowerCase()));
+  // Only as many as still fit in what YouTube takes.
+  const all = [...have];
+  for (const tag of fresh) {
+    if (tagsLength([...all, tag].join(', ')) > MAX_TAGS_LENGTH) break;
+    all.push(tag);
+  }
+  current.value.post.tags = all.join(', ');
+}
+
+const copied = ref('');
+async function copyText(what, text) {
+  try {
+    await navigator.clipboard.writeText(text ?? '');
+    copied.value = what;
+    setTimeout(() => (copied.value = ''), 2000);
   } catch {
     error.value = 'The browser did not allow copying. Select the text and copy it by hand.';
   }
@@ -312,7 +429,7 @@ async function generate() {
     if (onScreen) jobs.dismissed.push(started.id);
     await load();
     const fresh = compilations.value.find((c) => c.id === saved.id);
-    if (fresh && current.value?.id === saved.id) Object.assign(current.value, { final: fresh.final, description: fresh.description });
+    if (fresh && current.value?.id === saved.id) Object.assign(current.value, { final: fresh.final, description: fresh.description, made: fresh.made });
   } catch (e) {
     error.value = e.message;
   }
@@ -386,10 +503,9 @@ async function generate() {
         <h2>Add a card</h2>
         <p class="hint first">
           A card plays a sound and is shown exactly as long as that sound. The sounds are your own: put audio files
-          in the project's <code>sounds</code> folder and reload. A file named <code>intro</code>, <code>goal</code>,
+          in the project's <code>sounds</code> folder and reload. A file named <code>goal</code>,
           <code>red</code> or <code>fulltime</code> (for example <code>goal.mp3</code>) is used for every card of that
-          kind without choosing anything. A card with no such file is silent and shown for 3 seconds. A video file there works too
-          (for example <code>intro.mp4</code>): its sound plays and its picture moves behind the card.
+          kind without choosing anything. A card with no such file is silent and shown for 3 seconds.
         </p>
         <p v-if="matches.length === 0" class="empty">No saved cards yet. Make some on the Cards page first.</p>
         <div v-else class="row adder">
@@ -510,7 +626,7 @@ async function generate() {
                 />
               </div>
               <div>
-                <label :for="`sound-${item.id}`">Sound, or video, under the card</label>
+                <label :for="`sound-${item.id}`">Sound under the card</label>
                 <div class="joined">
                   <select :id="`sound-${item.id}`" v-model="item.sound" @change="stopHearing">
                     <option value="auto">Automatic: {{ soundName(autoSound(item)) }}</option>
@@ -531,6 +647,132 @@ async function generate() {
         </ol>
       </section>
 
+      <section class="panel">
+        <h2>YouTube thumbnail</h2>
+        <template v-if="thumbMatch">
+          <!-- The template escapes every name, so this is safe to put in the page as it is. -->
+          <div class="thumb" :style="{ aspectRatio: `${THUMBNAIL_SIZE.width} / ${THUMBNAIL_SIZE.height}` }" v-html="thumb" />
+          <div class="row">
+            <button class="fixed" @click="exportThumbnail"><Icon name="download" /> JPG {{ THUMBNAIL_SIZE.width }}×{{ THUMBNAIL_SIZE.height }}</button>
+          </div>
+          <p class="hint">
+            The picture for the video's page on YouTube; it is not part of the video and needs no saving. The clubs,
+            their logos and the score come from the match of the first card: the score of its full-time card, or the
+            one after its last goal. Across the top are the pictures of the streamers credited on the videos above, in that order,
+            on as many lines as they need; their names stay on the credit in the video. Change a credit or a card and it follows.
+          </p>
+        </template>
+        <p v-else class="empty">Add a card to the timeline, and the thumbnail of its match appears here.</p>
+      </section>
+
+      <section class="panel post">
+        <h2>YouTube title and description</h2>
+        <p class="hint first">
+          The text for the video's page, written as you type and saved with the compilation. The chapter times and the fan
+          channels are worked out from the timeline; the rest is your own text, and a new compilation starts with the
+          sentences of the last one.
+        </p>
+
+        <div class="row">
+          <div class="wide">
+            <label for="post-title">Title</label>
+            <input id="post-title" v-model="current.post.title" type="text" autocomplete="off" />
+          </div>
+          <button class="fixed bottom" :disabled="!current.post.title.trim()" @click="copyText('title', current.post.title.trim())"><Icon name="copy" /> {{ copied === 'title' ? 'Copied' : 'Copy' }}</button>
+          <button class="fixed bottom" :disabled="ideas.length === 0" :aria-expanded="showIdeas" @click="showIdeas = !showIdeas">Title ideas</button>
+        </div>
+        <p class="hint" :class="{ over: current.post.title.length > MAX_TITLE }">
+          {{ current.post.title.length }} of {{ MAX_TITLE }} characters, the most YouTube takes. About the first 60 show in most lists.
+        </p>
+        <div v-if="showIdeas && ideas.length > 0" class="ideas">
+          <p class="hint first">
+            Starting points worked out from the match and its score, on this computer. Click one to put it in the box, then
+            make it yours.
+          </p>
+          <button v-for="idea in ideas" :key="idea" class="idea" @click="current.post.title = idea">{{ idea }}</button>
+        </div>
+
+        <div class="row second">
+          <div class="wide">
+            <label for="post-fans">Under “Fan channels in the video”</label>
+            <textarea id="post-fans" v-model="current.post.fanText" rows="2" />
+          </div>
+        </div>
+        <p class="hint">The channels themselves are listed for you: every streamer credited in the timeline, once, as the channel's address.</p>
+
+        <div class="row second">
+          <div>
+            <label for="post-footage-text">Under “Source goal footage”</label>
+            <textarea id="post-footage-text" v-model="current.post.footageText" rows="3" />
+          </div>
+          <div>
+            <label for="post-footage">Goal footage sources, one a line</label>
+            <textarea id="post-footage" v-model="current.post.footage" rows="3" placeholder="https://www.youtube.com/@channel" spellcheck="false" />
+          </div>
+        </div>
+        <p class="hint">These are typed: the tool does not know where a goal clip came from. With no sources, this part is left out.</p>
+
+        <div class="row second">
+          <div>
+            <label for="post-call">Call to action</label>
+            <input id="post-call" v-model="current.post.callToAction" type="text" autocomplete="off" />
+          </div>
+          <div>
+            <label for="post-music">Music credit (optional)</label>
+            <input id="post-music" v-model="current.post.music" type="text" autocomplete="off" />
+          </div>
+        </div>
+        <p class="hint">The title is written again under the call to action.</p>
+
+        <div class="row second">
+          <div class="wide">
+            <label for="post-keywords">Keywords line (optional)</label>
+            <textarea id="post-keywords" v-model="current.post.keywords" rows="2" />
+          </div>
+        </div>
+
+        <div class="row second">
+          <div class="wide">
+            <label for="post-hashtags">Hashtags</label>
+            <textarea id="post-hashtags" v-model="current.post.hashtags" rows="2" spellcheck="false" />
+          </div>
+          <button class="fixed bottom" :disabled="!thumbMatch" @click="addHashtags">Add from the match</button>
+        </div>
+        <p class="hint" :class="{ over: hashtagCount > MAX_HASHTAGS }">
+          {{ hashtagCount }} {{ hashtagCount === 1 ? 'hashtag' : 'hashtags' }}. YouTube shows up to three by the title, and ignores all of them
+          when there are more than {{ MAX_HASHTAGS }}. A hashtag has no spaces.
+        </p>
+
+        <div class="row second">
+          <div class="wide">
+            <label for="post-tags">Tags, for the “Tags” box when you upload (optional)</label>
+            <textarea id="post-tags" v-model="current.post.tags" rows="3" spellcheck="false" placeholder="separated by commas" />
+          </div>
+          <div class="fixed bottom stack-buttons">
+            <button :disabled="!thumbMatch" @click="addTags">Add from the match</button>
+            <button :disabled="tagsOf(current.post.tags).length === 0" @click="copyText('tags', tagsOf(current.post.tags).join(', '))"><Icon name="copy" /> {{ copied === 'tags' ? 'Copied' : 'Copy' }}</button>
+          </div>
+        </div>
+        <p class="hint" :class="{ over: tagRoom > MAX_TAGS_LENGTH }">
+          {{ tagRoom }} of {{ MAX_TAGS_LENGTH }} characters, the most YouTube takes for tags. They are not part of the description: paste them into the
+          “Tags” box under “Show more” when you upload. YouTube says tags matter little, and help most for names people often misspell.
+        </p>
+
+        <div class="row middle second">
+          <h3 class="fixed">Description</h3>
+          <span />
+          <button class="fixed small" :disabled="!description" @click="copyText('description', description)"><Icon name="copy" /> {{ copied === 'description' ? 'Copied' : 'Copy' }}</button>
+        </div>
+        <p v-if="!made" class="notice">The chapter times appear here once the video has been generated: they come from the lengths it really has.</p>
+        <p v-else-if="madeIsOld" class="notice">The timeline has changed since the video was made, so the chapter times below may be wrong. Generate the video again.</p>
+        <p v-else-if="chapterNote" class="notice">{{ chapterNote }}</p>
+        <pre>{{ description || 'Nothing to write yet.' }}</pre>
+        <p class="hint" :class="{ over: descriptionBytes > MAX_DESCRIPTION_BYTES }">
+          {{ descriptionBytes }} of the {{ MAX_DESCRIPTION_BYTES }} bytes YouTube takes (an emoji or a letter outside the Latin alphabet counts as more than one). It is also kept as <code>data/compilations/{{ current.id }}/description.txt</code>, written
+          when you save or generate.
+        </p>
+      </section>
+
       <section v-if="current.final" class="panel result">
         <h2>Final video</h2>
         <video :key="current.final.version" :src="api.finalUrl(current.id, current.final.version)" controls playsinline :class="current.preset" />
@@ -538,12 +780,6 @@ async function generate() {
           <a class="button" :href="api.finalUrl(current.id, current.final.version)" :download="`${current.name}.mp4`"><Icon name="download" /> Download the video</a>
           <span class="muted">It is also at <code>data/compilations/{{ current.id }}/final.mp4</code></span>
         </p>
-        <div class="row middle">
-          <h3 class="fixed">description.txt</h3>
-          <span />
-          <button class="fixed small" @click="copyDescription"><Icon name="copy" /> {{ copied ? 'Copied' : 'Copy' }}</button>
-        </div>
-        <pre>{{ current.description }}</pre>
       </section>
 
       <!-- Always in view, so a change is never left unsaved by accident. -->
@@ -564,6 +800,9 @@ async function generate() {
 /* The credited channel's picture beside the box that chooses it. */
 .credit { display: flex; align-items: center; gap: 8px; }
 .credit .face { width: 36px; height: 36px; flex: none; border-radius: 50%; }
+/* The thumbnail, as wide as a player. Its colours are the clubs', like a card's. */
+.thumb { width: 100%; max-width: 720px; margin: 12px 0; border-radius: var(--radius); overflow: hidden; background: black; }
+.thumb :deep(svg) { display: block; width: 100%; height: 100%; }
 .builder { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: var(--gap); align-items: start; }
 .list .primary { width: 100%; }
 .empty.wide { align-self: start; margin: 0; padding: 28px; }
@@ -604,6 +843,15 @@ a.button {
 }
 a.button:hover { background: var(--accent-hover); }
 .result h3 { margin: 0; }
+/* The title and the description. */
+.post textarea { width: 100%; resize: vertical; font: inherit; }
+.post h3 { margin: 0; }
+.post .second { margin-top: 12px; }
+.post .bottom { align-self: flex-end; }
+.stack-buttons { display: grid; gap: 6px; }
+.post .over { color: var(--bad); }
+.ideas { display: grid; gap: 6px; margin: 8px 0 4px; padding: 10px; border: 1px dashed var(--line); border-radius: var(--radius); }
+.idea { text-align: left; white-space: normal; }
 pre {
   margin: 8px 0 0; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px;
   white-space: pre-wrap; font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace;

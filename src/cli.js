@@ -169,6 +169,7 @@ program
   .option('--start <time>', 'start of the part: seconds, mm:ss or hh:mm:ss', timeOption)
   .option('--end <time>', 'end of the part, same formats', timeOption)
   .option('--whole', 'the whole video instead of a part, up to 3 hours')
+  .option('--label <text>', 'your own name for the file, put in front of the name the tool gives it')
   .option('--out <dir>', 'folder the video is saved in', './in')
   .option('--data <dir>', 'folder that holds sources.json', './data')
   .action(async (link, options) => {
@@ -179,7 +180,7 @@ program
       throw new Error('Give --start and --end for a part, or --whole for the whole video.');
     }
     const fetched = await fetchVideo({
-      url: link, start: options.start, end: options.end, whole: Boolean(options.whole), outDir: options.out,
+      url: link, start: options.start, end: options.end, whole: Boolean(options.whole), label: options.label ?? '', outDir: options.out,
       sources: await readSources(path.resolve(options.data)),
       onStep: (step) => console.log({ looking: 'Looking the video up...', fetching: 'Fetching...', 'fetching-slow': 'The fast way did not work; fetching the slower way...', tidying: 'Preparing the video...' }[step]),
     });

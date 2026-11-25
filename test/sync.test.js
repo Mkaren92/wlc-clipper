@@ -128,7 +128,7 @@ describe('syncing two machines', () => {
     await put(office, 'data/source-subscribers.json', `${JSON.stringify({ one: { count: 18000, checked: '2026-11-20T10:00:00.000Z' } }, null, 2)}\n`);
     await put(office, 'data/source-pictures/one.png', 'picture of one');
     await put(office, 'sounds/goal.mp3', 'a shout');
-    await put(office, 'sounds/intro.mp4', 'the video behind the intro card');
+    await put(office, 'sounds/goal.wav', 'the sound under a goal card');
     await put(office, 'briefs/mine.json', '{"id":"mine"}');
     // Things that must never leave the machine.
     await put(office, 'data/youtube-cookies.txt', 'a sign-in, as good as a password');
@@ -153,7 +153,7 @@ describe('syncing two machines', () => {
     expect(await office.sync.state()).toMatchObject({ connected: true, remote: github });
 
     const names = await onGithub();
-    expect(names).toEqual(expect.arrayContaining(['data/sources.json', 'data/clubs.json', 'data/source-subscribers.json', 'data/source-pictures/one.png', 'sounds/goal.mp3', 'sounds/intro.mp4', 'briefs/mine.json']));
+    expect(names).toEqual(expect.arrayContaining(['data/sources.json', 'data/clubs.json', 'data/source-subscribers.json', 'data/source-pictures/one.png', 'sounds/goal.mp3', 'sounds/goal.wav', 'briefs/mine.json']));
     expect(names.filter((name) => name.startsWith('data/club-logos/'))).toHaveLength(1);
     expect(names.filter((name) => /cookies|backups|compilations|\.env|\.sync/.test(name))).toEqual([]);
     const everything = (await sh(['-C', github, 'log', '-p', '--all'])).stdout;
@@ -177,7 +177,7 @@ describe('syncing two machines', () => {
 
     const result = await home.sync.connect(github, 'github');
     expect(result.arrived).toEqual(expect.arrayContaining(['data/sources.json', 'data/clubs.json', 'sounds/goal.mp3']));
-    for (const name of ['data/sources.json', 'data/clubs.json', 'data/source-subscribers.json', 'data/source-pictures/one.png', 'sounds/intro.mp4', 'briefs/mine.json']) {
+    for (const name of ['data/sources.json', 'data/clubs.json', 'data/source-subscribers.json', 'data/source-pictures/one.png', 'sounds/goal.wav', 'briefs/mine.json']) {
       expect(await has(home, name), name).toBe(await has(office, name)); // byte for byte, the logo written back into the list
     }
     expect((await readLibrary(home.folders.data)).clubs.find((club) => club.id === 'barcelona').icon).toBe(PNG);

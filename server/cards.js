@@ -66,8 +66,12 @@ export function addCardRoutes(app, { dataDir }) {
   // compilation builder has the picture ffmpeg needs.
   app.put('/api/matches/:id/cards/:cardId/png/:size', express.raw({ type: 'image/png', limit: '12mb' }), async (req, res) => {
     if (!Buffer.isBuffer(req.body)) throw new HttpError(400, 'Send the picture as image/png.');
-    // ?clear=1 marks the picture with the see-through background, for a card that lies over a video.
-    await saveCardPng(dataDir, req.params.id, req.params.cardId, req.params.size, req.body, req.query.clear === '1').catch(asHttp);
+    // ?part=still or ?part=logo marks a piece of a card whose logo moves in a compilation.
+    // ?clear=1 was the see-through picture for a video behind a card, which no longer exists:
+    // only a page left open from before sends it.
+    if (req.query.clear !== undefined) throw new HttpError(400, 'This page is from before a change to the cards. Reload it, then save again.');
+    const part = req.query.part === undefined ? 'card' : String(req.query.part);
+    await saveCardPng(dataDir, req.params.id, req.params.cardId, req.params.size, req.body, part).catch(asHttp);
     res.json({ ok: true });
   });
 

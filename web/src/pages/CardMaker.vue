@@ -4,7 +4,7 @@
 // (src/cards/templates.js), so they always match.
 import { computed, onMounted, ref } from 'vue';
 import { CARD_SIZES, GOAL_TYPES, goalType, minuteLabel, RED_TYPES } from '../../../src/cards/config.js';
-import { renderCard } from '../../../src/cards/templates.js';
+import { movingLogo, movingLogoPicture, renderCard } from '../../../src/cards/templates.js';
 import { api } from '../api.js';
 import { cardPng, download, iconFromFile, loadCardFont } from '../cardPng.js';
 import ClubLibrary from '../components/ClubLibrary.vue';
@@ -33,7 +33,7 @@ const unsaved = computed(() => match.value !== null && JSON.stringify(match.valu
 const card = computed(() => match.value?.cards.find((c) => c.id === cardId.value) ?? null);
 const svg = computed(() => (card.value ? renderCard({ match: match.value, card: card.value, size: size.value }) : ''));
 const frame = computed(() => CARD_SIZES[size.value]);
-const CARD_NAMES = { intro: 'Intro', goal: 'Goal', red: 'Red card', fulltime: 'Full time' };
+const CARD_NAMES = { goal: 'Goal', red: 'Red card', fulltime: 'Full time' };
 
 async function load() {
   try {
@@ -60,7 +60,7 @@ function open(saved) {
 }
 
 function newMatch() {
-  match.value = { id: null, home: '', away: '', competition: '', date: '', colours: { home: '#a50044', away: '#1d4ed8' }, icons: { home: '', away: '' }, cards: [] };
+  match.value = { id: null, home: '', away: '', competition: '', date: '', colours: { home: '#a50044', away: '#1d4ed8' }, short: { home: '', away: '' }, icons: { home: '', away: '' }, cards: [] };
   cardId.value = '';
   note.value = '';
   savedText.value = '';
@@ -112,7 +112,6 @@ function scorers() {
 function addCard(type) {
   const id = newId();
   const fresh = {
-    intro: { id, type, showScore: false, homeScore: 0, awayScore: 0 },
     goal: { id, type, team: 'home', scorer: '', assist: '', minute: null, added: null, goalType: 'open-play', ...latestScore() },
     red: { id, type, team: 'home', player: '', minute: null, added: null, redType: 'straight', showScore: false, ...latestScore() },
     fulltime: { id, type, ...scorers() },
@@ -183,7 +182,6 @@ function fillFromGoals() {
 }
 
 function label(c) {
-  if (c.type === 'intro') return 'Intro';
   if (c.type === 'goal') return `${minuteLabel(c.minute, c.added)} ${c.scorer || 'Goal'}`.trim();
   if (c.type === 'red') return `${minuteLabel(c.minute, c.added)} ${c.player || 'Red card'}`.trim();
   return `Full time ${c.homeScore}–${c.awayScore}`;
@@ -210,7 +208,7 @@ const problem = computed(() => {
   return '';
 });
 
-/** Save the match, then draw and store both pictures of every card. */
+/** Save the match, then draw and store the pictures of every card, in both sizes. */
 async function save() {
   saving.value = true;
   error.value = '';
@@ -219,11 +217,14 @@ async function save() {
     const saved = match.value.id ? await api.saveMatch(match.value) : await api.createMatch(match.value);
     for (const c of saved.cards) {
       for (const [name, { width, height }] of Object.entries(CARD_SIZES)) {
-        // Two pictures in each size: the card as it is, and one with a see-through
-        // background for when a video plays behind it in a compilation.
-        for (const clear of [false, true]) {
-          const png = await cardPng(renderCard({ match: saved, card: c, size: name, clear }), width, height);
-          await api.saveCardPng(saved.id, c.id, name, png, clear);
+        await api.saveCardPng(saved.id, c.id, name, await cardPng(renderCard({ match: saved, card: c, size: name }), width, height));
+        // On a goal and a red card the logo moves in a compilation. That takes two more pieces:
+        // the card without that logo, and the logo by itself. They are saved after the card's
+        // own picture, which is how a compilation knows they belong to it.
+        const logo = movingLogo({ card: c, size: name });
+        if (logo) {
+          await api.saveCardPng(saved.id, c.id, name, await cardPng(renderCard({ match: saved, card: c, size: name, still: true }), width, height), 'still');
+          await api.saveCardPng(saved.id, c.id, name, await cardPng(movingLogoPicture({ match: saved, card: c, size: name }), logo.room, logo.room), 'logo');
         }
       }
     }
@@ -311,6 +312,14 @@ async function exportPng(name) {
           <div class="fixed"><label for="away-colour">Colour</label><input id="away-colour" v-model="match.colours.away" type="color" /></div>
         </div>
         <div class="row second">
+          <div><label for="home-short">{{ match.home || 'Home team' }}: short name (optional)</label><input id="home-short" v-model="match.short.home" type="text" maxlength="12" placeholder="for example BAR" autocomplete="off" /></div>
+          <div><label for="away-short">{{ match.away || 'Away team' }}: short name (optional)</label><input id="away-short" v-model="match.short.away" type="text" maxlength="12" placeholder="for example RMA" autocomplete="off" /></div>
+        </div>
+        <p class="hint">
+          The short names are for the chapter list under a compilation's video, such as “BAR 1-0 RMA”. Left empty, the
+          full names are used. They are not drawn on the cards.
+        </p>
+        <div class="row second">
           <div><label for="competition">Competition (optional)</label><input id="competition" v-model="match.competition" type="text" /></div>
           <div><label for="date">Date (optional)</label><input id="date" v-model="match.date" type="text" /></div>
         </div>
@@ -336,12 +345,11 @@ async function exportPng(name) {
       <section class="panel">
         <h2>Cards</h2>
         <div class="row">
-          <button class="fixed" @click="addCard('intro')"><Icon name="plus" /> Intro</button>
           <button class="fixed" @click="addCard('goal')"><Icon name="plus" /> Goal</button>
           <button class="fixed" @click="addCard('red')"><Icon name="plus" /> Red card</button>
           <button class="fixed" @click="addCard('fulltime')"><Icon name="plus" /> Full time</button>
         </div>
-        <p v-if="match.cards.length === 0" class="empty">No cards yet. Add an intro, a goal, a red card or the full-time score.</p>
+        <p v-if="match.cards.length === 0" class="empty">No cards yet. Add a goal, a red card or the full-time score.</p>
         <div v-for="c in match.cards" :key="c.id" class="entry" :class="{ current: c.id === cardId }">
           <button class="open" @click="cardId = c.id">
             <strong>{{ label(c) }}</strong>
@@ -363,21 +371,7 @@ async function exportPng(name) {
       <section v-if="card" class="panel">
         <h2>{{ CARD_NAMES[card.type] }}</h2>
 
-        <template v-if="card.type === 'intro'">
-          <p class="hint first">
-            The opening card: both clubs with their icons and names, from the match details above. It shows “V” between
-            them, or the score if you switch it on.
-          </p>
-          <div class="row">
-            <label class="check fixed"><input v-model="card.showScore" type="checkbox" /> Show the score</label>
-            <template v-if="card.showScore">
-              <div class="narrow"><label for="home-score">{{ match.home || 'Home' }}</label><input id="home-score" v-model.number="card.homeScore" type="number" min="0" /></div>
-              <div class="narrow"><label for="away-score">{{ match.away || 'Away' }}</label><input id="away-score" v-model.number="card.awayScore" type="number" min="0" /></div>
-            </template>
-          </div>
-        </template>
-
-        <template v-else-if="card.type === 'goal'">
+        <template v-if="card.type === 'goal'">
           <div class="row">
             <div>
               <label for="team">Scoring team</label>
@@ -472,7 +466,7 @@ async function exportPng(name) {
         <button class="fixed" @click="exportPng('landscape')"><Icon name="download" /> PNG 1920×1080</button>
         <button class="fixed" @click="exportPng('portrait')"><Icon name="download" /> PNG 1080×1920</button>
       </div>
-      <p class="hint">The picture is exactly what a compilation shows.</p>
+      <p class="hint">The picture is exactly what a compilation shows. In a compilation the logo of the club that scored, or had a player sent off, leans right and left.</p>
     </section>
   </div>
 </template>

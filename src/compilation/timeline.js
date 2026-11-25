@@ -2,12 +2,13 @@
 // opened again and rendered again.
 //
 //   data/compilations/<id>/timeline.json
-//   data/compilations/<id>/final.mp4, description.txt   (after Generate)
+//   data/compilations/<id>/final.mp4, description.txt, made.json   (after Generate)
 //   data/compilations/<id>/work/                         (segments, kept for the next run)
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { isId } from '../cards/match.js';
+import { DEFAULT_POST } from './description.js';
 import { isSoundChoice } from './sounds.js';
 
 /** The two output shapes, both at 30 frames a second. */
@@ -62,11 +63,27 @@ const cardItem = z.strictObject({
   sound: z.string().max(210).refine(isSoundChoice, 'choose "auto", "none" or a file from the sounds folder').default('auto'),
 });
 
+// The owner's own text for the video's page where it is posted (see description.js). A
+// compilation saved before this existed has none and gets the starting text.
+const typed = (key, max) => z.string().max(max).default(DEFAULT_POST[key]);
+const post = z.strictObject({
+  title: typed('title', 200),
+  fanText: typed('fanText', 600),
+  footageText: typed('footageText', 600),
+  footage: typed('footage', 2000),
+  callToAction: typed('callToAction', 600),
+  keywords: typed('keywords', 1500),
+  hashtags: typed('hashtags', 2000),
+  music: typed('music', 600),
+  tags: typed('tags', 1500),
+});
+
 export const timelineSchema = z.strictObject({
   id,
   name: z.string().trim().min(1).max(80),
   preset: z.enum(Object.keys(PRESETS)).default('landscape'),
   items: z.array(z.discriminatedUnion('kind', [videoItem, cardItem])).max(200).default([]),
+  post: post.default({ ...DEFAULT_POST }),
 });
 
 /** @typedef {z.infer<typeof timelineSchema>} Timeline */

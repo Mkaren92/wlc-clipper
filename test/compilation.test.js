@@ -7,8 +7,8 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { saveCardPng, saveMatch } from '../src/cards/match.js';
 import { buildCompilation, creditLayout, creditSubtitles } from '../src/compilation/build.js';
-import { buildDescription, cardTitle, chapterTime } from '../src/compilation/description.js';
-import { automaticSounds, CARD_KINDS, isSoundChoice, listSoundFiles, resolveSound, soundInfo, soundSeconds } from '../src/compilation/sounds.js';
+import { buildDescription, cardTitle, chapterProblem, chaptersOf, chapterTime, countHashtags, DEFAULT_POST, MAX_TAGS_LENGTH, suggestHashtags, suggestTags, tagsLength, tagsOf, titleIdeas } from '../src/compilation/description.js';
+import { automaticSounds, CARD_KINDS, isSoundChoice, listSoundFiles, resolveSound, soundSeconds } from '../src/compilation/sounds.js';
 import { deleteCompilation, listCompilations, newCompilationId, parseTimeline, readTimeline, saveTimeline } from '../src/compilation/timeline.js';
 import { probe } from '../src/probe.js';
 import { run } from '../src/run.js';
@@ -123,9 +123,17 @@ describe('buildCompilation', () => {
 
     expect(await readFile(path.join(dataDir, 'compilations', 'goals', 'description.txt'), 'utf8')).toBe(built.description);
     expect(built.description).toBe([
-      'Credits:', '- StreamerOne', '- Streamer Two', '',
-      'Chapters:', "0:00 12' Goal: Lewandowski (pen) (FC Barcelona 1–0 Manchester United)", '0:08 Full time: FC Barcelona 1–0 Manchester United', '',
+      'TIMESTAMP', '00:00 FC Barcelona 1-0 Manchester United', '00:08 FULL TIME FC Barcelona 1-0 Manchester United', '',
+      '----------------', 'FAN CHANNELS IN THE VIDEO 🎥', DEFAULT_POST.fanText, '', 'StreamerOne', 'Streamer Two', '',
+      '----------------', DEFAULT_POST.callToAction, '',
     ].join('\n'));
+    // What the chapters were worked out from is kept beside the video: each item's real length, and the timeline as it was.
+    const made = JSON.parse(await readFile(path.join(dataDir, 'compilations', 'goals', 'made.json'), 'utf8'));
+    expect(made.from).toEqual(timeline().items);
+    expect(made.items.map((item) => [item.kind, Math.round(item.seconds), item.credit ?? item.title])).toEqual([
+      ['card', 3, 'FC Barcelona 1-0 Manchester United'], ['video', 3, 'StreamerOne'], ['video', 2, 'Streamer Two'], ['card', 2, 'FULL TIME FC Barcelona 1-0 Manchester United'], ['video', 3, 'streamerone'],
+    ]);
+    expect(buildDescription(made.items, {}, timeline().post)).toBe(built.description);
 
     expect(progress.filter((p) => p.status === 'done').map((p) => p.index)).toEqual([0, 1, 2, 3, 4]);
     expect(progress.at(-1)).toEqual({ joining: true });
@@ -142,7 +150,7 @@ describe('buildCompilation', () => {
     changed.items[1].credit = 'A new name';
     const third = await buildCompilation({ timeline: changed, dataDir, resolveVideo });
     expect(third.items.map((item) => item.reused)).toEqual([true, false, true, true, true]);
-    expect(third.description).toContain('- A new name');
+    expect(third.description.split('\n')).toContain('A new name');
 
     // The replaced segment is gone, and nothing half-made is left behind.
     const after = (await readdir(workDir)).filter((name) => name.endsWith('.mp4')).sort();
@@ -168,7 +176,9 @@ describe('buildCompilation', () => {
     const final = await probe(built.file);
     expect([final.width, final.height, final.fps]).toEqual([1080, 1920, 30]);
     expect(Math.abs(built.seconds - 2)).toBeLessThan(0.2);
-    expect(built.description).toContain('- (no credits were entered)');
+    // Nobody is credited, so the part about fan channels is left out, with its heading.
+    expect(built.description).not.toContain('FAN CHANNELS');
+    expect(built.description.startsWith('TIMESTAMP\n00:00 FC Barcelona 1-0 Manchester United\n')).toBe(true);
   }, 240_000);
 
   it('plays a sound under a card, and keeps the length a card was given', async () => {
@@ -261,13 +271,16 @@ describe('buildCompilation', () => {
     const soundsDir = path.join(dir, 'own-sounds');
     await mkdir(soundsDir, { recursive: true });
     // No card has a sound of its own until the owner supplies one.
-    expect(await automaticSounds(soundsDir)).toEqual({ intro: 'none', goal: 'none', red: 'none', fulltime: 'none' });
+    expect(await automaticSounds(soundsDir)).toEqual({ goal: 'none', red: 'none', fulltime: 'none' });
+    // A file named for the intro card, which is gone, is nobody's sound; nor is a video, which once went behind a card.
     await ff(['-f', 'lavfi', '-i', 'sine=frequency=400:sample_rate=48000', '-t', '0.5', path.join(soundsDir, 'intro.wav')]);
+    await writeFile(path.join(soundsDir, 'red.mp4'), 'a video');
     await ff(['-f', 'lavfi', '-i', 'sine=frequency=700:sample_rate=48000', '-t', '0.8', path.join(soundsDir, 'GOAL.wav')]);
     await ff(['-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000', '-t', '0.6', path.join(soundsDir, 'fulltime.wav')]);
     await writeFile(path.join(soundsDir, 'goalkeeper.wav'), 'not the goal sound');
-    expect(await automaticSounds(soundsDir)).toEqual({ intro: 'file:intro.wav', goal: 'file:GOAL.wav', red: 'none', fulltime: 'file:fulltime.wav' });
-    expect(await automaticSounds(undefined)).toEqual({ intro: 'none', goal: 'none', red: 'none', fulltime: 'none' });
+    expect(await automaticSounds(soundsDir)).toEqual({ goal: 'file:GOAL.wav', red: 'none', fulltime: 'file:fulltime.wav' });
+    expect(await listSoundFiles(soundsDir)).toEqual(['fulltime.wav', 'GOAL.wav', 'goalkeeper.wav', 'intro.wav']);
+    expect(await automaticSounds(undefined)).toEqual({ goal: 'none', red: 'none', fulltime: 'none' });
 
     const own = timeline({ id: 'own', items: [
       { id: 'i1', kind: 'card', matchId: 'm1', cardId: 'goal' },
@@ -283,63 +296,127 @@ describe('buildCompilation', () => {
     expect(await level(silent.file, 0.5, 2)).toBeLessThan(-70);
   }, 240_000);
 
-  it('plays a video behind a card, with the card over it and the video\'s own sound', async () => {
+  it('leans the logo of a goal card to the right, then to the left, three times, and stands it straight', async () => {
+    // A match of its own, so the other tests' cards stay without the pieces and are made as before.
+    await saveMatch(dataDir, { ...match, id: 'm2' });
+    // The card's picture is the cards' own background, in its exact colours: the dark green with a
+    // lighter stripe every 240, each pixel written as the numbers it has on a card.
+    const green = path.join(dir, 'swing-card.png');
+    const stripe = (light, dark) => `'if(lt(mod(X,240),120),${light},${dark})'`;
+    await ff(['-f', 'lavfi', '-i', `nullsrc=s=1920x1080,format=rgb24,geq=r=${stripe(18, 10)}:g=${stripe(33, 26)}:b=${stripe(27, 20)}`, '-frames:v', '1', green]);
+    const navy = await readFile(green);
+    // The moving logo as the card maker would save it: a square of 324 (the 270 logo with room to lean),
+    // here a white bar standing upright in its middle, on nothing.
+    const bar = path.join(dir, 'bar.png');
+    await ff(['-f', 'lavfi', '-i', 'color=c=black@0.0:s=324x324,format=rgba,drawbox=x=152:y=20:w=20:h=284:color=white:t=fill:replace=1', '-frames:v', '1', bar]);
+    await saveCardPng(dataDir, 'm2', 'goal', 'landscape', navy);
+    const card = { id: 'i1', kind: 'card', matchId: 'm2', cardId: 'goal', seconds: 3 };
+    const make = (items = [card], more = {}) => buildCompilation({ timeline: timeline({ id: 'swing', items }), dataDir, resolveVideo, ...more });
+    const bright = async (file, frame, part) => {
+      const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', file, '-an', '-vf', `select='eq(n,${frame})',crop=${part},signalstats,metadata=print:key=lavfi.signalstats.YAVG`, '-frames:v', '1', '-f', 'null', '-']);
+      return Number(/YAVG=([\d.]+)/.exec(stderr)[1]);
+    };
+    // The home club's logo stands at 400, 745 on the wide card, so its square begins at 238, 583.
+    // Two patches beside the top of the bar: the bar is in neither while it stands straight.
+    const RIGHT_OF_BAR = '30:60:414:610';
+    const LEFT_OF_BAR = '30:60:356:610';
+    const ON_BAR = '12:200:394:645';
+
+    // Without the two pieces the card is a still picture, as it always was.
+    const plain = await make();
+    for (const frame of [3, 16, 25]) expect(await bright(plain.file, frame, ON_BAR)).toBeLessThan(40);
+
+    // The pieces are refused unless they are what the card's own drawing says: a logo of 324, a card-sized rest.
+    await expect(saveCardPng(dataDir, 'm2', 'goal', 'landscape', navy, 'logo')).rejects.toThrow(/PNG of 324x324/);
+    await expect(saveCardPng(dataDir, 'm2', 'goal', 'landscape', await readFile(bar), 'still')).rejects.toThrow(/PNG of 1920x1080/);
+    await expect(saveCardPng(dataDir, 'm2', 'full', 'landscape', navy, 'still')).rejects.toThrow(/No logo moves/);
+    await expect(saveCardPng(dataDir, 'm2', 'goal', 'landscape', navy, 'sideways')).rejects.toThrow(/no piece of that name/);
+    await saveCardPng(dataDir, 'm2', 'goal', 'landscape', navy, 'still');
+    await saveCardPng(dataDir, 'm2', 'goal', 'landscape', await readFile(bar), 'logo');
+
+    const built = await make();
+    expect(built.items[0].reused).toBe(false);
+    expect(Math.abs(built.items[0].seconds - 3)).toBeLessThan(0.05);
+    // Straight before it starts (0.4 s in) and after the third time (2.2 s in): the bar is where it was saved.
+    for (const frame of [3, 75, 88]) {
+      expect(await bright(built.file, frame, ON_BAR), `frame ${frame}`).toBeGreaterThan(200);
+      expect(await bright(built.file, frame, RIGHT_OF_BAR), `frame ${frame}`).toBeLessThan(40);
+      expect(await bright(built.file, frame, LEFT_OF_BAR), `frame ${frame}`).toBeLessThan(40);
+    }
+    // Each lean takes 0.6 s: furthest right 0.15 s into it, furthest left 0.45 s into it. Three times.
+    for (const start of [0.4, 1.0, 1.6]) {
+      const right = Math.round((start + 0.15) * 30);
+      const left = Math.round((start + 0.45) * 30);
+      expect(await bright(built.file, right, RIGHT_OF_BAR), `right at frame ${right}`).toBeGreaterThan(80);
+      expect(await bright(built.file, right, LEFT_OF_BAR), `right at frame ${right}`).toBeLessThan(40);
+      expect(await bright(built.file, left, LEFT_OF_BAR), `left at frame ${left}`).toBeGreaterThan(80);
+      expect(await bright(built.file, left, RIGHT_OF_BAR), `left at frame ${left}`).toBeLessThan(40);
+    }
+    // The logo has no dark square around it, and the card around it is the colour it has when
+    // nothing moves: the same patch of the same picture, measured in both videos. This is a
+    // coarse guard only. The fault it is here for (the stripes three levels of blue away, see
+    // docs/decisions.md) was found by comparing frames before video compression, and this check
+    // did not catch it when the first way of laying the logo on was put back.
+    const colour = async (file, frame, part) => {
+      const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', file, '-an', '-vf', `select='eq(n,${frame})',crop=${part},signalstats,metadata=print`, '-frames:v', '1', '-f', 'null', '-']);
+      return ['YAVG', 'UAVG', 'VAVG'].map((key) => Number(new RegExp(`${key}=([\\d.]+)`).exec(stderr)[1]));
+    };
+    // Beside the bar inside the logo's square, a lighter stripe, a darker one, and a wide piece across several.
+    for (const part of ['40:40:250:600', '60:60:30:450', '60:60:150:450', '600:200:1000:200']) {
+      const [moving, still] = [await colour(built.file, 16, part), await colour(plain.file, 16, part)];
+      moving.forEach((value, i) => expect(Math.abs(value - still[i]), `${part}: ${moving} against ${still}`).toBeLessThan(0.6));
+    }
+    // Nothing changed, so nothing is made again.
+    expect((await make()).items[0].reused).toBe(true);
+
+    // With a sound under the card, as the owner's cards have, it leans the same and the card is as long as its sound.
+    const wavs = path.join(dir, 'swing-wavs');
+    await mkdir(wavs, { recursive: true });
+    await ff(['-f', 'lavfi', '-i', 'sine=frequency=330:sample_rate=48000', '-t', '4', path.join(wavs, 'goal.wav')]);
+    const sounded = await make([{ ...card, seconds: undefined }], { soundsDir: wavs });
+    expect(Math.abs(sounded.items[0].seconds - 4)).toBeLessThan(0.05);
+    expect(await bright(sounded.file, 17, RIGHT_OF_BAR)).toBeGreaterThan(80);
+    expect(await bright(sounded.file, 26, LEFT_OF_BAR)).toBeGreaterThan(80);
+    expect(await bright(sounded.file, 100, ON_BAR)).toBeGreaterThan(200);
+    expect(await level(sounded.file, 0.5, 3)).toBeGreaterThan(-40);
+
+    // Pieces older than the card's picture were saved for another drawing of the card (a page from
+    // before the pieces existed saved the card since): the card is shown still, with the picture it has now.
+    await saveCardPng(dataDir, 'm2', 'goal', 'landscape', navy);
+    const stale = await make();
+    expect(stale.items[0].reused).toBe(false);
+    for (const frame of [3, 16, 25]) expect(await bright(stale.file, frame, ON_BAR)).toBeLessThan(40);
+
+    // Saving the match keeps the pieces with the card, and drops them with it.
+    await saveMatch(dataDir, { ...match, id: 'm2' });
+    expect((await readdir(path.join(dataDir, 'matches', 'm2', 'cards'))).sort()).toEqual(['goal-landscape-logo.png', 'goal-landscape-still.png', 'goal-landscape.png']);
+    await saveMatch(dataDir, { ...match, id: 'm2', cards: [] });
+    expect(await readdir(path.join(dataDir, 'matches', 'm2', 'cards'))).toEqual([]);
+  }, 240_000);
+
+  it('plays no video behind a card any more: a card saved with one says to choose another sound', async () => {
     const soundsDir = path.join(dir, 'video-sounds');
     await mkdir(soundsDir, { recursive: true });
-    // A 2-second video at 25 frames a second with a white flash and a beep one second in,
-    // one with no sound at all, and a music file that carries a cover picture.
-    const flash = "color=c=black:s=960x540:r=25,drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='between(t,1,1.1)'";
-    await ff(['-f', 'lavfi', '-i', flash, '-f', 'lavfi', '-i', "aevalsrc='if(between(t,1,1.1),sin(2*PI*1000*t),0)':s=44100", '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(soundsDir, 'goal.mp4')]);
-    await ff(['-f', 'lavfi', '-i', flash, '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', path.join(soundsDir, 'silent.mp4')]);
+    // A video with sound, as the intro once had, and a music file that carries a cover picture.
+    await ff(['-f', 'lavfi', '-i', 'color=c=black:s=960x540:r=25', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100', '-t', '2', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', path.join(soundsDir, 'goal.mp4')]);
     await ff(['-f', 'lavfi', '-i', 'sine=frequency=440', '-i', path.join(dir, 'landscape.png'), '-t', '1', '-map', '0:a', '-map', '1:v', '-c:v', 'mjpeg', '-disposition:v', 'attached_pic', path.join(soundsDir, 'song.mp3')]);
-    await writeFile(path.join(soundsDir, 'goal.wav'), 'a sound of the same name: the video is preferred');
 
-    expect(await soundInfo(path.join(soundsDir, 'goal.mp4'))).toMatchObject({ hasSound: true, hasPicture: true });
-    expect(await soundInfo(path.join(soundsDir, 'silent.mp4'))).toMatchObject({ hasSound: false, hasPicture: true });
-    expect(await soundInfo(path.join(soundsDir, 'song.mp3'))).toMatchObject({ hasSound: true, hasPicture: false }); // a cover is not a moving picture
-    expect(await soundInfo(path.join(soundsDir, 'goal.wav'))).toBeNull();
-    expect((await automaticSounds(soundsDir)).goal).toBe('file:goal.mp4');
-
-    const overVideo = (items, id = 'over-video') => buildCompilation({ timeline: timeline({ id, items }), dataDir, resolveVideo, soundsDir });
+    // A video in the sounds folder is not a sound: it is not offered, and it is not the "auto" sound of its kind.
+    expect(await listSoundFiles(soundsDir)).toEqual(['song.mp3']);
+    expect((await automaticSounds(soundsDir)).goal).toBe('none');
+    // A compilation saved while a video could be chosen still opens, and making it says what to do.
     const card = { id: 'i1', kind: 'card', matchId: 'm1', cardId: 'goal' };
-    const clip = { id: 'i9', kind: 'video', library: 'in', name: 'c.mkv', start: 0.5, end: 3.5, credit: '' };
+    const saved = timeline({ id: 'over-video', items: [{ ...card, sound: 'file:goal.mp4' }] });
+    expect(saved.items[0].sound).toBe('file:goal.mp4');
+    await expect(buildCompilation({ timeline: saved, dataDir, resolveVideo, soundsDir })).rejects.toThrow(/Item 1: its sound "goal.mp4" is a video, and a video behind a card was removed\. Choose another sound/);
 
-    // The card needs its see-through picture for this, and says so when it has none.
-    await expect(overVideo([card])).rejects.toThrow(/Item 1: the card has no see-through picture yet.*press Save/);
-    const clear = path.join(dir, 'clear.png');
-    await ff(['-f', 'lavfi', '-i', 'color=c=black@0.0:s=1920x1080,format=rgba', '-frames:v', '1', clear]);
-    await saveCardPng(dataDir, 'm1', 'goal', 'landscape', await readFile(clear), true);
-
-    const built = await overVideo([card, clip]);
-    // The card lasts as long as the video, and the video shows through it: its flash is seen,
-    // one second in, together with its beep.
-    expect(Math.abs(built.items[0].seconds - 2)).toBeLessThan(0.05);
-    const seen = await flashAt(built.file, 0.2);
-    const heard = await soundAt(built.file, 0.2);
-    expect(Math.abs(seen - 1)).toBeLessThan(0.06);
-    expect(Math.abs(seen - heard)).toBeLessThan(1 / 30 + 0.012);
-    // The clip after it is still in step.
-    const flashed = await flashAt(built.file, 2.2);
-    expect(Math.abs(flashed - 3)).toBeLessThan(0.1);
-    expect(Math.abs(flashed - (await soundAt(built.file, 2.3)))).toBeLessThan(1 / 30 + 0.005);
-    const final = await probe(built.file);
+    // A music file with a cover picture is a sound and nothing more: the card is as long as the song and plays it.
+    expect(Math.abs((await soundSeconds(path.join(soundsDir, 'song.mp3'))) - 1)).toBeLessThan(0.1);
+    const song = await buildCompilation({ timeline: timeline({ id: 'over-video', items: [{ ...card, sound: 'file:song.mp3' }] }), dataDir, resolveVideo, soundsDir });
+    expect(Math.abs(song.items[0].seconds - 1)).toBeLessThan(0.1);
+    expect(await level(song.file, 0.1, 0.8)).toBeGreaterThan(-40);
+    const final = await probe(song.file);
     expect([final.width, final.height, final.fps]).toEqual([1920, 1080, 30]);
-
-    // Shown for longer than the video runs: the last frame is held, and the sound is not played twice.
-    const longer = await overVideo([{ ...card, seconds: 4 }]);
-    expect(Math.abs(longer.items[0].seconds - 4)).toBeLessThan(0.05);
-    expect(await level(longer.file, 2.3, 1.5)).toBeLessThan(-70);
-    expect(await flashAt(longer.file, 1.5)).toBeNull();
-
-    // A video with no sound gives a silent card with a moving background.
-    const silent = await overVideo([{ ...card, sound: 'file:silent.mp4' }]);
-    expect(Math.abs(silent.items[0].seconds - 2)).toBeLessThan(0.05);
-    expect(await level(silent.file, 0, 2)).toBeLessThan(-70);
-    expect(Math.abs((await flashAt(silent.file, 0.2)) - 1)).toBeLessThan(0.06);
-
-    // A music file with a cover picture is a sound and nothing more: the ordinary card is used.
-    const song = await overVideo([{ ...card, sound: 'file:song.mp3' }]);
-    expect(await flashAt(song.file, 0)).toBeNull();
   }, 240_000);
 
   // A streamer's reaction with the goal they are reacting to beside it. The
@@ -553,12 +630,14 @@ describe('buildCompilation', () => {
 
 describe('sounds', () => {
   it('has no sound of its own: every kind of card is silent until the owner gives it a file', async () => {
-    expect(CARD_KINDS).toEqual(['intro', 'goal', 'red', 'fulltime']);
+    expect(CARD_KINDS).toEqual(['goal', 'red', 'fulltime']);
     for (const cardType of CARD_KINDS) {
       expect(await resolveSound({ choice: 'auto', cardType, soundsDir: path.join(dir, 'no-such-folder') })).toBeNull();
       expect(await resolveSound({ choice: 'none', cardType })).toBeNull();
     }
     await expect(resolveSound({ choice: 'builtin:goal', cardType: 'goal' })).rejects.toThrow(/was one the tool made, and those were removed/);
+    // A video was once a card's sound and its moving background; that was removed too, and says so.
+    await expect(resolveSound({ choice: 'file:intro.mp4', cardType: 'goal', soundsDir: dir })).rejects.toThrow(/is a video, and a video behind a card was removed/);
   });
 
   it('knows a sound choice when it sees one, and only plain file names', () => {
@@ -572,31 +651,139 @@ describe('sounds', () => {
     const folder = path.join(dir, 'listed');
     await mkdir(folder);
     for (const name of ['b.mp3', 'A.wav', 'notes.txt', '.hidden.mp3', 'video.mp4', 'photo.png']) await writeFile(path.join(folder, name), 'x');
-    // A video counts: it gives a card its sound and a moving background.
-    expect(await listSoundFiles(folder)).toEqual(['A.wav', 'b.mp3', 'video.mp4']);
+    // A video does not count any more: it once gave a card its sound and a moving background.
+    expect(await listSoundFiles(folder)).toEqual(['A.wav', 'b.mp3']);
     expect(await listSoundFiles(path.join(dir, 'no-such-folder'))).toEqual([]);
     expect(await listSoundFiles(undefined)).toEqual([]);
   });
 });
 
 describe('description', () => {
-  it('lists each streamer once and starts the chapters at 0:00', () => {
-    const text = buildDescription([
-      { kind: 'video', seconds: 12.4, credit: 'Ana' },
-      { kind: 'card', seconds: 3, title: 'First goal' },
-      { kind: 'video', seconds: 50, credit: 'ana' },
-      { kind: 'video', seconds: 4000, credit: 'Ben' },
-      { kind: 'card', seconds: 3, title: 'Full time' },
-    ]);
-    expect(text).toBe('Credits:\n- Ana\n- Ben\n\nChapters:\n0:00 Start\n0:12 First goal\n1:07:45 Full time\n');
+  const items = [
+    { kind: 'video', seconds: 12.4, credit: 'Ana' },
+    { kind: 'card', seconds: 3, title: 'HOM 1-0 AWY' },
+    { kind: 'video', seconds: 50, credit: 'ana' },
+    { kind: 'video', seconds: 4000, credit: 'Ben' },
+    { kind: 'card', seconds: 3, title: 'FULL TIME HOM 1-0 AWY' },
+  ];
+
+  it('writes the whole text for under the video: chapters, fan channels, goal footage, the call to action, and the owner\'s last lines', () => {
+    const post = {
+      title: 'A TITLE | MATCH REACTIONS', fanText: 'Subscribe to them.', footageText: 'Tell me if it is yours.', footage: ' https://www.youtube.com/@goals \n\n@other ',
+      callToAction: 'Like for more!', keywords: 'One, Two and more.', hashtags: '#Home #Away', music: 'Music by Somebody',
+    };
+    expect(buildDescription(items, { ana: 'https://www.youtube.com/@ana' }, post)).toBe([
+      // A chapter starts at each card; the video does not open with one, so one is added at 00:00.
+      'TIMESTAMP', '00:00 START', '00:12 HOM 1-0 AWY', '1:07:45 FULL TIME HOM 1-0 AWY', '',
+      // Each streamer once, in the order they first appear: a channel as its address, anyone else by name.
+      '----------------', 'FAN CHANNELS IN THE VIDEO 🎥', 'Subscribe to them.', '', 'https://www.youtube.com/@ana', 'Ben', '',
+      '----------------', 'SOURCE GOAL FOOTAGE 🎥', 'Tell me if it is yours.', '', 'https://www.youtube.com/@goals', '@other', '',
+      '----------------', 'Like for more!', 'A TITLE | MATCH REACTIONS', '',
+      '----------------', 'One, Two and more.', '', '#Home #Away', '', 'Music by Somebody', '',
+    ].join('\n'));
   });
 
-  it('writes chapter times and card titles', () => {
-    expect([chapterTime(0), chapterTime(59.9), chapterTime(61), chapterTime(3723)]).toEqual(['0:00', '0:59', '1:01', '1:02:03']);
+  it('leaves out every part that has nothing in it, and starts from neutral sentences of its own', () => {
+    // With nothing typed: the chapters, the channels under the standing sentence, the call to action.
+    expect(buildDescription(items)).toBe([
+      'TIMESTAMP', '00:00 START', '00:12 HOM 1-0 AWY', '1:07:45 FULL TIME HOM 1-0 AWY', '',
+      '----------------', 'FAN CHANNELS IN THE VIDEO 🎥', DEFAULT_POST.fanText, '', 'Ana', 'Ben', '',
+      '----------------', DEFAULT_POST.callToAction, '',
+    ].join('\n'));
+    // The standing text names nobody: no title, no footage, no keywords, no hashtags, no music.
+    expect([DEFAULT_POST.title, DEFAULT_POST.footage, DEFAULT_POST.keywords, DEFAULT_POST.hashtags, DEFAULT_POST.music]).toEqual(['', '', '', '', '']);
+    // Before the video is made there are no chapter times, and the channels come from the timeline as it stands.
+    expect(buildDescription([], {}, { callToAction: '' }, ['Cara'])).toBe(`FAN CHANNELS IN THE VIDEO 🎥\n${DEFAULT_POST.fanText}\n\nCara\n`);
+    // After the timeline changes, the channels are the timeline's and the times are still the made video's.
+    expect(buildDescription(items, {}, { callToAction: '' }, ['Cara']).split('\n').slice(0, 9)).toEqual(['TIMESTAMP', '00:00 START', '00:12 HOM 1-0 AWY', '1:07:45 FULL TIME HOM 1-0 AWY', '', '----------------', 'FAN CHANNELS IN THE VIDEO 🎥', DEFAULT_POST.fanText, '']);
+    expect(buildDescription([], {}, { callToAction: '', fanText: '' })).toBe('');
+    // Goal footage sources are only ever typed: with none, their sentence is not written either.
+    expect(buildDescription([], {}, { callToAction: '', footageText: 'Tell me.' })).toBe('');
+  });
+
+  it('writes chapter times and card titles, with a team\'s short name only when the owner gave one', () => {
+    expect([chapterTime(0), chapterTime(59.9), chapterTime(61), chapterTime(3723)]).toEqual(['00:00', '00:59', '01:01', '1:02:03']);
+    const goal = match.cards[0];
     const red = { type: 'red', team: 'away', player: 'Martínez', minute: 67, added: null, redType: 'second-yellow' };
-    expect(cardTitle(match, red)).toBe("67' Red card: Martínez (second yellow)");
-    expect(cardTitle(match, { id: 'i', type: 'intro', showScore: false })).toBe('FC Barcelona v Manchester United');
-    expect(cardTitle(match, { ...match.cards[0], goalType: 'own-goal', minute: 90, added: 3 })).toBe("90+3' Goal: Lewandowski (og) (FC Barcelona 1–0 Manchester United)");
+    expect(cardTitle(match, goal)).toBe('FC Barcelona 1-0 Manchester United');
+    expect(cardTitle(match, red)).toBe("RED CARD Martínez (Manchester United, 67', second yellow)");
+    expect(cardTitle(match, match.cards[1])).toBe('FULL TIME FC Barcelona 1-0 Manchester United');
+    const short = { ...match, short: { home: 'BAR', away: ' ' } };
+    expect(cardTitle(short, { ...goal, homeScore: 2, awayScore: 1 })).toBe('BAR 2-1 Manchester United');
+    expect(cardTitle({ ...match, short: { home: 'BAR', away: 'MUN' } }, red)).toBe("RED CARD Martínez (MUN, 67', second yellow)");
+  });
+
+  it('says when YouTube would not show the chapters: fewer than three, or one under ten seconds', () => {
+    const chapters = chaptersOf(items);
+    expect(chapters.map((chapter) => [Math.round(chapter.at), chapter.title, Math.round(chapter.seconds)])).toEqual([[0, 'START', 12], [12, 'HOM 1-0 AWY', 4053], [4065, 'FULL TIME HOM 1-0 AWY', 3]]);
+    // The full-time card ends the video, so its chapter is three seconds long.
+    expect(chapterProblem(chapters)).toMatch(/each lasts at least 10 seconds; "FULL TIME HOM 1-0 AWY" lasts 3/);
+    expect(chapterProblem(chaptersOf([...items, { kind: 'video', seconds: 30, credit: '' }]))).toBe('');
+    expect(chapterProblem(chaptersOf(items.slice(0, 3)))).toMatch(/at least 3; this video has 2/);
+    // A video that opens with a card has its first chapter there, with no "START".
+    expect(chaptersOf(items.slice(1)).map((chapter) => chapter.title)).toEqual(['HOM 1-0 AWY', 'FULL TIME HOM 1-0 AWY']);
+  });
+
+  it('works hashtags out from the match, and counts them', () => {
+    const tags = suggestHashtags({ home: 'FC Barcelona', away: 'Real Madrid', competition: 'La Liga' });
+    expect(tags).toBe('#FCBarcelona #RealMadrid #LaLiga #FCBarcelonaVsRealMadrid #FanReactions #FootballFans #MatchReactions #Football #FCBarcelonaFans #RealMadridFans');
+    for (const tag of tags.split(' ')) expect(tag).toMatch(/^#[\p{L}\p{N}]+$/u);
+    expect(countHashtags(tags)).toBe(10);
+    expect(suggestHashtags({ home: 'A', away: 'B' })).toBe('#A #B #AVsB #FanReactions #FootballFans #MatchReactions #Football #AFans #BFans');
+    expect(suggestHashtags({ home: '', away: '', competition: '' })).toBe('#FanReactions #FootballFans #MatchReactions #Football');
+    expect([countHashtags(''), countHashtags(undefined), countHashtags('no tags, 1 # alone'), countHashtags('#one\n#two #Երեք3')]).toEqual([0, 0, 0, 3]);
+  });
+
+  it('works tags for the upload form out from the match, within what YouTube takes', () => {
+    const game = { home: 'Real Madrid', away: 'PSV Eindhoven', competition: 'Champions League' };
+    const tags = suggestTags(game, { home: 5, away: 1 }, ['Streamer One', 'Another, "Channel"']);
+    // Plain words in lower case, the fixture first, each once.
+    expect(tags.slice(0, 3)).toEqual(['real madrid vs psv eindhoven', 'psv eindhoven vs real madrid', 'real madrid 5-1 psv eindhoven']);
+    expect(tags).toEqual(expect.arrayContaining(['real madrid fans', 'psv eindhoven fan reactions', 'champions league', 'fan reactions', 'watchalong']));
+    expect(new Set(tags).size).toBe(tags.length);
+    for (const tag of tags) expect(tag).toMatch(/^[^,<>"A-Z]+$/);
+    // YouTube counts the commas, and two more characters for each tag with a space in it: 500 in all.
+    expect(tagsLength('Foo-Baz')).toBe(7);
+    expect(tagsLength('Foo Baz')).toBe(9);
+    expect(tagsLength('one, two words,three')).toBe(3 + 1 + 11 + 1 + 5);
+    expect(tagsLength(tags.join(', '))).toBeLessThanOrEqual(MAX_TAGS_LENGTH);
+    // The list stops before it would pass that, the general ones and the streamers going first.
+    const long = suggestTags({ home: 'Borussia Mönchengladbach', away: 'Wolverhampton Wanderers', competition: 'UEFA Europa Conference League' }, { home: 2, away: 2 }, ['Somebody']);
+    expect(tagsLength(long.join(', '))).toBeLessThanOrEqual(MAX_TAGS_LENGTH);
+    expect(long[0]).toBe('borussia mönchengladbach vs wolverhampton wanderers');
+    expect(long).not.toContain('somebody');
+    // With little room taken, the streamers are tags too, without the commas and quotes a name may hold.
+    const few = suggestTags({ home: 'A', away: 'B' }, null, ['Streamer One', 'Another, "Channel"']);
+    expect(few).toEqual(expect.arrayContaining(['a vs b', 'streamer one', 'another channel']));
+    expect(few.join(' ')).not.toMatch(/\d-\d/);
+    // A typed box is read by its commas and line ends, each tag once whatever its capitals.
+    expect(tagsOf(' One, two words ,\none,, THREE ')).toEqual(['One', 'two words', 'THREE']);
+    expect([tagsOf(''), tagsOf(undefined), tagsLength('')]).toEqual([[], [], 0]);
+    // Tags are for their own box of the upload form: they are not written into the description.
+    expect(buildDescription([], {}, { callToAction: 'Like!', tags: 'one, two' })).toBe('Like!\n');
+  });
+
+  it('offers title ideas that are true to the score', () => {
+    const game = { home: 'Barcelona', away: 'Real Madrid' };
+    const all = (score) => titleIdeas(game, score).join('\n');
+    for (const score of [{ home: 5, away: 0 }, { home: 2, away: 1 }, { home: 0, away: 2 }, { home: 1, away: 1 }, { home: 0, away: 0 }, null]) {
+      const ideas = titleIdeas(game, score);
+      expect(ideas.length).toBeGreaterThanOrEqual(2);
+      for (const idea of ideas) {
+        expect(idea.length, idea).toBeLessThanOrEqual(100);
+        expect(idea, idea).toMatch(/BARCELONA|Barcelona/);
+        // The score is in every idea, written home first or winner first.
+        if (score) expect(idea.includes(`${score.home}-${score.away}`) || idea.includes(`${Math.max(score.home, score.away)}-${Math.min(score.home, score.away)}`), idea).toBe(true);
+      }
+    }
+    // Only a heavy defeat is a thrashing; a draw has no winner, loser, or anybody destroyed.
+    expect(all({ home: 5, away: 0 })).toMatch(/REAL MADRID FANS SHOCKED .* 5-0 THRASHING BY BARCELONA/);
+    expect(all({ home: 0, away: 4 })).toMatch(/BARCELONA FANS SHOCKED .* 4-0 THRASHING BY REAL MADRID/);
+    for (const score of [{ home: 2, away: 1 }, { home: 3, away: 1 }, { home: 1, away: 1 }, { home: 0, away: 0 }]) expect(all(score)).not.toMatch(/THRASHING|DESTROY|HUMILIAT/);
+    for (const score of [{ home: 1, away: 1 }, { home: 0, away: 0 }]) expect(all(score)).not.toMatch(/GUTTED|HEARTBROKEN|FURIOUS|WIN OVER|EDGE IT/);
+    expect(all({ home: 0, away: 0 })).not.toMatch(/GOAL/);
+    // With no score yet, none is written.
+    expect(all(null)).not.toMatch(/\d-\d/);
   });
 });
 
