@@ -1,6 +1,6 @@
 # Home PC: what to do
 
-What to do on the home PC so it has the same code and the same channels, clubs, logos, sounds and briefs as the office PC. Last updated 2026-11-24.
+What to do on the home PC so it has the same code and the same channels, clubs, logos, sounds and briefs as the office PC. Last updated 2026-11-25.
 
 The data lives in the private repository https://github.com/Mkaren92/wlc-clipper-data. The code lives in the public one, https://github.com/Mkaren92/wlc-clipper.
 
@@ -25,7 +25,7 @@ If the project is in another folder, `cd` there instead. Then open http://127.0.
 - `git status` should say `nothing to commit, working tree clean`. If it lists changed files, or says `Your branch is ahead of 'origin/main'`, there is work on the home PC that was never pushed. Do not delete the folder or clone again. Open Claude Code in that folder and write: **"I have work here that was never pushed. Get the latest main from GitHub, put it together with my work here, run the tests, and commit-push."**
 - `npm run setup` is **not** needed. Nothing new has to be installed.
 
-## What is different after this pull (code of 2026-11-24)
+## What is different after this pull (code of 2026-11-25)
 
 - **Captions use a larger speech model.** The first clip cut with captions downloads it once: about 1.6 GB, a few minutes. Check there is room first with `df -h ~`. Later clips do not download anything.
 - **Captions take longer than before**, because of that model. On the office PC a 60-second clip takes about 2 minutes to make. The home PC's graphics card makes the picture faster, but captions do not use the card.
@@ -41,6 +41,7 @@ If the project is in another folder, `cd` there instead. Then open http://127.0.
 - **A new intro video and a new goal sound arrive by sync** (`sounds/intro.mp4`, `sounds/goal.wav`). The home PC's own older files of those names are moved to `data/backups/sync/`.
 - **The result player on the Compilations page has no black bars** beside the picture any more.
 - **The three sounds "made by the tool" are gone** from a card's sound list. Cards use your own files in `sounds/`, which sync.
+- **Goal, red and full-time cards have six layouts** (2026-11-25). On the **Cards** page, under a card's fields, "Layout" shows the card drawn six ways; two of them show the club icons. Cards already saved stay as they were ("Classic"). Matches do not sync, so a layout chosen on the office PC is not on the home PC: choose it there too, press **Save match and cards**, and generate the compilation again.
 
 Tried on the office PC on 2026-11-24 and removed the same day, so the home PC never gets it and needs nothing for it: a "Drop game voices" checkbox and a voice sample for each channel. One voice sample that was uploaded then is still in the data repository (`data/source-voices/`, two files). Nothing uses it and it is not copied to the home PC.
 

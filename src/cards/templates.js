@@ -3,21 +3,16 @@
 // same SVG into the PNG, so the two cannot differ.
 //
 // Text and plain blocks of team colour, with one exception: the intro card
-// shows a club icon for each team when the owner has added one to the match.
-// Nothing here fetches a picture; an icon is only ever what the owner chose.
-import { CARD_SIZES, goalType, isIcon, minuteLabel, redType } from './config.js';
+// shows a club icon for each team when the owner has added one to the match
+// (and so do the two logo layouts in layouts.js). Nothing here fetches a
+// picture; an icon is only ever what the owner chose.
+import { CARD_SIZES, goalType, minuteLabel, redType } from './config.js';
 import { fitSize, textWidth } from './measure.js';
+import { layoutFor } from './layouts.js';
+import { BACKGROUND, frame, icon, line, MUTED, PANEL, readableOn, RED, round, safeColour, SOLID_BACKGROUND, teamName, text, TEXT } from './parts.js';
 
-/** Name the page and the PNG export give the bundled font. */
-export const CARD_FONT = 'Clipper Card';
-
-const BACKGROUND = '#12151b';
-const PANEL = '#1c212b';
-const TEXT = '#f4f5f7';
-const MUTED = '#a7afbd';
-const RED = '#d0202f';
-// The end of the one rectangle that fills a card. renderCard swaps it for a see-through one.
-const SOLID_BACKGROUND = `fill="${BACKGROUND}"/>`;
+// The page and the PNG export read these from here.
+export { CARD_FONT, escapeXml } from './parts.js';
 
 // How much of the card's dark background stays when a video plays behind it:
 // enough to keep the words readable, little enough to see the video.
@@ -37,7 +32,10 @@ const PLATE = 0.7;
 export function renderCard({ match, card, size, clear = false }) {
   const draw = { intro: introCard, goal: goalCard, red: redCard, fulltime: fullTimeCard }[card.type];
   if (!draw) throw new Error(`Unknown kind of card: ${card.type}`);
-  const svg = draw({ match, card, size, clear });
+  // A goal, red or full-time card may have another layout chosen. A card without one, or with
+  // one this version does not know, is the classic card, drawn exactly as before.
+  const other = card.type === 'intro' ? null : layoutFor(card.layout);
+  const svg = other ? other({ match, card, size }) : draw({ match, card, size, clear });
   return clear ? svg.replace(SOLID_BACKGROUND, `fill="${BACKGROUND}" fill-opacity="${SEE_THROUGH}"/>`) : svg;
 }
 
@@ -158,15 +156,6 @@ function canvas(size) {
       };
 }
 
-function frame(c, parts) {
-  return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${c.w} ${c.h}" width="${c.w}" height="${c.h}" font-family="'${CARD_FONT}', 'Liberation Sans', Arial, sans-serif" font-weight="bold">`,
-    `<rect width="${c.w}" height="${c.h}" ${SOLID_BACKGROUND}`,
-    ...parts.filter(Boolean),
-    '</svg>',
-  ].join('');
-}
-
 /** Competition and date, small, at the top. */
 function header(c, match) {
   const text = [match.competition, match.date].filter(Boolean).join('  ·  ');
@@ -221,53 +210,4 @@ function team(c, match, side, { x, y, anchor, width, lit }) {
     text(name, { x, y, size, anchor, fill }),
     `<rect x="${round(barX)}" y="${round(y + size * 0.28)}" width="${round(barWidth)}" height="${round(c.barH)}" fill="${safeColour(match.colours[side])}"/>`,
   ].join('');
-}
-
-/**
- * A team's icon in a square of `size` centred on x, y. Without an icon, a
- * disc of the team's colour with the first letter of its name stands in, so
- * the card is whole either way.
- */
-function icon(c, match, side, { x, y, size }) {
-  const picture = match.icons?.[side];
-  if (isIcon(picture)) {
-    return `<image href="${picture}" x="${round(x - size / 2)}" y="${round(y - size / 2)}" width="${round(size)}" height="${round(size)}" preserveAspectRatio="xMidYMid meet"/>`;
-  }
-  const fill = safeColour(match.colours[side]);
-  const letter = teamName(match, side).trim().charAt(0).toUpperCase();
-  return [
-    `<circle cx="${round(x)}" cy="${round(y)}" r="${round(size / 2)}" fill="${fill}"/>`,
-    text(letter, { x, y: y + size * 0.18, size: size * 0.5, anchor: 'middle', fill: readableOn(fill) }),
-  ].join('');
-}
-
-/** A centred line of text, made smaller if it would not fit. */
-function line(c, value, { x = c.w / 2, y, size, fill, anchor = 'middle', maxWidth = c.w - 2 * c.margin }) {
-  if (!value) return '';
-  return text(value, { x, y, size: fitSize(value, size, maxWidth), anchor, fill });
-}
-
-function text(value, { x, y, size, anchor, fill }) {
-  return `<text x="${round(x)}" y="${round(y)}" font-size="${round(size)}" text-anchor="${anchor}" fill="${fill}">${escapeXml(value)}</text>`;
-}
-
-// --- Small helpers --------------------------------------------------------------
-
-const teamName = (match, side) => (side === 'away' ? match.away : match.home) || (side === 'away' ? 'Away' : 'Home');
-const round = (n) => Math.round(n * 10) / 10;
-
-/** Names are typed by a person, so anything with a meaning in SVG is escaped. */
-export function escapeXml(value) {
-  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-/** A colour is used only if it is a plain #rrggbb value. */
-function safeColour(colour) {
-  return /^#[0-9a-fA-F]{6}$/.test(colour ?? '') ? colour : '#5b6475';
-}
-
-/** Black or white, whichever is easier to read on `colour`. */
-function readableOn(colour) {
-  const [r, g, b] = [1, 3, 5].map((i) => parseInt(colour.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.4 ? '#101216' : '#ffffff';
 }

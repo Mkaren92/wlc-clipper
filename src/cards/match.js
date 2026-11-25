@@ -8,7 +8,7 @@
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { CARD_SIZES, GOAL_TYPES, goalType, isIcon, minuteLabel, RED_TYPES } from './config.js';
+import { CARD_LAYOUTS, CARD_SIZES, GOAL_TYPES, goalType, isIcon, minuteLabel, RED_TYPES } from './config.js';
 
 const ID = /^[a-z0-9][a-z0-9-]{0,79}$/;
 const id = z.string().regex(ID, 'an id is lower-case letters, digits and dashes');
@@ -22,6 +22,10 @@ const side = z.enum(['home', 'away']);
 // A club icon: nothing, or a small PNG as text (see ICON in config.js).
 const icon = z.string().refine((value) => value === '' || isIcon(value), 'an icon is a PNG picture of modest size').default('');
 
+// How the card is laid out. A card saved before layouts existed has none and stays "classic".
+const layout = z.enum(CARD_LAYOUTS.map((known) => known.id)).default('classic');
+
+// The intro card has one layout, so it has no such field.
 const introCard = z.strictObject({
   id, type: z.literal('intro'),
   // With the score off, the card shows "V" between the two clubs.
@@ -31,16 +35,16 @@ const goalCard = z.strictObject({
   id, type: z.literal('goal'), team: side, scorer: name, assist: name.default(''),
   minute, added: added.default(null),
   goalType: z.enum(GOAL_TYPES.map((type) => type.id)),
-  homeScore: score, awayScore: score,
+  homeScore: score, awayScore: score, layout,
 });
 const redCard = z.strictObject({
   id, type: z.literal('red'), team: side, player: name, minute, added: added.default(null),
   redType: z.enum(RED_TYPES.map((type) => type.id)),
-  showScore: z.boolean().default(false), homeScore: score.default(0), awayScore: score.default(0),
+  showScore: z.boolean().default(false), homeScore: score.default(0), awayScore: score.default(0), layout,
 });
 const fullTimeCard = z.strictObject({
   id, type: z.literal('fulltime'), homeScore: score, awayScore: score,
-  homeScorers: z.array(name).max(12).default([]), awayScorers: z.array(name).max(12).default([]),
+  homeScorers: z.array(name).max(12).default([]), awayScorers: z.array(name).max(12).default([]), layout,
 });
 
 export const matchSchema = z.strictObject({

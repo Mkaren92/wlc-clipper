@@ -17,6 +17,20 @@ export const RED_TYPES = [
 ];
 
 /**
+ * The layouts a goal, red or full-time card can be drawn in. Every one shows the same fields;
+ * only where they stand differs, and the last two also show the clubs' icons. The intro card
+ * has one layout. A card saved before these existed has none and is drawn as "classic".
+ */
+export const CARD_LAYOUTS = [
+  { id: 'classic', label: 'Classic' },
+  { id: 'side', label: 'Side panel' },
+  { id: 'centre', label: 'Centre' },
+  { id: 'strip', label: 'Lower strip' },
+  { id: 'crests', label: 'Both logos' },
+  { id: 'badge', label: 'Team logo' },
+];
+
+/**
  * A club icon as it is stored with a match: a small PNG written out as text.
  * The page shrinks whatever picture the owner chooses to this before saving,
  * so nothing but a plain PNG of modest size ever reaches a card.

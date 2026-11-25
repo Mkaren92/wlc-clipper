@@ -106,18 +106,27 @@ These dashboard pages are for "goal reaction" compilations: streamers' reaction 
 ### Cards
 
 1. Press "New match". Choose a league and then the home and away club from your list (see [Leagues and clubs](#leagues-and-clubs)): that fills in each team's name, colour and logo, and the competition. Or type the two teams and pick their colours yourself. You can change anything for this match afterwards, and optionally add a date. These are shared by every card of the match.
-2. Optionally add a club icon for each team: a picture from your own computer, which is shrunk and kept with the match. The tool does not fetch crests. Icons are shown on the intro card.
+2. Optionally add a club icon for each team: a picture from your own computer, which is shrunk and kept with the match. The tool does not fetch crests. Icons are shown on the intro card, and on the other cards when you choose one of the two layouts with logos (step 4).
 3. Add cards:
    - **Intro:** the opening card. It shows both clubs with their icons and names, and "V" between them, or the score if you switch it on. A team without an icon gets its first letter on its colour.
    - **Goal:** scoring team, scorer, assist, minute (with added time, such as 45+2), goal type, and the score after the goal. The assist is left out for a penalty and an own goal.
    - **Red card:** player, team, minute, straight red or second yellow, and optionally the score.
    - **Full time:** the final score and the scorers. The lists are filled in from the goal cards; you can edit them, and "Fill from the goal cards" refreshes them.
-4. The preview on the right updates as you type, in either size.
-5. "Save match and cards" stores the match and a picture of each card in both sizes, which is what a compilation uses. "Export PNG" downloads one card at 1920×1080 or 1080×1920.
+4. Choose a layout for a goal, red or full-time card. Under the card's fields, "Layout" shows that card drawn six ways; click one:
+   - **Classic:** the title on a band of the team's colour across the card. This is how every card looked before layouts existed.
+   - **Side panel:** the title and the minute on a block of the colour at the left (at the top of the tall card), the score as two rows.
+   - **Centre:** everything in the middle, the title and the minute in a rounded block, the name very large.
+   - **Lower strip:** everything in bars in the lower part of the picture, like a broadcast caption, so a video behind the card shows above it.
+   - **Both logos:** the two clubs' icons with the score between them (under them on the tall card). A red card without the score shows only the player's club.
+   - **Team logo:** the icon of the club the card is about, large, with the title and the name beside it, and the score on a plate with both icons, small. Full time is a row for each club.
+
+   Every layout shows the same things; only the place of each differs, and the last two add the club icons from the match details (a club without an icon gets its first letter on its colour). The layout is chosen for each card: "Use this layout for every card of this match" copies it to the others, and a new card starts with the layout of the last one. The intro card has one layout. A card saved before layouts existed stays Classic until you choose another.
+5. The preview on the right updates as you type, in either size.
+6. "Save match and cards" stores the match and a picture of each card in both sizes, which is what a compilation uses. "Export PNG" downloads one card at 1920×1080 or 1080×1920.
 
 Every match and every card has a trash icon. It asks once, then deletes for good. Deleting a card of a saved match takes effect straight away, without pressing Save; deleting a match removes its cards and their pictures with it.
 
-Cards are text with team colours as plain blocks. The only pictures are the club icons you add yourself, on the intro card: no league logos or photos, and nothing fetched. Club crests belong to the clubs, so whether to use one is your call. Cards are drawn with the font bundled in `assets/fonts`, so they look the same on every machine.
+Cards are text with team colours as plain blocks. The only pictures are the club icons you add yourself, on the intro card and in the "Both logos" and "Team logo" layouts: no league logos or photos, and nothing fetched. After changing a card's layout, press "Save match and cards" and generate the compilation again; that match's cards are made again and the videos are reused. Club crests belong to the clubs, so whether to use one is your call. Cards are drawn with the font bundled in `assets/fonts`, so they look the same on every machine.
 
 To add a goal type, add a line to `GOAL_TYPES` in `src/cards/config.js`.
 

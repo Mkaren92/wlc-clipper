@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated 2026-11-24. Update this file when something here changes.
+Last updated 2026-11-25. Update this file when something here changes.
 
 ## Built
 
@@ -17,6 +17,7 @@ Version 1 of the spec is complete: all three "evenings".
 - Sounds under the cards of a compilation, each card shown as long as its sound: the owner's own files from `sounds/` (the three sounds the tool made were removed on 2026-11-24, at the owner's word)
 - An intro card for a match: both clubs with their icons and names and "V" or the score, with the owner's intro sound under it
 - A video behind a card: a video file in `sounds/` gives the card its sound and a moving background
+- Six layouts for a goal, red and full-time card (2026-11-25): Classic, Side panel, Centre, Lower strip, and two with the clubs' icons, Both logos and Team logo; every layout shows the same fields, chosen per card on the Cards page, with saved cards staying Classic
 - A second video beside a reaction in a compilation: split screen while it runs, then the reaction full screen
 - Sync marks on the Combine page (2026-11-24): mark the goal in one video and the reaction in the other, and the two meet on the same frame; the reaction's start is locked to the marks
 - A Combine page: two videos side by side with a live preview to line them up by eye, a side, a start and a shown part for each, a main video that takes the whole screen at the end, and the result offered to compilations
@@ -47,7 +48,7 @@ Version 1 of the spec is complete: all three "evenings".
 - Clips from a stream's chat are 1 minute (30 s before and after) since 2026-11-22, and "Skip parts already suggested" gives new parts when asking a stream again
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-590 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
+596 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
 
 ## Waiting on the owner
 
@@ -106,6 +107,7 @@ Found in a review on 2026-11-22. They are in the pages, which need driving in a 
 - Which player showed the fetched part out of step. The file is now the same for every player, but the owner has not yet confirmed it plays in step.
 - A compilation saved with one of the removed tool-made sounds, opened in a browser: the page offers "A sound the tool made (removed): choose another"; that was built and not looked at, since none of the owner's compilations has one.
 - Whether the owner meant the supplied intro video to play behind the intro card. It was built that way on a reading of one sentence.
+- The card layouts in a finished compilation, and with real club icons. Each layout was looked at as a picture and saved from the Cards page with made-up icons; no compilation was generated with one, and none was put over a video. Which layout looks best is the owner's call.
 - The colours in the starting list of clubs. Which clubs are in La Liga and the Premier League was checked for 2026–27; the colours are still from memory.
 - The redesigned dashboard in long use. The owner looked at it and accepted it on 2026-11-19; before that it was looked at in screenshots from a hidden Chrome and its main actions were run by script. A real mouse drag of the crop on the new layout, a screen reader and browsers other than Chrome were not tried.
 - The wider crop (`--crop-width`) on a clip the owner has judged. One frame from a real video was looked at, and one cut was made from the page.
@@ -127,6 +129,7 @@ Nothing is decided. Ideas the owner has been offered:
 - Covering swear words in `post.txt` titles too, where YouTube is strictest; and turning the cover or the muffle on or off for a clip that is already made
 - On the Combine page: a delay before the second video comes in, and removing the older "Show another video beside it" option from Compilations if the page replaces it
 - A credits card at the end of a compilation, listing each streamer with their picture
+- A layout chosen once for a whole match or for every new match, if choosing it per card proves tedious; and a dark plate behind the small grey lines of a card that lies over a video
 - A faster encoder setting for compilations (`superfast`: about two thirds of the time, the same quality, twice the file size)
 - A time limit on a fetch, as a second safety beside the Stop button and the refusal of live streams
 - Ending the dashboard's running jobs when it is stopped with Ctrl+C. On 2026-11-21 a restart during a slow fetch left its ffmpeg running, holding a deleted 276 MB file, until it was ended by hand
