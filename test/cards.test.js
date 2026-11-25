@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readLibrary, removeClub, removeLeague, saveClub, saveLeague, startingLibrary } from '../src/cards/clubs.js';
-import { CARD_LAYOUTS, GOAL_TYPES, isIcon, minuteLabel } from '../src/cards/config.js';
+import { GOAL_TYPES, isIcon, minuteLabel } from '../src/cards/config.js';
 import { deleteMatch, listMatches, newMatchId, parseMatch, readMatch, saveCardPng, saveMatch, scorersFromGoals } from '../src/cards/match.js';
 import { fitSize, textWidth } from '../src/cards/measure.js';
 import { renderCard } from '../src/cards/templates.js';
@@ -79,8 +79,6 @@ describe('card templates', () => {
     expect((withIcons.match(/<image /g) ?? []).length).toBe(1);
     expect(withIcons).toContain(`<image href="${ICON}"`);
     expect((withIcons.match(/<circle/g) ?? []).length).toBe(1);
-    // Other cards stay as they were: icons are for the intro card.
-    expect(renderCard({ match: { ...match, icons: { home: ICON, away: ICON } }, card: goal, size: 'landscape' })).not.toContain('<image');
   });
 
   it('draws nothing as an icon that is not a plain PNG written as text', () => {
@@ -101,7 +99,7 @@ describe('card templates', () => {
       const clear = renderCard({ match, card, size: 'landscape', clear: true });
       expect(solid).not.toContain('fill-opacity');
       // The intro card has one more see-through thing: the plate behind its score.
-      const plates = clear.match(/<rect [^>]*rx="[^>]*><\/rect>/g) ?? [];
+      const plates = clear.match(/<rect [^>]*fill-opacity="[^>]*><\/rect>/g) ?? [];
       expect(plates.length).toBe(card.type === 'intro' ? 1 : 0);
       expect((clear.match(/fill-opacity="0\.\d+"/g) ?? []).length).toBe(1 + plates.length);
       // Nothing else differs: the words and where they sit are the same.
@@ -128,157 +126,120 @@ describe('card templates', () => {
     }
   });
 
-  const OTHER_LAYOUTS = CARD_LAYOUTS.map((known) => known.id).filter((id) => id !== 'classic');
-  // The two that also show the clubs' icons (asked for on 2026-11-25).
-  const LOGO_LAYOUTS = ['crests', 'badge'];
   // Two icons that differ, so a test can tell whose is drawn: the one clear pixel, and the same file with a spare byte of padding.
   const AWAY_ICON = ICON.replace('AAAABJRU5ErkJggg==', 'AAAABJRU5ErkJgggAA');
   const withIcons = { ...match, icons: { home: ICON, away: AWAY_ICON } };
   const pictures = (svg) => [...svg.matchAll(/<image href="([^"]*)" x="([\d.-]+)" y="([\d.-]+)" width="([\d.]+)" height="([\d.]+)"/g)]
     .map(([, href, x, y, width, height]) => ({ href, x: Number(x), y: Number(y), width: Number(width), height: Number(height) }));
+  const SIZES = [['landscape', 1920, 1080], ['portrait', 1080, 1920]];
 
-  it('offers five more layouts for a goal, red and full-time card, and each shows what the classic one shows', () => {
-    expect(CARD_LAYOUTS.map((known) => known.id)).toEqual(['classic', 'side', 'centre', 'strip', 'crests', 'badge']);
-    expect(OTHER_LAYOUTS.filter((id) => !LOGO_LAYOUTS.includes(id))).toEqual(['side', 'centre', 'strip']);
-    // What each card says. A layout may write the score as "1 – 0" or as a number beside each team.
+  it('says the same things on the wide and the tall card', () => {
     const says = [
-      [goal, ['CHAMPIONS LEAGUE  ·  19 NOV 2026', 'GOAL', '45+2&#39;', 'Robert Lewandowski', 'Header  ·  Assist: Lamine Yamal', 'FC BARCELONA', 'MANCHESTER UNITED'], [1, 0]],
-      [{ ...goal, goalType: 'own-goal' }, ['OWN GOAL', 'Own goal', 'Robert Lewandowski'], [1, 0]],
-      [red, ['RED CARD', '67&#39;', 'Lisandro Martínez', 'Manchester United  ·  Second yellow', 'FC BARCELONA', 'MANCHESTER UNITED'], [2, 1]],
-      [fullTime, ['FULL TIME', 'FC BARCELONA', 'MANCHESTER UNITED', 'Lewandowski 12&#39;, 45+2&#39;', 'Fernandes 60&#39; (pen)'], [3, 1]],
+      [goal, ['CHAMPIONS LEAGUE  ·  19 NOV 2026', 'GOAL', '45+2&#39;', 'Robert Lewandowski', 'Header  ·  Assist: Lamine Yamal', 'FC BARCELONA', '1 – 0', 'MANCHESTER UNITED']],
+      [{ ...goal, goalType: 'own-goal' }, ['OWN GOAL', 'Own goal', 'Robert Lewandowski', '1 – 0']],
+      [red, ['RED CARD', '67&#39;', 'Lisandro Martínez', 'Manchester United  ·  Second yellow', 'FC BARCELONA', '2 – 1', 'MANCHESTER UNITED']],
+      [fullTime, ['FULL TIME', 'FC BARCELONA', '3 – 1', 'MANCHESTER UNITED', 'Lewandowski 12&#39;, 45+2&#39;', 'Fernandes 60&#39; (pen)']],
     ];
-    for (const layout of OTHER_LAYOUTS) {
-      for (const size of ['landscape', 'portrait']) {
-        for (const [card, words, [home, away]] of says) {
-          const svg = renderCard({ match, card: { ...card, layout }, size });
-          expect(svg).not.toBe(renderCard({ match, card, size }));
-          const shown = texts(svg);
-          // A title of two words may stand on two lines, so look through the words as they are read.
-          const read = shown.join(' ');
-          for (const word of words) expect(read.includes(word), `${layout} ${size} ${card.type}: ${word}`).toBe(true);
-          const together = shown.includes(`${home} – ${away}`);
-          const apart = shown.includes(String(home)) && shown.includes(String(away));
-          expect(together || apart, `${layout} ${size} ${card.type}: the score`).toBe(true);
-          // Nothing but plain shapes and words: no pictures, no shared definitions that could clash on a page.
-          expect(svg).not.toMatch(/<image|<defs|<clipPath|Gradient| id="/);
-          // A club's icon is drawn only by the two logo layouts; the others stay words and colour whatever the match holds.
-          const drawn = pictures(renderCard({ match: withIcons, card: { ...card, layout }, size }));
-          expect(drawn.length > 0, `${layout} ${size} ${card.type}: icons`).toBe(LOGO_LAYOUTS.includes(layout));
+    for (const [size] of SIZES) {
+      for (const [card, words] of says) expect(texts(renderCard({ match, card, size })), `${size} ${card.type}`).toEqual(expect.arrayContaining(words));
+      expect(renderCard({ match, card: { ...goal, goalType: 'penalty' }, size })).not.toContain('Assist');
+      // A red card without the score names one club, the player's, and shows no number but the minute.
+      const quiet = texts(renderCard({ match, card: { ...red, showScore: false }, size }));
+      expect(quiet).not.toContain('2 – 1');
+      expect(quiet).not.toContain('FC BARCELONA');
+    }
+  });
+
+  it('shows both clubs\' icons on a goal, red and full-time card: only the owner\'s pictures, and a letter on the team\'s colour without one', () => {
+    for (const [size, width, height] of SIZES) {
+      for (const card of [goal, { ...goal, team: 'away', goalType: 'own-goal' }, red, { ...red, showScore: false }, fullTime]) {
+        const where = `${size} ${card.type}`;
+        const svg = renderCard({ match: withIcons, card, size });
+        const drawn = pictures(svg);
+        // Every picture in the card is one of the match's two icons, whole and inside the card, and no larger than the intro card draws it.
+        expect((svg.match(/<image /g) ?? []).length, where).toBe(drawn.length);
+        for (const picture of drawn) {
+          expect([ICON, AWAY_ICON], where).toContain(picture.href);
+          expect(picture.x, where).toBeGreaterThanOrEqual(0);
+          expect(picture.y, where).toBeGreaterThanOrEqual(0);
+          expect(picture.x + picture.width, where).toBeLessThanOrEqual(width);
+          expect(picture.y + picture.height, where).toBeLessThanOrEqual(height);
+          expect(picture.width, where).toBeLessThanOrEqual(400);
+          expect(picture.height).toBe(picture.width);
         }
-        // The same choices as the classic card: no assist for a penalty, no score on a red card unless asked.
-        expect(renderCard({ match, card: { ...goal, goalType: 'penalty', layout }, size })).not.toContain('Assist');
-        const quiet = texts(renderCard({ match, card: { ...red, showScore: false, layout }, size }));
-        expect(quiet).not.toContain('2 – 1');
-        expect(quiet).not.toContain('2');
+        // Nothing that could clash when several cards are put into one page.
+        expect(svg).not.toMatch(/<defs|<clipPath|Gradient| id="/);
+        // Without the score there is no second club: only the sent-off player's.
+        const quiet = card.type === 'red' && !card.showScore;
+        expect(drawn.map((picture) => picture.href), where).toEqual(quiet ? [AWAY_ICON] : [ICON, AWAY_ICON]);
+        // Without an icon the card is whole: a disc of the team's colour with its first letter, as on the intro card.
+        const plain = renderCard({ match, card, size });
+        expect(plain, where).not.toContain('<image');
+        expect((plain.match(/<circle /g) ?? []).length, where).toBe(drawn.length);
+        const one = renderCard({ match: { ...match, icons: { home: '', away: AWAY_ICON } }, card, size });
+        expect(pictures(one).every((picture) => picture.href === AWAY_ICON), where).toBe(true);
+        // Something that is not a plain PNG written as text is never drawn.
+        expect(renderCard({ match: { ...match, icons: { home: 'https://example.com/crest.png', away: 'data:image/svg+xml;base64,AAAA' } }, card, size }), where).toBe(plain);
       }
     }
   });
 
-  it('shows the clubs\' icons in the two logo layouts: only the owner\'s pictures, and a letter on the team\'s colour without one', () => {
-    for (const layout of LOGO_LAYOUTS) {
-      for (const [size, width, height] of [['landscape', 1920, 1080], ['portrait', 1080, 1920]]) {
-        for (const card of [goal, { ...goal, team: 'away', goalType: 'own-goal' }, red, { ...red, showScore: false }, fullTime]) {
-          const where = `${layout} ${size} ${card.type}`;
-          const svg = renderCard({ match: withIcons, card: { ...card, layout }, size });
-          const drawn = pictures(svg);
-          // Every picture in the card is one of the match's two icons, whole and inside the card, and no larger than the intro card draws it.
-          expect((svg.match(/<image /g) ?? []).length, where).toBe(drawn.length);
-          for (const picture of drawn) {
-            expect([ICON, AWAY_ICON], where).toContain(picture.href);
-            expect(picture.x, where).toBeGreaterThanOrEqual(0);
-            expect(picture.y, where).toBeGreaterThanOrEqual(0);
-            expect(picture.x + picture.width, where).toBeLessThanOrEqual(width);
-            expect(picture.y + picture.height, where).toBeLessThanOrEqual(height);
-            expect(picture.width, where).toBeLessThanOrEqual(400);
-            expect(picture.height).toBe(picture.width);
-          }
-          expect(svg).not.toMatch(/<defs|<clipPath|Gradient| id="/);
-          const shown = new Set(drawn.map((picture) => picture.href));
-          if (card.type === 'red' && !card.showScore) {
-            // No score, so no second club: only the sent-off player's.
-            expect([...shown], where).toEqual([AWAY_ICON]);
-          } else {
-            expect(shown, where).toEqual(new Set([ICON, AWAY_ICON]));
-          }
-          // The large icon of the "badge" layout is the club the card is about; an own goal is the club given the goal.
-          if (layout === 'badge' && card.type !== 'fulltime') {
-            const largest = drawn.reduce((a, b) => (b.width > a.width ? b : a));
-            expect(largest.href, where).toBe(card.team === 'home' ? ICON : AWAY_ICON);
-          }
-          // Without an icon the card is whole: a disc of the team's colour with its first letter, as on the intro card.
-          const plain = renderCard({ match, card: { ...card, layout }, size });
-          expect(plain, where).not.toContain('<image');
-          expect((plain.match(/<circle /g) ?? []).length, where).toBe(drawn.length);
-          const one = renderCard({ match: { ...match, icons: { home: '', away: AWAY_ICON } }, card: { ...card, layout }, size });
-          expect(pictures(one).every((picture) => picture.href === AWAY_ICON), where).toBe(true);
-          // Something that is not a plain PNG written as text is never drawn.
-          expect(renderCard({ match: { ...match, icons: { home: 'https://example.com/crest.png', away: 'data:image/svg+xml;base64,AAAA' } }, card: { ...card, layout }, size }), where).toBe(plain);
-        }
-      }
-    }
-  });
-
-  it('draws a card with no layout, with "classic" and with one it does not know as the classic card', () => {
-    for (const card of [goal, red, fullTime]) {
-      const classic = renderCard({ match, card, size: 'landscape' });
-      expect(renderCard({ match, card: { ...card, layout: 'classic' }, size: 'landscape' })).toBe(classic);
-      expect(renderCard({ match, card: { ...card, layout: 'from-a-newer-version' }, size: 'landscape' })).toBe(classic);
-      expect(renderCard({ match, card: { ...card, layout: 'constructor' }, size: 'landscape' })).toBe(classic);
-    }
-    // The intro card has one layout, whatever it is handed.
-    expect(renderCard({ match, card: { ...intro, layout: 'side' }, size: 'landscape' })).toBe(renderCard({ match, card: intro, size: 'landscape' }));
-  });
-
-  it('still draws the classic cards and the intro card exactly as before the other layouts existed', () => {
-    // Recorded on 2026-11-25 from the code before layouts. Saved matches are redrawn from these
-    // functions every time they are saved, so a change here changes every card the owner has.
-    // Renew it only when the classic card is changed on purpose.
+  it('draws the intro card exactly as recorded', () => {
+    // Recorded on 2026-11-25, after the cards took the colours of the owner's channel artwork.
+    // Before that change the fingerprint was the one of the commit before the goal, red and
+    // full-time cards were redrawn (4e4aa22), and with every colour taken out the intro card was
+    // still the same as then: only colours had changed. Renew it only when the intro card is
+    // changed on purpose: saved matches are redrawn from these functions every time they are saved.
     const all = [];
-    for (const card of [intro, { ...intro, showScore: true, homeScore: 3, awayScore: 1 }, goal, { ...goal, goalType: 'own-goal' }, red, { ...red, showScore: false }, fullTime]) {
-      for (const size of ['landscape', 'portrait']) for (const clear of [false, true]) all.push(renderCard({ match, card, size, clear }));
-    }
-    expect(createHash('sha256').update(all.join('\n')).digest('hex')).toBe('432d6f5f164d8ea220c07e3c11469ac799fb50760c49f245a37d4541beade064');
-  });
-
-  it('lays the other layouts over a video too: a see-through background and nothing else changed', () => {
-    for (const layout of OTHER_LAYOUTS) {
-      for (const card of [goal, red, fullTime]) {
-        const solid = renderCard({ match: withIcons, card: { ...card, layout }, size: 'portrait' });
-        const clear = renderCard({ match: withIcons, card: { ...card, layout }, size: 'portrait', clear: true });
-        expect(clear).toContain('<rect width="1080" height="1920" fill="#12151b" fill-opacity="0.45"/>');
-        expect(clear.replace(' fill-opacity="0.45"', '')).toBe(solid);
+    for (const m of [match, { ...match, icons: { home: ICON, away: '' } }]) {
+      for (const card of [intro, { ...intro, showScore: true, homeScore: 3, awayScore: 1 }]) {
+        for (const [size] of SIZES) for (const clear of [false, true]) all.push(renderCard({ match: m, card, size, clear }));
       }
     }
+    expect(createHash('sha256').update(all.join('\n')).digest('hex')).toBe('ad9a6fee0ac4465dfb31fe8170fa92cda1092d62869a9dac80840169fbf026cd');
   });
 
-  it('keeps every line of the other layouts inside the picture, however long the names', () => {
+  it('uses the colours of the owner\'s channel: its dark green behind every card, its lime for what belongs to neither team', () => {
+    for (const card of [intro, goal, red, fullTime]) {
+      expect(renderCard({ match, card, size: 'landscape' })).toContain('<rect width="1920" height="1080" fill="#0a1a14"/>');
+      expect(renderCard({ match, card, size: 'portrait', clear: true })).toContain('<rect width="1080" height="1920" fill="#0a1a14" fill-opacity="0.45"/>');
+    }
+    // "FULL TIME" stands on the lime in the dark green; a goal on its team's colour and a red card on red, as before.
+    expect(renderCard({ match, card: fullTime, size: 'landscape' })).toMatch(/fill="#c6ff3d"><\/rect><text [^>]*fill="#0a1a14">FULL TIME</);
+    expect(renderCard({ match, card: goal, size: 'landscape' })).toMatch(/fill="#a50044"><\/rect><text [^>]*fill="#ffffff">GOAL</);
+    expect(renderCard({ match, card: red, size: 'landscape' })).toMatch(/fill="#d0202f"><\/rect><text [^>]*fill="#ffffff">RED CARD</);
+    expect(renderCard({ match, card: intro, size: 'landscape' })).toMatch(/fill="#c6ff3d">V</);
+  });
+
+  it('keeps every line, icon and disc inside the picture, however long the names', () => {
     const long = { ...match, home: 'Borussia Mönchengladbach Football Club Of The Lower Rhine', away: 'W'.repeat(80) };
     const cards = [
       { ...goal, scorer: 'W'.repeat(80), assist: 'W'.repeat(80), minute: 200, added: 60, homeScore: 99, awayScore: 99 },
+      { ...goal, goalType: 'own-goal', minute: 200, added: 60 },
       { ...red, player: 'W'.repeat(80), homeScore: 99, awayScore: 99 },
+      { ...red, showScore: false },
       { ...fullTime, homeScore: 99, awayScore: 99, homeScorers: Array(12).fill('W'.repeat(80)), awayScorers: Array(12).fill('W'.repeat(80)) },
     ];
-    for (const layout of OTHER_LAYOUTS) {
-      for (const [size, width, height] of [['landscape', 1920, 1080], ['portrait', 1080, 1920]]) {
-        for (const card of cards) {
-          const svg = renderCard({ match: long, card: { ...card, layout }, size });
-          for (const [, x, y, fontSize, anchor, words] of svg.matchAll(/<text x="([\d.-]+)" y="([\d.-]+)" font-size="([\d.]+)" text-anchor="(\w+)" fill="[^"]*"(?: fill-opacity="[^"]*")?>([^<]*)<\/text>/g)) {
-            const wide = textWidth(words.replace(/&#39;/g, "'").replace(/&amp;/g, '&'), Number(fontSize));
-            const left = anchor === 'start' ? Number(x) : anchor === 'end' ? Number(x) - wide : Number(x) - wide / 2;
-            const where = `${layout} ${size} ${card.type}: "${words.slice(0, 30)}"`;
-            expect(left, where).toBeGreaterThanOrEqual(-1);
-            expect(left + wide, where).toBeLessThanOrEqual(width + 1);
-            expect(Number(y), where).toBeLessThanOrEqual(height);
-            expect(Number(y) - 0.72 * Number(fontSize), where).toBeGreaterThanOrEqual(0);
-          }
-          // The discs that stand in for an icon stay inside too.
-          for (const [, cx, cy, r] of svg.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)" r="([\d.]+)"/g)) {
-            const where = `${layout} ${size} ${card.type}: a disc`;
-            expect(Number(cx) - Number(r), where).toBeGreaterThanOrEqual(0);
-            expect(Number(cx) + Number(r), where).toBeLessThanOrEqual(width);
-            expect(Number(cy) - Number(r), where).toBeGreaterThanOrEqual(0);
-            expect(Number(cy) + Number(r), where).toBeLessThanOrEqual(height);
-          }
+    for (const [size, width, height] of SIZES) {
+      for (const card of cards) {
+        const svg = renderCard({ match: long, card, size });
+        const lines = [...svg.matchAll(/<text x="([\d.-]+)" y="([\d.-]+)" font-size="([\d.]+)" text-anchor="(\w+)" fill="[^"]*">([^<]*)<\/text>/g)];
+        expect(lines.length).toBe((svg.match(/<text /g) ?? []).length);
+        for (const [, x, y, fontSize, anchor, words] of lines) {
+          const wide = textWidth(words.replace(/&#39;/g, "'").replace(/&amp;/g, '&'), Number(fontSize));
+          const left = anchor === 'start' ? Number(x) : anchor === 'end' ? Number(x) - wide : Number(x) - wide / 2;
+          const where = `${size} ${card.type}: "${words.slice(0, 30)}"`;
+          expect(left, where).toBeGreaterThanOrEqual(-1);
+          expect(left + wide, where).toBeLessThanOrEqual(width + 1);
+          expect(Number(y), where).toBeLessThanOrEqual(height);
+          expect(Number(y) - 0.72 * Number(fontSize), where).toBeGreaterThanOrEqual(0);
+        }
+        for (const [, cx, cy, r] of svg.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)" r="([\d.]+)"/g)) {
+          const where = `${size} ${card.type}: a disc`;
+          expect(Number(cx) - Number(r), where).toBeGreaterThanOrEqual(0);
+          expect(Number(cx) + Number(r), where).toBeLessThanOrEqual(width);
+          expect(Number(cy) - Number(r), where).toBeGreaterThanOrEqual(0);
+          expect(Number(cy) + Number(r), where).toBeLessThanOrEqual(height);
         }
       }
     }
@@ -351,11 +312,12 @@ describe('saved matches', () => {
     expect(() => parseMatch({ ...match, cards: [goal, { ...red, id: 'g1' }] })).toThrow(/share the id/);
     expect(() => parseMatch({ ...match, cards: [{ ...goal, goalType: 'bicycle' }] })).toThrow(/not valid/);
     expect(() => parseMatch({ ...match, id: '../x' })).toThrow(/not valid/);
-    // A card saved before layouts existed has none and stays classic; the intro card has no such choice.
-    expect(parseMatch({ ...match, cards: [goal, red, fullTime] }).cards.map((card) => card.layout)).toEqual(['classic', 'classic', 'classic']);
-    expect(parseMatch({ ...match, cards: [{ ...goal, layout: 'strip' }] }).cards[0].layout).toBe('strip');
-    expect(() => parseMatch({ ...match, cards: [{ ...goal, layout: 'sideways' }] })).toThrow(/not valid/);
-    expect(() => parseMatch({ ...match, cards: [{ ...intro, layout: 'side' }] })).toThrow(/not valid/);
+    // For one day (2026-11-25) a card was saved with a layout. Such a match still opens, and the field is gone from what is read.
+    const old = parseMatch({ ...match, cards: [{ ...goal, layout: 'centre' }, { ...red, layout: 'classic' }, { ...fullTime, layout: 'anything at all' }, intro] });
+    expect(old.cards.map((card) => 'layout' in card)).toEqual([false, false, false, false]);
+    expect(old.cards[0]).toEqual(parseMatch({ ...match, cards: [goal] }).cards[0]);
+    // Any other field nobody knows is still an error.
+    expect(() => parseMatch({ ...match, cards: [{ ...goal, colour: 'pink' }] })).toThrow(/not valid/);
     // A match saved before icons existed has none, and an intro card needs nothing but its id.
     expect(parseMatch({ ...match, cards: [{ id: 'i1', type: 'intro' }] })).toMatchObject({ icons: { home: '', away: '' }, cards: [intro] });
     expect(parseMatch({ ...match, icons: { home: ICON, away: '' } }).icons.home).toBe(ICON);

@@ -41,7 +41,7 @@ If the project is in another folder, `cd` there instead. Then open http://127.0.
 - **A new intro video and a new goal sound arrive by sync** (`sounds/intro.mp4`, `sounds/goal.wav`). The home PC's own older files of those names are moved to `data/backups/sync/`.
 - **The result player on the Compilations page has no black bars** beside the picture any more.
 - **The three sounds "made by the tool" are gone** from a card's sound list. Cards use your own files in `sounds/`, which sync.
-- **Goal, red and full-time cards have six layouts** (2026-11-25). On the **Cards** page, under a card's fields, "Layout" shows the card drawn six ways; two of them show the club icons. Cards already saved stay as they were ("Classic"). Matches do not sync, so a layout chosen on the office PC is not on the home PC: choose it there too, press **Save match and cards**, and generate the compilation again.
+- **The cards look different** (2026-11-25): goal, red and full-time cards show both clubs' logos with the score between them, and every card has the dark green, white and lime of the channel's artwork. Card pictures do not sync and are drawn again only when a match is saved, so on the home PC open **Cards**, choose each match and press **Save match and cards** once; then generate the compilation again.
 
 Tried on the office PC on 2026-11-24 and removed the same day, so the home PC never gets it and needs nothing for it: a "Drop game voices" checkbox and a voice sample for each channel. One voice sample that was uploaded then is still in the data repository (`data/source-voices/`, two files). Nothing uses it and it is not copied to the home PC.
 

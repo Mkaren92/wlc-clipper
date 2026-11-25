@@ -3,7 +3,7 @@
 // The preview and the exported PNG come from the same template functions
 // (src/cards/templates.js), so they always match.
 import { computed, onMounted, ref } from 'vue';
-import { CARD_LAYOUTS, CARD_SIZES, GOAL_TYPES, goalType, minuteLabel, RED_TYPES } from '../../../src/cards/config.js';
+import { CARD_SIZES, GOAL_TYPES, goalType, minuteLabel, RED_TYPES } from '../../../src/cards/config.js';
 import { renderCard } from '../../../src/cards/templates.js';
 import { api } from '../api.js';
 import { cardPng, download, iconFromFile, loadCardFont } from '../cardPng.js';
@@ -34,18 +34,6 @@ const card = computed(() => match.value?.cards.find((c) => c.id === cardId.value
 const svg = computed(() => (card.value ? renderCard({ match: match.value, card: card.value, size: size.value }) : ''));
 const frame = computed(() => CARD_SIZES[size.value]);
 const CARD_NAMES = { intro: 'Intro', goal: 'Goal', red: 'Red card', fulltime: 'Full time' };
-
-// A goal, red or full-time card can be drawn in several layouts; the intro card has one.
-const hasLayout = (c) => c.type !== 'intro';
-const layoutOf = (c) => c.layout ?? 'classic';
-// The card being edited, drawn small in every layout, to choose from. Same template functions as the preview.
-const layouts = computed(() => (card.value && hasLayout(card.value)
-  ? CARD_LAYOUTS.map((known) => ({ ...known, svg: renderCard({ match: match.value, card: { ...card.value, layout: known.id }, size: size.value }) }))
-  : []));
-const othersDiffer = computed(() => match.value.cards.some((c) => hasLayout(c) && layoutOf(c) !== layoutOf(card.value)));
-function useLayoutEverywhere() {
-  for (const c of match.value.cards) if (hasLayout(c)) c.layout = layoutOf(card.value);
-}
 
 async function load() {
   try {
@@ -123,14 +111,11 @@ function scorers() {
 
 function addCard(type) {
   const id = newId();
-  // A new card takes the layout of the last one, so a match keeps one look without choosing it each time.
-  const last = match.value.cards.filter(hasLayout).at(-1);
-  const layout = last ? layoutOf(last) : 'classic';
   const fresh = {
     intro: { id, type, showScore: false, homeScore: 0, awayScore: 0 },
-    goal: { id, type, team: 'home', scorer: '', assist: '', minute: null, added: null, goalType: 'open-play', ...latestScore(), layout },
-    red: { id, type, team: 'home', player: '', minute: null, added: null, redType: 'straight', showScore: false, ...latestScore(), layout },
-    fulltime: { id, type, ...scorers(), layout },
+    goal: { id, type, team: 'home', scorer: '', assist: '', minute: null, added: null, goalType: 'open-play', ...latestScore() },
+    red: { id, type, team: 'home', player: '', minute: null, added: null, redType: 'straight', showScore: false, ...latestScore() },
+    fulltime: { id, type, ...scorers() },
   }[type];
   match.value.cards.push(fresh);
   cardId.value = id;
@@ -343,9 +328,8 @@ async function exportPng(name) {
           </div>
         </div>
         <p class="hint">
-          An icon is a picture from your own computer; the tool fetches none. It is shown on the intro card, and on
-          goal, red and full-time cards in the layouts “Both logos” and “Team logo”. Without one, the card shows the
-          team's first letter on its colour.
+          An icon is a picture from your own computer; the tool fetches none. It is shown on every card. Without
+          one, the card shows the team's first letter on its colour.
         </p>
       </section>
 
@@ -459,23 +443,6 @@ async function exportPng(name) {
             <div><label for="away-scorers">{{ match.away || 'Away' }} scorers</label><textarea id="away-scorers" v-model="awayLines" rows="4" /></div>
           </div>
         </template>
-
-        <div v-if="layouts.length > 0" class="layouts">
-          <h3>Layout</h3>
-          <div class="layout-row" role="group" aria-label="Layout of this card">
-            <button v-for="known in layouts" :key="known.id" class="pick" :aria-pressed="layoutOf(card) === known.id" @click="card.layout = known.id">
-              <!-- The template escapes every name, so this is safe to put in the page as it is. -->
-              <span class="mini" :class="size" v-html="known.svg" />
-              <span>{{ known.label }}</span>
-            </button>
-          </div>
-          <p class="hint">
-            This card in each layout. They all show the same things; only the place of each differs. “Both logos” and
-            “Team logo” also show the clubs' icons from the match details. “Wide” and “Tall” above the preview switch
-            these pictures too.
-          </p>
-          <button v-if="othersDiffer" class="small" @click="useLayoutEverywhere">Use this layout for every card of this match</button>
-        </div>
       </section>
 
       <!-- Always in view, so a change is never left unsaved by accident. -->
@@ -538,15 +505,6 @@ async function exportPng(name) {
 .card { width: 100%; margin: 12px auto; border-radius: var(--radius); overflow: hidden; background: black; box-shadow: 0 2px 10px var(--shadow); }
 .card.portrait { max-width: 250px; }
 .card :deep(svg) { display: block; width: 100%; height: 100%; }
-/* The layouts of the card being edited, small, three in a row. The chosen one has the accent around it. */
-.layouts { margin-top: 16px; padding-top: 12px; border-top: 1px dashed var(--line); }
-.layout-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.pick { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 6px; font-size: 13px; }
-.pick[aria-pressed='true'] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
-.mini { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: calc(var(--radius) / 2); overflow: hidden; background: black; }
-.mini.portrait { aspect-ratio: 9 / 16; max-width: 120px; margin: 0 auto; }
-.mini :deep(svg) { display: block; width: 100%; height: 100%; }
-@media (max-width: 700px) { .layout-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .savebar {
   position: sticky; bottom: 0; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 16px;
   background: var(--panel); border: 1px solid var(--line); border-bottom: 0;
