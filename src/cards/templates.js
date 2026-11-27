@@ -215,16 +215,20 @@ function streamerRows(c, streamers, bottom) {
   }).join('');
 }
 
-/** A goal: the title and the minute on the scoring team's colour, the scorer, and both clubs with the score. */
+/**
+ * A goal: the title and the minute on the scoring team's colour, the scorer, and both clubs with the score.
+ * A missed penalty is drawn the same way, titled "PENALTY MISSED", on the colour of the team that missed.
+ */
 export function goalCard({ match, card, size, still = false }) {
   const c = canvas(size);
   const type = goalType(card.goalType);
-  const details = [type.label];
+  // A missed penalty's title already says what it is, so the line under the name is left empty.
+  const details = type.missed ? [] : [type.label];
   if (type.assist && card.assist) details.push(`Assist: ${card.assist}`);
   // The team is the one given the goal, so for an own goal it is not the scorer's club.
   return frame(c, [
     header(c, match),
-    pill(c, { colour: safeColour(match.colours[card.team]), title: type.id === 'own-goal' ? 'OWN GOAL' : 'GOAL', minute: minuteLabel(card.minute, card.added) }),
+    pill(c, { colour: safeColour(match.colours[card.team]), title: type.missed ? 'PENALTY MISSED' : type.id === 'own-goal' ? 'OWN GOAL' : 'GOAL', minute: minuteLabel(card.minute, card.added) }),
     line(c, card.scorer, { y: c.nameY, size: c.nameSize, fill: TEXT }),
     line(c, details.join('  ·  '), { y: c.detailY, size: c.detailSize, fill: MUTED }),
     scoreboard(c, match, { home: card.homeScore, away: card.awayScore, lit: card.team }, { y: c.clubsY, iconSize: c.clubIcon, nameSize: c.clubNameSize, scoreY: c.scoreY, without: still ? movingLogo({ card, size }).team : null }),

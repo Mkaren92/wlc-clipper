@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildDescription } from '../src/compilation/description.js';
 import { fetchedOrigin } from '../src/chat/chatStore.js';
-import { downloadTimeout, fastFailure, fetchVideo, filePrefix, leadInOf, removeHiddenLeadIn, videoUrl } from '../src/fetch.js';
+import { downloadTimeout, fastFailure, fetchVideo, filePrefix, leadInOf, relayDownload, removeHiddenLeadIn, videoUrl } from '../src/fetch.js';
 import * as fetchLink from '../src/fetchLink.js';
 import { fileLabel, madeName, MAX_FILE_LABEL } from '../src/fetchLink.js';
 import { checkStreamUrl, startRangeRelay } from '../src/rangeRelay.js';
@@ -181,6 +181,18 @@ describe('range relay', () => {
     expect(reason).not.toMatch(/googlevideo|203\.0\.113|127\.0\.0\.1/);
     expect(reason).toContain('Input/output error');
     expect(reason.length).toBeLessThanOrEqual(300);
+  });
+
+  it('asks for plain files first, since the relay cannot help with a playlist, and the old choice after', async () => {
+    let asked;
+    const call = async (args) => {
+      asked = args;
+      throw new Error('no network in tests');
+    };
+    await expect(relayDownload({ call, url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', start: 0, end: 10, file: 'unused.mp4' })).rejects.toThrow('no network');
+    const choices = asked[asked.indexOf('-f') + 1].split('/');
+    expect(choices[0]).toBe('bv*[height<=1080][protocol=https]+ba[protocol=https]');
+    expect(choices.slice(-3)).toEqual(['bv*[height<=1080]+ba', 'b[height<=1080]', 'b']);
   });
 
   it('serves only the streams it was started with', async () => {

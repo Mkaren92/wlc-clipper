@@ -48,6 +48,16 @@ describe('card templates', () => {
     expect(texts(renderCard({ match, card: { ...goal, goalType: 'own-goal' }, size: 'portrait' }))).toContain('OWN GOAL');
   });
 
+  it('draws a missed penalty on the goal card with its own title and no assist', () => {
+    for (const size of ['landscape', 'portrait']) {
+      const shown = texts(renderCard({ match, card: { ...goal, goalType: 'penalty-miss' }, size }));
+      expect(shown).toEqual(expect.arrayContaining(['PENALTY MISSED', 'Robert Lewandowski', '1 – 0']));
+      expect(shown).not.toContain('GOAL');
+      expect(shown).not.toContain('Penalty missed');
+      expect(shown.join(' ')).not.toContain('Assist');
+    }
+  });
+
   it('shows a red card with the team and type, and the score only when asked', () => {
     const shown = texts(renderCard({ match, card: red, size: 'landscape' }));
     expect(shown).toEqual(expect.arrayContaining(['RED CARD', '67&#39;', 'Lisandro Martínez', 'Manchester United  ·  Second yellow', '2 – 1']));
@@ -404,8 +414,8 @@ describe('card templates', () => {
   });
 
   it('has an entry for every goal type in the one list', () => {
-    expect(GOAL_TYPES.map((type) => type.label)).toEqual(['Open play', 'Penalty', 'Free kick', 'Header', 'Corner', 'Own goal']);
-    for (const type of GOAL_TYPES) expect(texts(renderCard({ match, card: { ...goal, goalType: type.id, assist: '' }, size: 'landscape' }))).toContain(type.label);
+    expect(GOAL_TYPES.map((type) => type.label)).toEqual(['Open play', 'Penalty', 'Penalty missed', 'Free kick', 'Header', 'Corner', 'Own goal']);
+    for (const type of GOAL_TYPES) expect(texts(renderCard({ match, card: { ...goal, goalType: type.id, assist: '' }, size: 'landscape' }))).toContain(type.missed ? type.label.toUpperCase() : type.label);
   });
 });
 
@@ -449,6 +459,7 @@ describe('saved matches', () => {
     expect(() => parseMatch({ ...match, colours: { home: 'red', away: '#000000' } })).toThrow(/colour looks like/);
     expect(() => parseMatch({ ...match, cards: [goal, { ...red, id: 'g1' }] })).toThrow(/share the id/);
     expect(() => parseMatch({ ...match, cards: [{ ...goal, goalType: 'bicycle' }] })).toThrow(/not valid/);
+    expect(parseMatch({ ...match, cards: [{ ...goal, goalType: 'penalty-miss' }] }).cards[0].goalType).toBe('penalty-miss');
     expect(() => parseMatch({ ...match, id: '../x' })).toThrow(/not valid/);
     // For one day (2026-11-25) a card was saved with a layout. Such a match still opens, and the field is gone from what is read.
     const old = parseMatch({ ...match, cards: [{ ...goal, layout: 'centre' }, { ...red, layout: 'classic' }, { ...fullTime, layout: 'anything at all' }] });
@@ -504,6 +515,7 @@ describe('scorersFromGoals', () => {
       { ...goal, id: 'c', team: 'away', scorer: 'Fernandes', minute: 60, added: null, goalType: 'penalty', homeScore: 2, awayScore: 1 },
       { ...goal, id: 'd', scorer: 'Lewandowski', minute: 45, added: 2, homeScore: 2, awayScore: 0 },
       { ...goal, id: 'e', team: 'away', scorer: 'Araújo', minute: 88, added: null, goalType: 'own-goal', homeScore: 3, awayScore: 2 },
+      { ...goal, id: 'f', scorer: 'Raphinha', minute: 30, added: null, goalType: 'penalty-miss', homeScore: 1, awayScore: 0 },
       red,
     ];
     expect(scorersFromGoals({ cards })).toEqual({

@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated 2026-11-27. Update this file when something here changes.
+Last updated 2026-11-28. Update this file when something here changes.
 
 ## Built
 
@@ -20,6 +20,7 @@ Version 1 of the spec is complete: all three "evenings".
 - A YouTube title, description and tags for a compilation (2026-11-25): chapters and fan channels worked out, the owner's own text typed once and kept, title ideas and tags worked out from the match on this machine; short team names on a match for the chapter list
 - Tick boxes to delete several videos, clips or parts with one question (2026-11-27)
 - Favourite channels (2026-11-27): a star on a row of the Sources page lists that channel first, whatever its count
+- A missed penalty (2026-11-27): goal type "Penalty missed" on the goal card, titled "PENALTY MISSED", left out of the full-time scorers and silent on "Automatic"
 - The owner's own name in front of a fetched file's name (2026-11-25), from the Download page or `--label`; and the link stays in its box after a download
 - The leaning logo (2026-11-25): in a compilation, the logo of the club that scored or had a player sent off leans right and left three times as its card appears
 - The cards in the colours of the owner's channel artwork (2026-11-25): its dark green behind every card, mown in stripes like the banner's pitch, white words, and its lime on "FULL TIME"
@@ -33,7 +34,7 @@ Version 1 of the spec is complete: all three "evenings".
 - Who is live: channels in the list that are broadcasting are marked LIVE, listed first and counted in the side column
 - A Stop button for anything waiting or running, in "Activity"
 - A sources list and `fetch`: part of a YouTube video or a whole one, each up to 3 hours (parts were capped at 20 minutes until 2026-11-21), from a channel in the list (the owner adds a channel only once it has agreed)
-- Fast fetching: 20 minutes in about 16 s instead of 11 minutes, and a whole video of about 1.5 hours in about 20 s, through a relay that asks YouTube for slices (`src/rangeRelay.js`)
+- Fast fetching: 20 minutes in about 16 s instead of 11 minutes, and a whole video of about 1.5 hours in about 20 s, through a relay that asks YouTube for slices (`src/rangeRelay.js`); plain files are taken before YouTube's playlists since 2026-11-28, when a 41-second part of a past stream ran for minutes through one (10 s after the change, measured through the engine; not yet fetched from the page)
 - A Download page for `fetch`: paste a link and a range or tick "Whole video", with the checks shown while typing, progress, Stop, "Open it to cut", and the reason shown when a fetch had to go the slow way (the form used to be on the Sources page)
 - Channel pictures: the profile picture of each channel in the list, fetched on request and drawn beside its name where it is credited in a compilation; a sync button on a row fills a new channel's name and picture from its address, and each row shows the channel's subscriber count from the last lookup
 - Clips from a stream's chat on the Download page: a finished live stream's link, optional words and a number; the best moments, from where chat reacted (laughing, W, L, "clip it"; not commands, polls or pasted messages) and where viewers pointed in the comments, are downloaded as parts
@@ -53,7 +54,7 @@ Version 1 of the spec is complete: all three "evenings".
 - Clips from a stream's chat are 1 minute (30 s before and after) since 2026-11-22, and "Skip parts already suggested" gives new parts when asking a stream again
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-607 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
+609 tests pass (on the home PC on 2026-11-28, Ubuntu in WSL, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
 
 ## Waiting on the owner
 
@@ -63,7 +64,7 @@ Version 1 of the spec is complete: all three "evenings".
 - **A verdict on caption timing** in continuous speech, judged by eye on real clips. Word starts after pauses were measured, and since 2026-11-22 starts under game sound (the clip "what-just-happened-here", rendered again with the fix): watch it and say whether the captions now land with the shouts.
 - **How to keep two downloader runs from rewriting the YouTube sign-in at once.** yt-dlp writes the cookies file back when it ends, and the live check runs beside a fetch or a chat download, so two can write it at the same moment and spoil it. Ways out: run downloader calls one at a time (the live check would then wait behind a long fetch), or hand each call a copy of the file (the rules say never to copy it). Found in review on 2026-11-22; not yet seen to happen.
 
-- **For the home PC, from the work PC (2026-11-25).** The steps are in `docs/home-pc.md` under "Do these once after the pull of 2026-11-25": run `npm test` once (the full suite was not run before this push, at the owner's word; 605 is the count expected, by counting), save every match once on the Cards page, remove intro items and video sounds from older compilations and generate each once, and type the description's standing sentences there too, since compilations do not sync. `sounds/intro.mp4` stays in the home PC's sounds folder unused, because a video there is no longer a kind sync knows; it can be deleted by hand. The leaning logo's colour steps were measured only with ffmpeg 4.4.2 on the work PC.
+- **For the home PC, from the work PC (2026-11-25).** The steps are in `docs/home-pc.md` under "Do these once after the pull of 2026-11-25": run `npm test` once (done on the home PC on 2026-11-27: 607 passed, the leaning-logo test among them, with ffmpeg 4.4.2), save every match once on the Cards page, remove intro items and video sounds from older compilations and generate each once, and type the description's standing sentences there too, since compilations do not sync. `sounds/intro.mp4` stays in the home PC's sounds folder unused, because a video there is no longer a kind sync knows; it can be deleted by hand. The leaning logo's colour steps were measured only with ffmpeg 4.4.2 on the work PC.
 - **For the work PC, from the home PC (2026-11-24).** After `git pull`, run `npm run setup` once: it installs `yt-dlp-ejs`, the solver YouTube's JavaScript puzzle needs, without which a signed-in lookup fails with "could not be looked up" (on the home PC the sign-in was off for a day because of that); if `nvidia-smi --query-gpu=name --format=csv` finds a card there, it also installs the card's libraries. With no NVIDIA card, transcripts (captions, whole videos, hooks) and the clip's picture are made on the processor, exactly as before. The Combine page's sync marks and each video's own player need nothing; the owner tried them on the home PC and they work. Combinations stay on the PC they were made on (they do not sync), so one made at home is not on the work PC. On the home PC captions now run on its card (see "Captions on the graphics card" in `docs/decisions.md`): a word can start up to about 0.3 s apart between a clip made there and one made here, so compare caption timing between the two PCs with that in mind. The card code in `scripts/transcribe.py` and `src/render.js` can only be tried on the home PC: keep its fallback to the processor when changing those files, and leave a note here if it needs trying there.
 - **Pull the new code on every PC before adding the first Twitch channel.** A PC with older code cannot read a channels list that has a Twitch address, so its sync would stop with a message until it is updated.
 - **TwitchDownloader**, if Twitch chat is wanted: a free program to save a past broadcast's chat as JSON. It is the owner's to install.
@@ -116,6 +117,7 @@ Found in a review on 2026-11-22. They are in the pages, which need driving in a 
 - The description, tags and title ideas in use: whether the parts and their order suit the owner's uploads, and whether the title ideas are any good. The text was read on the page with the owner's compilation; nothing was posted.
 - How the leaning logo looks and feels: its speed, its size of lean, and real crests. Frames were measured and looked at; nobody here watched it move. Two test videos with made-up logos were made for the owner.
 - The new goal, red and full-time cards, and the cards' new colours, in a finished compilation. They were looked at as pictures, with the owner's own match and its real icons in the dashboard; no compilation was generated with them, and none was put over a video. The owner's older matches keep their old card pictures until each is saved once on the Cards page.
+- A missed-penalty card in a finished compilation, and its "Automatic" label on the Compilations page in a browser. The card was looked at as a picture and the Cards page was driven in a hidden Chrome; the sound and the chapter title were tested only. The logo of the team that missed still leans like a goal's.
 - The colours in the starting list of clubs. Which clubs are in La Liga and the Premier League was checked for 2026–27; the colours are still from memory.
 - The redesigned dashboard in long use. The owner looked at it and accepted it on 2026-11-19; before that it was looked at in screenshots from a hidden Chrome and its main actions were run by script. A real mouse drag of the crop on the new layout, a screen reader and browsers other than Chrome were not tried.
 - The wider crop (`--crop-width`) on a clip the owner has judged. One frame from a real video was looked at, and one cut was made from the page.

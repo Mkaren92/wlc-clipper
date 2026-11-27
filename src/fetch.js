@@ -248,8 +248,12 @@ export async function removeHiddenLeadIn(file) {
   return Math.max(0, hidden);
 }
 
-// At most 1080p, as an MP4 the rest of the tool reads.
-const FORMAT = 'bv*[height<=1080]+ba/b[height<=1080]/b';
+// At most 1080p, as an MP4 the rest of the tool reads. Plain files first (`protocol=https`):
+// some past streams offer their best 1080p picture only as an HLS playlist (format 616), which
+// the relay can only hand on as a playlist, so ffmpeg read the pieces from YouTube itself and,
+// on 2026-11-28, from the very start of the stream to reach 59:15 (about 2 GB at 2 MB/s). With
+// no plain file the choice is the old one.
+const FORMAT = 'bv*[height<=1080][protocol=https]+ba[protocol=https]/b[height<=1080][protocol=https]/bv*[height<=1080]+ba/b[height<=1080]/b';
 
 /**
  * Fetch a range the fast way: the downloader only says where the streams are,

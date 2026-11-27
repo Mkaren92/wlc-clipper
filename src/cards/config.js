@@ -1,10 +1,15 @@
 // Choices offered in the card maker. Add a goal type by adding a line here;
 // nothing else needs to change.
 
-/** `assist` says whether an assist can be credited for that kind of goal. */
+/**
+ * `assist` says whether an assist can be credited for that kind of goal. `missed` marks a
+ * penalty that was not scored (asked for on 2026-11-27): it is drawn on the goal card with its
+ * own title, is left out of the full-time scorers, and plays no sound on "Automatic".
+ */
 export const GOAL_TYPES = [
   { id: 'open-play', label: 'Open play', assist: true },
   { id: 'penalty', label: 'Penalty', assist: false },
+  { id: 'penalty-miss', label: 'Penalty missed', assist: false, missed: true },
   { id: 'free-kick', label: 'Free kick', assist: true },
   { id: 'header', label: 'Header', assist: true },
   { id: 'corner', label: 'Corner', assist: true },
@@ -43,6 +48,13 @@ export const CARD_SIZES = {
 
 export const goalType = (id) => GOAL_TYPES.find((type) => type.id === id) ?? GOAL_TYPES[0];
 export const redType = (id) => RED_TYPES.find((type) => type.id === id) ?? RED_TYPES[0];
+
+/**
+ * The kind of sound "Automatic" plays under a card: its own type, except a missed penalty,
+ * which is a goal card but must not get the goal's sound. "missed" names no sound file, so it
+ * is silent. The Compilations page and the compilation builder both ask here.
+ */
+export const soundKindOf = (card) => (card?.type === 'goal' && goalType(card.goalType).missed ? 'missed' : card?.type);
 
 /** A minute as it is written on a card: 12' or 45+2'. */
 export function minuteLabel(minute, added) {

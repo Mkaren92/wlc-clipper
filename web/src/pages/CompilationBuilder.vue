@@ -1,7 +1,7 @@
 <script setup>
 // Put videos and cards in order and render them into one video.
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
-import { minuteLabel, THUMBNAIL_SIZE } from '../../../src/cards/config.js';
+import { goalType, minuteLabel, soundKindOf, THUMBNAIL_SIZE } from '../../../src/cards/config.js';
 import { matchScore, thumbnail } from '../../../src/cards/templates.js';
 import { buildDescription, chapterProblem, chaptersOf, countHashtags, creditsOf, MAX_DESCRIPTION_BYTES, MAX_HASHTAGS, MAX_TAGS_LENGTH, MAX_TITLE, STANDING_POST, suggestHashtags, suggestTags, tagsLength, tagsOf, titleIdeas } from '../../../src/compilation/description.js';
 import { madeName } from '../../../src/fetchLink.js';
@@ -189,7 +189,7 @@ function addCard() {
 
 const cardOf = (item) => matches.value.find((m) => m.id === item.matchId)?.cards.find((c) => c.id === item.cardId);
 /** The sound "Automatic" stands for on this card: your file named after its kind, or none. */
-const autoSound = (item) => sounds.value.automatic[cardOf(item)?.type] ?? 'none';
+const autoSound = (item) => sounds.value.automatic[soundKindOf(cardOf(item))] ?? 'none';
 /** The sound a card really plays, whatever its setting says. */
 const soundOf = (item) => (item.sound === 'auto' ? autoSound(item) : item.sound);
 function soundName(choice) {
@@ -248,7 +248,7 @@ function onDrop(event) {
 const pickedMatch = computed(() => matches.value.find((m) => m.id === pick.match));
 
 function cardLabel(card) {
-  if (card.type === 'goal') return `Goal: ${minuteLabel(card.minute, card.added)} ${card.scorer}`.trim();
+  if (card.type === 'goal') return `${goalType(card.goalType).missed ? 'Penalty missed' : 'Goal'}: ${minuteLabel(card.minute, card.added)} ${card.scorer}`.trim();
   if (card.type === 'red') return `Red card: ${minuteLabel(card.minute, card.added)} ${card.player}`.trim();
   return `Full time ${card.homeScore}–${card.awayScore}`;
 }

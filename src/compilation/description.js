@@ -6,7 +6,7 @@
 //
 // Nothing here reads a file or the network, so the Compilations page uses the
 // same functions to show the text as the engine uses to write description.txt.
-import { minuteLabel, redType } from '../cards/config.js';
+import { goalType, minuteLabel, redType } from '../cards/config.js';
 
 /** The longest title YouTube takes. */
 export const MAX_TITLE = 100;
@@ -54,13 +54,17 @@ export function teamShort(match, side) {
 
 /**
  * The chapter title for a card: "GER 1-0 NED" for a goal, with the teams' short names when the
- * match has them.
+ * match has them, and the taker, team and minute before the score for a missed penalty.
  *
  * @param {{ home: string, away: string, short?: { home: string, away: string } }} match
  * @param {object} card
  */
 export function cardTitle(match, card) {
   const score = `${teamShort(match, 'home')} ${card.homeScore ?? 0}-${card.awayScore ?? 0} ${teamShort(match, 'away')}`;
+  if (card.type === 'goal' && goalType(card.goalType).missed) {
+    const minute = minuteLabel(card.minute, card.added);
+    return `PENALTY MISSED ${card.scorer || 'Unknown'} (${teamShort(match, card.team)}${minute ? `, ${minute}` : ''}), ${score}`;
+  }
   if (card.type === 'goal') return score;
   if (card.type === 'red') {
     const minute = minuteLabel(card.minute, card.added);

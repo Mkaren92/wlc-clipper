@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { access, mkdir, readFile, readdir, rename, rm, stat, statfs, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CARD_SIZES, LOGO_SWING } from '../cards/config.js';
+import { CARD_SIZES, LOGO_SWING, soundKindOf } from '../cards/config.js';
 import { cardPngPath, readMatch } from '../cards/match.js';
 import { movingLogo } from '../cards/templates.js';
 import { cleanOverlayText, FONT_NAME } from '../captions/ass.js';
@@ -153,7 +153,8 @@ async function planCard(item, timeline, dataDir, soundsDir) {
   const card = match.cards.find((c) => c.id === item.cardId);
   if (!card) throw new Error('its card was deleted from the match. Remove it from the timeline.');
   // What plays under the card: the sound for its kind, another one, a file, or nothing.
-  const sound = await resolveSound({ choice: item.sound ?? 'auto', cardType: card.type, soundsDir });
+  // A missed penalty is silent on "Automatic" (soundKindOf).
+  const sound = await resolveSound({ choice: item.sound ?? 'auto', cardType: soundKindOf(card), soundsDir });
   const png = cardPngPath(dataDir, item.matchId, item.cardId, timeline.preset);
   const file = await stat(png).catch(() => {
     throw new Error('the card has no picture yet. Open its match in the card maker and press Save.');

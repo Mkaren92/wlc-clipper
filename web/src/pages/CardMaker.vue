@@ -97,7 +97,7 @@ function latestScore() {
  * which cannot be loaded in a browser because it reads files.
  */
 function scorers() {
-  const goals = match.value.cards.filter((c) => c.type === 'goal').sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0) || (a.added ?? 0) - (b.added ?? 0));
+  const goals = match.value.cards.filter((c) => c.type === 'goal' && !goalType(c.goalType).missed).sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0) || (a.added ?? 0) - (b.added ?? 0));
   const lines = { home: new Map(), away: new Map() };
   for (const goal of goals) {
     const type = goalType(goal.goalType);
@@ -182,6 +182,7 @@ function fillFromGoals() {
 }
 
 function label(c) {
+  if (c.type === 'goal' && goalType(c.goalType).missed) return `${minuteLabel(c.minute, c.added)} ${c.scorer || ''} (penalty missed)`.replace(/\s+/g, ' ').trim();
   if (c.type === 'goal') return `${minuteLabel(c.minute, c.added)} ${c.scorer || 'Goal'}`.trim();
   if (c.type === 'red') return `${minuteLabel(c.minute, c.added)} ${c.player || 'Red card'}`.trim();
   return `Full time ${c.homeScore}–${c.awayScore}`;
@@ -374,13 +375,13 @@ async function exportPng(name) {
         <template v-if="card.type === 'goal'">
           <div class="row">
             <div>
-              <label for="team">Scoring team</label>
+              <label for="team">{{ goalType(card.goalType).missed ? 'Team that missed' : 'Scoring team' }}</label>
               <select id="team" v-model="card.team">
                 <option value="home">{{ match.home || 'Home' }}</option>
                 <option value="away">{{ match.away || 'Away' }}</option>
               </select>
             </div>
-            <div><label for="scorer">Scorer</label><input id="scorer" v-model="card.scorer" type="text" /></div>
+            <div><label for="scorer">{{ goalType(card.goalType).missed ? 'Penalty taker' : 'Scorer' }}</label><input id="scorer" v-model="card.scorer" type="text" /></div>
             <div>
               <label for="goal-type">Goal type</label>
               <select id="goal-type" v-model="card.goalType">
@@ -392,8 +393,8 @@ async function exportPng(name) {
             <div v-if="goalType(card.goalType).assist"><label for="assist">Assist (optional)</label><input id="assist" v-model="card.assist" type="text" /></div>
             <div class="narrow"><label for="minute">Minute</label><input id="minute" v-model="minute" type="number" min="0" /></div>
             <div class="narrow"><label for="added">Added time (optional)</label><input id="added" v-model="added" type="number" min="0" /></div>
-            <div class="narrow"><label for="home-score">{{ match.home || 'Home' }} score after</label><input id="home-score" v-model.number="card.homeScore" type="number" min="0" /></div>
-            <div class="narrow"><label for="away-score">{{ match.away || 'Away' }} score after</label><input id="away-score" v-model.number="card.awayScore" type="number" min="0" /></div>
+            <div class="narrow"><label for="home-score">{{ match.home || 'Home' }} {{ goalType(card.goalType).missed ? 'score' : 'score after' }}</label><input id="home-score" v-model.number="card.homeScore" type="number" min="0" /></div>
+            <div class="narrow"><label for="away-score">{{ match.away || 'Away' }} {{ goalType(card.goalType).missed ? 'score' : 'score after' }}</label><input id="away-score" v-model.number="card.awayScore" type="number" min="0" /></div>
           </div>
         </template>
 

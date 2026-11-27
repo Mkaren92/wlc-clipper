@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from '
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { soundKindOf } from '../src/cards/config.js';
 import { saveCardPng, saveMatch } from '../src/cards/match.js';
 import { buildCompilation, creditLayout, creditSubtitles } from '../src/compilation/build.js';
 import { buildDescription, cardTitle, chapterProblem, chaptersOf, chapterTime, countHashtags, DEFAULT_POST, MAX_TAGS_LENGTH, suggestHashtags, suggestTags, tagsLength, tagsOf, titleIdeas } from '../src/compilation/description.js';
@@ -281,6 +282,11 @@ describe('buildCompilation', () => {
     expect(await automaticSounds(soundsDir)).toEqual({ goal: 'file:GOAL.wav', red: 'none', fulltime: 'file:fulltime.wav' });
     expect(await listSoundFiles(soundsDir)).toEqual(['fulltime.wav', 'GOAL.wav', 'goalkeeper.wav', 'intro.wav']);
     expect(await automaticSounds(undefined)).toEqual({ goal: 'none', red: 'none', fulltime: 'none' });
+    // A missed penalty is a goal card, but "Automatic" is silent under it, though GOAL.wav is there.
+    const miss = { type: 'goal', goalType: 'penalty-miss' };
+    expect(soundKindOf(miss)).toBe('missed');
+    expect(soundKindOf({ type: 'goal', goalType: 'penalty' })).toBe('goal');
+    expect(await resolveSound({ choice: 'auto', cardType: soundKindOf(miss), soundsDir })).toBeNull();
 
     const own = timeline({ id: 'own', items: [
       { id: 'i1', kind: 'card', matchId: 'm1', cardId: 'goal' },
@@ -708,6 +714,8 @@ describe('description', () => {
     expect(cardTitle(match, goal)).toBe('FC Barcelona 1-0 Manchester United');
     expect(cardTitle(match, red)).toBe("RED CARD Martínez (Manchester United, 67', second yellow)");
     expect(cardTitle(match, match.cards[1])).toBe('FULL TIME FC Barcelona 1-0 Manchester United');
+    expect(cardTitle(match, { ...goal, goalType: 'penalty-miss', team: 'away', scorer: 'Fernandes', minute: 70, added: null }))
+      .toBe("PENALTY MISSED Fernandes (Manchester United, 70'), FC Barcelona 1-0 Manchester United");
     const short = { ...match, short: { home: 'BAR', away: ' ' } };
     expect(cardTitle(short, { ...goal, homeScore: 2, awayScore: 1 })).toBe('BAR 2-1 Manchester United');
     expect(cardTitle({ ...match, short: { home: 'BAR', away: 'MUN' } }, red)).toBe("RED CARD Martínez (MUN, 67', second yellow)");

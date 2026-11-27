@@ -186,7 +186,7 @@ export async function newMatchId(dataDir, home, away) {
  */
 export function scorersFromGoals(match) {
   const goals = match.cards
-    .filter((card) => card.type === 'goal')
+    .filter((card) => card.type === 'goal' && !goalType(card.goalType).missed)
     .sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0) || (a.added ?? 0) - (b.added ?? 0));
   const lines = { home: new Map(), away: new Map() };
   for (const goal of goals) {
