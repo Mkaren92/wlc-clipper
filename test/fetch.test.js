@@ -13,7 +13,7 @@ import { checkStreamUrl, startRangeRelay } from '../src/rangeRelay.js';
 import { run } from '../src/run.js';
 import { channelAddress, checkPictureUrl, creditPictures, fetchPicture, fetchPictures, listPictures, listSubscribers, PICTURE_PIXELS, pictureFile, removeOtherPictures, syncSource } from '../src/pictures.js';
 import { checkLive } from '../src/live.js';
-import { agreedSourceOf, channelKey, creditLinks, parseSources, readSources, removeSource, saveSources, setSourceClubs } from '../src/sources.js';
+import { agreedSourceOf, channelKey, creditLinks, parseSources, readSources, removeSource, saveSources, setSourceClubs, setSourceFavourite } from '../src/sources.js';
 
 const sources = parseSources([
   { id: 'northstand', name: 'Northstand', url: 'https://www.youtube.com/@northstandtv', status: 'agreed', note: 'Said yes by email' },
@@ -293,7 +293,7 @@ describe('sources', () => {
     expect(() => parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }])).toThrow(/channel address/);
     expect(() => parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x', status: 'maybe' }])).toThrow(/not valid/);
     // A channel is added only once it has agreed, so an entry with no status is one that can be fetched from.
-    expect(parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x' }])).toEqual([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x', status: 'agreed', note: '', clubs: [] }]);
+    expect(parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x' }])).toEqual([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x', status: 'agreed', note: '', clubs: [], favourite: false }]);
 
     // The clubs a streamer supports: up to three names, each once.
     const withClubs = (clubs) => parseSources([{ id: 'x', name: 'X', url: 'https://www.youtube.com/@x', clubs }])[0].clubs;
@@ -715,15 +715,16 @@ describe('channel pictures', () => {
     const sync = (source, answer) => syncSource({ source, dataDir: data, downloader: youtube(answer), download });
 
     const added = await sync({ id: 'snew', url: ' https://www.youtube.com/@NorthStandTV ', name: '' }, { name: 'North\n Stand  TV\u0007' });
-    expect(added).toEqual({ source: { id: 'snew', name: 'North Stand TV', url: 'https://www.youtube.com/@NorthStandTV', status: 'agreed', note: '', clubs: [] }, named: true, picture: true, pictureError: '' });
+    expect(added).toEqual({ source: { id: 'snew', name: 'North Stand TV', url: 'https://www.youtube.com/@NorthStandTV', status: 'agreed', note: '', clubs: [], favourite: false }, named: true, picture: true, pictureError: '' });
     expect(await readSources(data)).toEqual([added.source]);
     expect(await readdir(path.join(data, 'source-pictures'))).toEqual(['snew.png']);
     expect(asked.length).toBe(calls + 1); // YouTube was asked once for both the name and the picture
 
     // A name the owner typed is kept, and the note written earlier stays, and so do the clubs marked on the channel.
-    await saveSources(data, [{ ...added.source, note: 'Said yes by email', clubs: ['Barcelona'] }]);
+    // A favourite stays a favourite too: the mark is saved by itself, so the saved one is kept.
+    await saveSources(data, [{ ...added.source, note: 'Said yes by email', clubs: ['Barcelona'], favourite: true }]);
     const kept = await sync({ id: 'snew', url: 'https://www.youtube.com/@northstandtv', name: 'Northstand' }, { name: 'Another Name' });
-    expect(kept).toMatchObject({ source: { name: 'Northstand', note: 'Said yes by email', clubs: ['Barcelona'] }, named: false, picture: true });
+    expect(kept).toMatchObject({ source: { name: 'Northstand', note: 'Said yes by email', clubs: ['Barcelona'], favourite: true }, named: false, picture: true });
     // Clubs chosen on the row and not yet saved come along with the sync; too many are refused, and nothing is saved.
     const chosen = await sync({ id: 'snew', url: 'https://www.youtube.com/@northstandtv', name: 'Northstand', clubs: ['Arsenal', 'Inter'] }, {});
     expect(chosen.source.clubs).toEqual(['Arsenal', 'Inter']);
@@ -817,6 +818,29 @@ describe('changing one channel, and the copies kept', () => {
     await expect(setSourceClubs(dir, 'kopend', ['A', 'B', 'C', 'D'])).rejects.toThrow(/at most 3 clubs/);
     await expect(setSourceClubs(dir, 'kopend', 'Liverpool')).rejects.toThrow(/not valid/);
     expect((await list()).kopend).toEqual(['Liverpool']); // a refused change changes nothing
+  });
+
+  it('marks one channel as a favourite and leaves every other channel, and its own clubs, as they are', async () => {
+    const marks = async () => Object.fromEntries((await readSources(dir)).map((source) => [source.id, source.favourite]));
+    const clubs = await list();
+    // A list saved before favourites existed has none.
+    expect(await marks()).toEqual({ northstand: false, kopend: false, terrace: false, dave: false });
+    expect(parseSources([{ id: 'old', name: 'Old', url: 'https://www.youtube.com/@old' }])[0].favourite).toBe(false);
+    await setSourceFavourite(dir, 'kopend', true);
+    await setSourceFavourite(dir, 'dave', true);
+    expect(await marks()).toEqual({ northstand: false, kopend: true, terrace: false, dave: true });
+    // Only the mark changed: every channel's clubs are as they were, and a club chosen afterwards keeps the mark.
+    expect(await list()).toEqual(clubs);
+    await setSourceClubs(dir, 'kopend', clubs.kopend);
+    expect((await marks()).kopend).toBe(true);
+    await expect(setSourceFavourite(dir, 'nobody', true)).rejects.toThrow(/No such channel/);
+    await expect(setSourceFavourite(dir, 'kopend', 'yes')).rejects.toThrow(/not valid/);
+    expect((await marks()).kopend).toBe(true); // a refused change changes nothing
+    // The mark can be taken off again.
+    await setSourceFavourite(dir, 'kopend', false);
+    await setSourceFavourite(dir, 'dave', false);
+    expect(await marks()).toEqual({ northstand: false, kopend: false, terrace: false, dave: false });
+    expect(await list()).toEqual(clubs);
   });
 
   it('removes one channel and leaves the others, with what was marked on them', async () => {

@@ -7,7 +7,7 @@ import { prepareTranscript } from '../src/ai/suggest.js';
 import { fetchVideo, filePrefix, ytDlp } from '../src/fetch.js';
 import { checkLive } from '../src/live.js';
 import { fetchPictures, listPictures, listSubscribers, pictureFile, removeOtherPictures, syncSource } from '../src/pictures.js';
-import { readSources, removeSource, saveSources, setSourceClubs } from '../src/sources.js';
+import { readSources, removeSource, saveSources, setSourceClubs, setSourceFavourite } from '../src/sources.js';
 import { formatClock, parseTime } from '../src/time.js';
 import { HttpError } from './http.js';
 
@@ -72,6 +72,15 @@ export function addSourceRoutes(app, { dataDir, inDir, jobs, downloader = ytDlp(
   // One channel's clubs, saved the moment they are chosen. Only that channel is changed on disk.
   app.put('/api/sources/:id/clubs', async (req, res) => {
     const sources = await setSourceClubs(dataDir, req.params.id, req.body?.clubs).catch((error) => {
+      throw new HttpError(/^No such/.test(error.message) ? 404 : 400, error.message);
+    });
+    res.json(await answer(sources));
+  });
+
+  // One channel's favourite mark, saved the moment it is made. Only that channel is changed on disk.
+  app.put('/api/sources/:id/favourite', async (req, res) => {
+    if (typeof req.body?.favourite !== 'boolean') throw new HttpError(400, 'Say whether the channel is a favourite: true or false.');
+    const sources = await setSourceFavourite(dataDir, req.params.id, req.body.favourite).catch((error) => {
       throw new HttpError(/^No such/.test(error.message) ? 404 : 400, error.message);
     });
     res.json(await answer(sources));

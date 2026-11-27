@@ -261,7 +261,19 @@ export function createSync({ folders, codeDir, anyAddress = false, pause = async
       // Changed on both, differently.
       try {
         if (name === LISTS.sources) {
-          const result = mergeSources(await jsonAt(base, name), (await jsonAt(here, name)) ?? [], (await jsonAt(there, name)) ?? []);
+          // Each side is read with the list's own defaults first. A field added since the machines
+          // last agreed (a favourite, 2026-11-27) is then in all three, and a channel changed on one
+          // machine only is not taken for one changed on both. A side that cannot be read is merged
+          // as it is, and the check below stops the round.
+          const filled = async (revision) => {
+            const list = await jsonAt(revision, name);
+            try {
+              return list === null ? null : parseSources(list);
+            } catch {
+              return list;
+            }
+          };
+          const result = mergeSources(await filled(base), (await filled(here)) ?? [], (await filled(there)) ?? []);
           parseSources(result.merged);
           await merged(name, pretty(result.merged));
           clashes.push(...result.clashes);

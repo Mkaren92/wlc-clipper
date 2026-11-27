@@ -32,6 +32,7 @@ const PATHS = {
   start: 'M6 4v16M10 12l9-6v12z',
   end: 'M18 4v16M14 12 5 6v12z',
   // Which site a channel is on: a play button for YouTube, a speech bubble for Twitch. Plain shapes, not the sites' logos.
+  star: 'M12 3.5l2.6 5.5 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6-4.4-4.2 6-.8z',
   youtube: 'M3 7.5A2.5 2.5 0 0 1 5.5 5h13A2.5 2.5 0 0 1 21 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5zM10 9.2v5.6l4.8-2.8z',
   twitch: 'M4.5 3.5h15v10.5l-4 4h-4l-3 3v-3h-4zM11 7.5v4M15.5 7.5v4',
 };

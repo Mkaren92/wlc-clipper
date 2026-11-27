@@ -8,7 +8,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readLibrary, saveClub } from '../src/cards/clubs.js';
 import { run } from '../src/run.js';
-import { readSources, saveSources, setSourceClubs } from '../src/sources.js';
+import { readSources, saveSources, setSourceClubs, setSourceFavourite } from '../src/sources.js';
 import { githubRepo } from '../src/sync/git.js';
 import { joinLogos, splitLogos } from '../src/sync/logos.js';
 import { mergeLibrary, mergeRecords, mergeSources, mergeSubscribers } from '../src/sync/merge.js';
@@ -110,6 +110,7 @@ describe('syncing two machines', () => {
   };
   const channel = (id, clubs = []) => ({ id, name: `Channel ${id} é`, url: `https://www.youtube.com/@${id}`, clubs });
   const clubsOf = async (one) => Object.fromEntries((await readSources(one.folders.data)).map((source) => [source.id, source.clubs.join('+')]));
+  const favouritesOf = async (one) => (await readSources(one.folders.data)).filter((source) => source.favourite).map((source) => source.id).sort();
   /** What the repository holds at its newest state. */
   const onGithub = async () => (await sh(['-C', github, 'ls-tree', '-r', '--name-only', 'main'])).stdout.trim().split('\n').filter(Boolean);
 
@@ -334,6 +335,42 @@ describe('syncing two machines', () => {
     expect(await onGithub()).toContain('data/something-new/x.bin');
     expect(await has(office, 'data/something-new/x.bin')).toBeNull();
     expect((await clubsOf(home)).one).toBe('Sevilla');
+  });
+
+  it('carries a favourite to the other machine, and back off again', async () => {
+    await setSourceFavourite(office.folders.data, 'three', true);
+    expect(await office.sync.sync()).toMatchObject({ state: 'synced', sent: true });
+    expect(await home.sync.sync()).toMatchObject({ arrived: ['data/sources.json'], clashes: [] });
+    expect(await favouritesOf(home)).toEqual(['three']);
+    await setSourceFavourite(home.folders.data, 'three', false);
+    await home.sync.sync();
+    await office.sync.sync();
+    expect(await favouritesOf(office)).toEqual([]);
+    expect(await has(home, 'data/sources.json')).toBe(await has(office, 'data/sources.json'));
+  });
+
+  // The first write by a version that knows favourites adds the field to every channel. Against a
+  // list agreed before that, every channel would look changed on both machines, and one machine's
+  // club would be dropped as a clash.
+  it('puts a star and a club marked on two machines together when the list they last agreed on is from before favourites', async () => {
+    const before = `${JSON.stringify((await readSources(office.folders.data)).map(({ favourite, ...rest }) => rest), null, 2)}\n`;
+    await put(office, 'data/sources.json', before);
+    await put(home, 'data/sources.json', before);
+    await office.sync.sync();
+    await home.sync.sync();
+    await office.sync.sync();
+    expect(await has(home, 'data/sources.json')).toBe(before); // both agree on a list with no such field
+
+    await setSourceFavourite(office.folders.data, 'one', true);
+    await setSourceClubs(home.folders.data, 'two', ['Roma']);
+    expect(await office.sync.sync()).toMatchObject({ sent: true, clashes: [] });
+    expect(await home.sync.sync()).toMatchObject({ state: 'synced', sent: true, clashes: [] });
+    await office.sync.sync();
+    for (const one of [office, home]) {
+      expect(await favouritesOf(one)).toEqual(['one']);
+      expect((await clubsOf(one)).two).toBe('Roma');
+    }
+    expect(await has(home, 'data/sources.json')).toBe(await has(office, 'data/sources.json'));
   });
 
   it('refuses to run when its copy of the data is not a repository of its own, so it can never act on the code\'s', async () => {

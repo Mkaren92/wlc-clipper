@@ -31,6 +31,9 @@ const sourceSchema = z.strictObject({
   clubs: z.array(z.string().trim().min(1).max(80)).default([])
     .transform((names) => [...new Set(names)])
     .refine((names) => names.length <= MAX_CLUBS, `a streamer can support at most ${MAX_CLUBS} clubs`),
+  // The owner's own mark (2026-11-27): a favourite is listed before the others on the Sources page,
+  // whatever its subscriber count. A list saved before this has none.
+  favourite: z.boolean().default(false),
 });
 const sourcesSchema = z.array(sourceSchema).max(200);
 
@@ -148,6 +151,11 @@ async function changeSource(dataDir, sourceId, change) {
 /** Set the clubs one saved channel supports. */
 export function setSourceClubs(dataDir, sourceId, clubs) {
   return changeSource(dataDir, sourceId, (source) => ({ ...source, clubs }));
+}
+
+/** Mark one saved channel as a favourite, or take the mark off. */
+export function setSourceFavourite(dataDir, sourceId, favourite) {
+  return changeSource(dataDir, sourceId, (source) => ({ ...source, favourite }));
 }
 
 /** Take one channel out of the saved list. */

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { api } from './api.js';
 import ClipView from './components/ClipView.vue';
 import Icon from './components/Icon.vue';
@@ -58,6 +58,8 @@ watch([page, view], () => {
 async function refresh() {
   try {
     [videos.value, clips.value, briefs.value, parts.value] = await Promise.all([api.videos(), api.clips(), api.briefs(), api.parts()]);
+    // A ticked box whose file is gone is unticked.
+    for (const kind of Object.keys(LISTS)) picked[kind] = picked[kind].filter((name) => LISTS[kind].all().some((one) => one.name === name));
     error.value = '';
   } catch (e) {
     error.value = e.message;
@@ -118,6 +120,48 @@ async function deletePart(name) {
     confirming.value = '';
     error.value = e.message;
   }
+}
+
+// Several at once (asked for on 2026-11-27): tick the boxes, then one question for all of them.
+// Each one is still deleted by its own call, one after another, so every safeguard of a single
+// delete holds for each: the server checks the name and refuses while a job is running.
+const LISTS = {
+  video: { all: () => videos.value, remove: (name) => api.deleteVideo(name), one: 'video', many: 'videos' },
+  clip: { all: () => clips.value, remove: (name) => api.deleteClip(name), one: 'clip', many: 'clips' },
+  part: { all: () => parts.value, remove: (name) => api.deletePart(name), one: 'part', many: 'parts' },
+};
+const picked = reactive({ video: [], clip: [], part: [] });
+const deleting = ref(false);
+const allPicked = (kind) => LISTS[kind].all().length > 0 && picked[kind].length === LISTS[kind].all().length;
+function pickAll(kind, on) {
+  picked[kind] = on ? LISTS[kind].all().map((one) => one.name) : [];
+  if (!on && confirming.value === `bulk:${kind}`) confirming.value = '';
+}
+const countOf = (kind) => `${picked[kind].length} ${picked[kind].length === 1 ? LISTS[kind].one : LISTS[kind].many}`;
+// How many clips were cut from the ticked videos, each clip once.
+const clipsFromPicked = () => clips.value.filter((clip) => picked.video.includes(clip.source)).length;
+
+async function deletePicked(kind) {
+  const names = [...picked[kind]];
+  let done = 0;
+  deleting.value = true;
+  try {
+    for (const name of names) {
+      await LISTS[kind].remove(name);
+      done += 1;
+      picked[kind] = picked[kind].filter((other) => other !== name);
+    }
+  } catch (e) {
+    // The rest stay ticked, so the same button finishes the job once whatever stopped it is over.
+    error.value = done > 0 ? `${done} of ${names.length} were deleted, then it stopped: ${e.message}` : e.message;
+  }
+  deleting.value = false;
+  confirming.value = '';
+  const failed = error.value;
+  await refresh();
+  if (failed) error.value = failed;
+  // If the one on screen was among them, show another.
+  if (view.value.kind === kind && !LISTS[kind].all().some((one) => one.name === view.value.name)) view.value = firstVideo();
 }
 
 // A part opened on the cutting screen: it is put among the videos (the same file, not a copy) first.
@@ -236,7 +280,23 @@ onMounted(async () => {
           <p v-if="loaded && videos.length === 0" class="empty">
             No videos yet. Put files in the <code>in</code> folder and reload, or download one on the Download page.
           </p>
+          <div v-if="videos.length > 0" class="bulk">
+            <label class="check"><input type="checkbox" :checked="allPicked('video')" @change="pickAll('video', $event.target.checked)" /> All</label>
+            <button v-if="picked.video.length > 0" class="small danger" :disabled="deleting" @click="confirming = 'bulk:video'">Delete {{ countOf('video') }}</button>
+          </div>
+          <div v-if="confirming === 'bulk:video' && picked.video.length > 0" class="confirm" role="alertdialog" :aria-label="`Delete ${countOf('video')}?`">
+            <span>
+              Delete the {{ countOf('video') }} you ticked? This cannot be undone.
+              <template v-if="clipsFromPicked() > 0">
+                {{ clipsFromPicked() === 1 ? '1 clip was cut from them. It stays' : `${clipsFromPicked()} clips were cut from them. They stay` }},
+                but can no longer be rendered again or have caption words fixed.
+              </template>
+            </span>
+            <button class="small danger" :disabled="deleting" @click="deletePicked('video')">{{ deleting ? 'Deleting…' : 'Delete' }}</button>
+            <button class="small" :disabled="deleting" @click="confirming = ''">Cancel</button>
+          </div>
           <div v-for="video in videos" :key="video.name" class="item-row">
+            <input v-model="picked.video" type="checkbox" class="pick" :value="video.name" :aria-label="`Tick ${video.name}`" />
             <button
               class="item" :class="{ current: view.kind === 'video' && view.name === video.name }"
               :aria-current="view.kind === 'video' && view.name === video.name ? 'true' : undefined"
@@ -263,7 +323,19 @@ onMounted(async () => {
         <section>
           <h3>Clips <span class="count">{{ clips.length }}</span></h3>
           <p v-if="loaded && clips.length === 0" class="empty">Clips you cut appear here.</p>
+          <div v-if="clips.length > 0" class="bulk">
+            <label class="check"><input type="checkbox" :checked="allPicked('clip')" @change="pickAll('clip', $event.target.checked)" /> All</label>
+            <button v-if="picked.clip.length > 0" class="small danger" :disabled="deleting" @click="confirming = 'bulk:clip'">Delete {{ countOf('clip') }}</button>
+          </div>
+          <div v-if="confirming === 'bulk:clip' && picked.clip.length > 0" class="confirm" role="alertdialog" :aria-label="`Delete ${countOf('clip')}?`">
+            <span>
+              Delete the {{ countOf('clip') }} you ticked? This cannot be undone. Each clip goes with its files.
+            </span>
+            <button class="small danger" :disabled="deleting" @click="deletePicked('clip')">{{ deleting ? 'Deleting…' : 'Delete' }}</button>
+            <button class="small" :disabled="deleting" @click="confirming = ''">Cancel</button>
+          </div>
           <div v-for="clip in clips" :key="clip.name" class="item-row">
+            <input v-model="picked.clip" type="checkbox" class="pick" :value="clip.name" :aria-label="`Tick ${clip.name}`" />
             <button
               class="item" :class="{ current: view.kind === 'clip' && view.name === clip.name }"
               :aria-current="view.kind === 'clip' && view.name === clip.name ? 'true' : undefined"
@@ -285,7 +357,19 @@ onMounted(async () => {
         <section>
           <h3>Parts <span class="count">{{ parts.length }}</span></h3>
           <p v-if="loaded && parts.length === 0" class="empty">Parts saved as they are, at the original size, appear here.</p>
+          <div v-if="parts.length > 0" class="bulk">
+            <label class="check"><input type="checkbox" :checked="allPicked('part')" @change="pickAll('part', $event.target.checked)" /> All</label>
+            <button v-if="picked.part.length > 0" class="small danger" :disabled="deleting" @click="confirming = 'bulk:part'">Delete {{ countOf('part') }}</button>
+          </div>
+          <div v-if="confirming === 'bulk:part' && picked.part.length > 0" class="confirm" role="alertdialog" :aria-label="`Delete ${countOf('part')}?`">
+            <span>
+              Delete the {{ countOf('part') }} you ticked? This cannot be undone.
+            </span>
+            <button class="small danger" :disabled="deleting" @click="deletePicked('part')">{{ deleting ? 'Deleting…' : 'Delete' }}</button>
+            <button class="small" :disabled="deleting" @click="confirming = ''">Cancel</button>
+          </div>
           <div v-for="part in parts" :key="part.name" class="item-row">
+            <input v-model="picked.part" type="checkbox" class="pick" :value="part.name" :aria-label="`Tick ${part.name}`" />
             <button
               class="item" :class="{ current: view.kind === 'part' && view.name === part.name }"
               :aria-current="view.kind === 'part' && view.name === part.name ? 'true' : undefined"
@@ -387,6 +471,10 @@ h3 { display: flex; align-items: center; gap: 6px; padding: 0 4px; }
 .count { font-weight: 650; letter-spacing: 0; background: var(--highlight); color: var(--highlight-text); border-radius: 999px; padding: 0 7px; }
 .lists { display: flex; flex-direction: column; gap: 18px; }
 .item-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+/* Ticking several to delete at once: a box on each row, and "All" with the button above the list. */
+.pick { flex: none; margin: 0 4px 0 2px; }
+.bulk { display: flex; align-items: center; gap: 10px; min-height: 28px; margin: 0 0 4px 2px; font-size: 13px; }
+.bulk + .confirm { margin: 0 0 8px; background: var(--panel); }
 .item {
   flex: 1; min-width: 0; min-height: 0; flex-direction: column; align-items: flex-start; gap: 1px;
   padding: 6px 10px; text-align: left; font-weight: 400;

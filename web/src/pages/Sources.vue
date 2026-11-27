@@ -60,15 +60,38 @@ function liveTip(source) {
 }
 const unchecked = computed(() => sources.value.filter((source) => live.channels[source.id]?.live === null).length);
 
-// The rows are shown with the most subscribers first. A channel with no count yet, such as one
-// just added, goes to the end, and channels with the same count keep the order they were added in.
+// The rows are shown with the owner's favourites first, whatever their count (2026-11-27), then
+// the most subscribers first. A channel with no count yet, such as one just added, goes to the end
+// of its group, and channels with the same count keep the order they were added in.
 // Only the order on the page changes; the saved list keeps its own.
 const ordered = computed(() => [...sources.value]
   // A row with no address yet is always shown, so a channel being added never disappears.
   .filter((source) => siteFilter.value === 'all' || !siteOfRow(source) || siteOfRow(source) === siteFilter.value)
   .sort((a, b) =>
-  // Channels that are live right now come first, then the rest, each group by subscribers.
-  Number(isLive(b)) - Number(isLive(a)) || (subscribers.value[b.id]?.count ?? -1) - (subscribers.value[a.id]?.count ?? -1)));
+  // Favourites come first; among them, and among the rest, channels that are live right now come
+  // first, then the others by subscribers.
+  Number(Boolean(b.favourite)) - Number(Boolean(a.favourite))
+    || Number(isLive(b)) - Number(isLive(a))
+    || (subscribers.value[b.id]?.count ?? -1) - (subscribers.value[a.id]?.count ?? -1)));
+
+// A favourite is saved the moment it is marked, like a club, for a channel that is already saved:
+// only that one thing goes to the server, which changes that one channel in the list it holds.
+async function setFavourite(source) {
+  const before = Boolean(source.favourite);
+  source.favourite = !before;
+  if (!isSaved(source)) return; // a new row is saved whole, with "Save the list" or its sync button
+  error.value = '';
+  clubError.value = { ...clubError.value, [source.id]: '' };
+  try {
+    const answer = await api.setSourceFavourite(source.id, !before);
+    takeSaved(answer, source.id);
+    note.value = `${source.name}: ${before ? 'no longer a favourite' : 'a favourite'}. Saved.`;
+  } catch (e) {
+    // Not saved: the row goes back to what is saved, so it never shows a mark that is not on disk.
+    source.favourite = before;
+    clubError.value = { ...clubError.value, [source.id]: `Not saved: ${e.message}` };
+  }
+}
 // The club a streamer supports is saved the moment it is chosen, for a channel that is already saved.
 // Only that one thing is saved; anything else still being typed on the page stays as it is. Before,
 // it waited for "Save the list", and a reload in between lost every choice made.
@@ -174,7 +197,7 @@ onMounted(async () => {
 });
 
 function add() {
-  sources.value.push({ id: `s${Date.now().toString(36)}`, name: '', url: '', status: 'agreed', note: '', clubs: [] });
+  sources.value.push({ id: `s${Date.now().toString(36)}`, name: '', url: '', status: 'agreed', note: '', clubs: [], favourite: false });
   note.value = '';
 }
 
@@ -262,9 +285,10 @@ async function sync(source) {
       <p class="hint first">
         Add a channel only once it has agreed to let you use its videos. Paste its address and press the round arrows
         on its row: the name, picture and subscriber count come from YouTube (on Twitch, the follower count) and the
-        channel is saved. A streamer's Twitch channel is a row of its own. Channels that are live are listed first, then
-        the rest by subscribers or followers. Hover over a number or a LIVE mark for the details.
-        Under “Supports”, choose the club a streamer supports; it is saved as you choose.
+        channel is saved. A streamer's Twitch channel is a row of its own. Press the star on a row to make the channel a
+        favourite: favourites are listed first, whatever their count. After them, and among them, channels that are live
+        come first, then the rest by subscribers or followers. Hover over a number or a LIVE mark for the details.
+        Under “Supports”, choose the club a streamer supports. The star and the club are saved as you choose.
       </p>
       <div class="row middle live-line" role="status">
         <span v-if="live.checking" class="fixed running"><span class="spinner" aria-hidden="true" /> Asking YouTube and Twitch who is live…</span>
@@ -292,6 +316,12 @@ async function sync(source) {
             <Icon :name="siteOfRow(source)" /><span class="sr">{{ SITE_NAMES[siteOfRow(source)] }}</span>
           </span>
         </span>
+        <button
+          class="fixed quiet icon-only star" :aria-pressed="Boolean(source.favourite)"
+          :aria-label="source.favourite ? `Take ${source.name || 'this channel'} out of your favourites` : `Make ${source.name || 'this channel'} a favourite`"
+          :title="source.favourite ? 'A favourite: listed first. Press to take the star off.' : 'Make it a favourite: favourites are listed first'"
+          @click="setFavourite(source)"
+        ><Icon name="star" /></button>
         <div class="name">
           <label :for="`name-${source.id}`" :class="{ sr: index > 0 }">Name</label>
           <input :id="`name-${source.id}`" v-model="source.name" type="text" placeholder="Name, or leave empty and press sync" />
@@ -373,6 +403,11 @@ async function sync(source) {
 }
 .face img { width: 100%; height: 100%; }
 .sync { min-height: 32px; min-width: 32px; padding: 6px; color: var(--muted); }
+/* The favourite star: a quiet outline, filled in the page's highlight once the channel is a favourite. */
+.star { min-height: 32px; min-width: 32px; padding: 6px; color: var(--muted); }
+.star:hover:not(:disabled) { color: var(--highlight); }
+.star[aria-pressed='true'] { color: var(--highlight); }
+.star[aria-pressed='true'] :deep(path) { fill: currentColor; }
 /* The link to the channel, sized and coloured like the buttons beside it. */
 .go { display: inline-grid; place-items: center; width: 32px; height: 36px; border-radius: var(--radius); color: var(--muted); }
 a.go:hover { color: var(--accent); background: var(--soft); }

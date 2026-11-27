@@ -1,6 +1,6 @@
 # Home PC: what to do
 
-What to do on the home PC so it has the same code and the same channels, clubs, logos, sounds and briefs as the office PC. Last updated 2026-11-25.
+What to do on the home PC so it has the same code and the same channels, clubs, logos, sounds and briefs as the office PC. Last updated 2026-11-27.
 
 The data lives in the private repository https://github.com/Mkaren92/wlc-clipper-data. The code lives in the public one, https://github.com/Mkaren92/wlc-clipper.
 
@@ -25,6 +25,10 @@ If the project is in another folder, `cd` there instead. Then open http://127.0.
 - `git status` should say `nothing to commit, working tree clean`. If it lists changed files, or says `Your branch is ahead of 'origin/main'`, there is work on the home PC that was never pushed. Do not delete the folder or clone again. Open Claude Code in that folder and write: **"I have work here that was never pushed. Get the latest main from GitHub, put it together with my work here, run the tests, and commit-push."**
 - `npm run setup` is **not** needed. Nothing new has to be installed.
 
+## Pull before starting the dashboard: it matters more now
+
+Since 2026-11-27 a channel can be a **favourite** (the star on its row on the Sources page). The mark is kept in the channels list, which syncs, so a star made on one PC shows on the other. The new version writes the mark's field for every channel the first time it changes the list in any way (a star, a club, a new channel). An older version of the tool cannot read a channels list that has it: if the home PC's dashboard is started before `git pull`, its sync stops with "Sync is failing" and a message about the sources list. Nothing is lost or deleted. Stop the dashboard, run the commands under "Next time at home", and sync works again.
+
 ## Do these once after the pull of 2026-11-25
 
 This pull changes the cards, removes the intro and adds the thumbnail, the title and description, and the leaning logo. Things made at home before it need a little care, once.
@@ -36,7 +40,7 @@ This pull changes the cards, removes the intro and adds the thumbnail, the title
    npm test
    ```
 
-   It should end with `Tests  604 passed`. If anything fails, open Claude Code in that folder and write: **"npm test fails after the pull of 2026-11-25. Show me what fails and fix it."**
+   It should end with `Tests  607 passed`. If anything fails, open Claude Code in that folder and write: **"npm test fails after the pull of 2026-11-25. Show me what fails and fix it."**
 2. **Save every match once.** Open **Cards**, choose a match, press **Save match and cards**; do it for each match. This redraws its cards in the new look and saves the two extra pictures the leaning logo needs. A match that had an intro card opens without it. Until a match is saved, its cards in a compilation are the old pictures and its logos stand still.
 3. **Look through each compilation's timeline.**
    - An item that was an **intro card** now says its card was deleted from the match. Remove that item.
@@ -67,6 +71,8 @@ Nothing new has to be installed, and nothing in this pull uses the graphics card
 - **A compilation has a YouTube thumbnail** (2026-11-25), under the timeline on the **Compilations** page: download it with "JPG 1280×720".
 - **The goal, red card and full-time sounds are shorter** (3.0 s each, cut on 2026-11-25) and arrive by sync.
 - **A compilation has a "YouTube title and description" panel** (2026-11-25), under the thumbnail: the chapter times and the fan channels are written for you, your own sentences are typed once, and there are title ideas, hashtags and tags worked out from the match. For chapters like `BAR 1-0 RMA`, type each team's short name on the **Cards** page.
+- **Several videos, clips or parts can be deleted at once** (2026-11-27): tick the boxes in the left column of the Clips page and press the "Delete" button that appears.
+- **A channel can be a favourite** (2026-11-27): press the star on its row on the Sources page and it is listed first. Favourites arrive by sync.
 - **A download can have your own name** (2026-11-25): "Your own name for the file" on the **Download** page puts it in front of the file's name. The link, the times and the name stay in their boxes after a download.
 
 Tried on the office PC on 2026-11-24 and removed the same day, so the home PC never gets it and needs nothing for it: a "Drop game voices" checkbox and a voice sample for each channel. One voice sample that was uploaded then is still in the data repository (`data/source-voices/`, two files). Nothing uses it and it is not copied to the home PC.

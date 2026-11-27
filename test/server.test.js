@@ -532,6 +532,14 @@ describe('sources and fetching', () => {
     expect((await api('/api/sources/nobody/clubs', { method: 'PUT', body: { clubs: [] } })).status).toBe(404);
     expect((await api('/api/sources/a/clubs', { method: 'PUT', body: { clubs: [] }, headers: { Origin: 'https://example.com' } })).status).toBe(403);
     expect((await api('/api/sources')).data.sources[0].clubs).toEqual(['Inter']);
+    // The favourite mark is saved by itself too, and only as true or false.
+    expect((await api('/api/sources')).data.sources[0].favourite).toBe(false);
+    expect((await api('/api/sources/a/favourite', { method: 'PUT', body: { favourite: true } })).data.sources[0]).toMatchObject({ favourite: true, clubs: ['Inter'] });
+    expect((await api('/api/sources/a/favourite', { method: 'PUT', body: { favourite: 'yes' } })).status).toBe(400);
+    expect((await api('/api/sources/a/favourite', { method: 'PUT', body: {} })).status).toBe(400);
+    expect((await api('/api/sources/nobody/favourite', { method: 'PUT', body: { favourite: true } })).status).toBe(404);
+    expect((await api('/api/sources/a/favourite', { method: 'PUT', body: { favourite: false }, headers: { Origin: 'https://example.com' } })).status).toBe(403);
+    expect((await api('/api/sources')).data.sources[0].favourite).toBe(true);
     // Every change kept a copy of the list as it was.
     expect((await readdir(path.join(dir, 'data', 'backups', 'sources'))).length).toBeGreaterThan(0);
     await api('/api/sources', { method: 'PUT', body: source('agreed') });

@@ -153,7 +153,8 @@ export async function syncSource({ source, dataDir, downloader, download }) {
   if (!name) throw new Error(`${siteName(channel)} gave no name for this channel. Type one.`);
 
   const at = saved.findIndex((other) => other.id === typed.id);
-  const entry = { id: typed.id, name, url: typed.url, status: 'agreed', note: at < 0 ? '' : saved[at].note, clubs: clubs ?? (at < 0 ? [] : saved[at].clubs) };
+  // The favourite mark is saved the moment it is made, so the saved one is the one to keep.
+  const entry = { id: typed.id, name, url: typed.url, status: 'agreed', note: at < 0 ? '' : saved[at].note, clubs: clubs ?? (at < 0 ? [] : saved[at].clubs), favourite: at < 0 ? false : saved[at].favourite };
   // saveSources checks the whole list, the id included, before anything is written.
   const sources = await saveSources(dataDir, at < 0 ? [...saved, entry] : saved.map((other, index) => (index === at ? entry : other)));
   const kept = sources.find((other) => other.id === typed.id);

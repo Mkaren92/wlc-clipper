@@ -81,6 +81,7 @@ export const api = {
   saveSources: (sources, version) => request('/api/sources', { method: 'PUT', body: sources, headers: version ? { 'X-List-Version': version } : {} }),
   // Changes to one saved channel, which leave every other channel as it is on the server.
   setSourceClubs: (id, clubs) => request(`/api/sources/${enc(id)}/clubs`, { method: 'PUT', body: { clubs } }),
+  setSourceFavourite: (id, favourite) => request(`/api/sources/${enc(id)}/favourite`, { method: 'PUT', body: { favourite } }),
   deleteSource: (id) => request(`/api/sources/${enc(id)}`, { method: 'DELETE' }),
   // Which channels are live: the last answer, and asking YouTube again.
   live: () => request('/api/sources/live'),

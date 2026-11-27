@@ -1,6 +1,6 @@
 # Roadmap
 
-Last updated 2026-11-25. Update this file when something here changes.
+Last updated 2026-11-27. Update this file when something here changes.
 
 ## Built
 
@@ -18,6 +18,8 @@ Version 1 of the spec is complete: all three "evenings".
 - A YouTube thumbnail for a compilation (2026-11-25): each half its club's bright colour with its logo blurred in it, both logos, the names and the score in front, and the credited streamers across the top, downloaded as a 1280×720 JPG. It took the place of the intro card, which was removed the same day together with the video behind a card; a compilation now starts with a goal or a red card
 - Goal, red and full-time cards with both clubs' icons and the score between them (2026-11-25). Six layouts with a chooser were built that day; the owner looked at them all and kept this one, and the rest was removed
 - A YouTube title, description and tags for a compilation (2026-11-25): chapters and fan channels worked out, the owner's own text typed once and kept, title ideas and tags worked out from the match on this machine; short team names on a match for the chapter list
+- Tick boxes to delete several videos, clips or parts with one question (2026-11-27)
+- Favourite channels (2026-11-27): a star on a row of the Sources page lists that channel first, whatever its count
 - The owner's own name in front of a fetched file's name (2026-11-25), from the Download page or `--label`; and the link stays in its box after a download
 - The leaning logo (2026-11-25): in a compilation, the logo of the club that scored or had a player sent off leans right and left three times as its card appears
 - The cards in the colours of the owner's channel artwork (2026-11-25): its dark green behind every card, mown in stripes like the banner's pitch, white words, and its lime on "FULL TIME"
@@ -51,7 +53,7 @@ Version 1 of the spec is complete: all three "evenings".
 - Clips from a stream's chat are 1 minute (30 s before and after) since 2026-11-22, and "Skip parts already suggested" gives new parts when asking a stream again
 - AI help, optional, through Claude Code's command line (no key) or OpenAI (with a key): `suggest` and "Suggest moments" propose ranges with a hook, title and description; "Suggest fixes" proposes caption word corrections
 
-604 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
+607 tests pass on the first development machine (Linux, ffmpeg 4.4.2). None of them cover the dashboard's pages, none call the real AI service, and none reach YouTube or Twitch.
 
 ## Waiting on the owner
 
@@ -61,7 +63,7 @@ Version 1 of the spec is complete: all three "evenings".
 - **A verdict on caption timing** in continuous speech, judged by eye on real clips. Word starts after pauses were measured, and since 2026-11-22 starts under game sound (the clip "what-just-happened-here", rendered again with the fix): watch it and say whether the captions now land with the shouts.
 - **How to keep two downloader runs from rewriting the YouTube sign-in at once.** yt-dlp writes the cookies file back when it ends, and the live check runs beside a fetch or a chat download, so two can write it at the same moment and spoil it. Ways out: run downloader calls one at a time (the live check would then wait behind a long fetch), or hand each call a copy of the file (the rules say never to copy it). Found in review on 2026-11-22; not yet seen to happen.
 
-- **For the home PC, from the work PC (2026-11-25).** The steps are in `docs/home-pc.md` under "Do these once after the pull of 2026-11-25": run `npm test` once (the full suite was not run before this push, at the owner's word; 604 is the count expected, by counting), save every match once on the Cards page, remove intro items and video sounds from older compilations and generate each once, and type the description's standing sentences there too, since compilations do not sync. `sounds/intro.mp4` stays in the home PC's sounds folder unused, because a video there is no longer a kind sync knows; it can be deleted by hand. The leaning logo's colour steps were measured only with ffmpeg 4.4.2 on the work PC.
+- **For the home PC, from the work PC (2026-11-25).** The steps are in `docs/home-pc.md` under "Do these once after the pull of 2026-11-25": run `npm test` once (the full suite was not run before this push, at the owner's word; 605 is the count expected, by counting), save every match once on the Cards page, remove intro items and video sounds from older compilations and generate each once, and type the description's standing sentences there too, since compilations do not sync. `sounds/intro.mp4` stays in the home PC's sounds folder unused, because a video there is no longer a kind sync knows; it can be deleted by hand. The leaning logo's colour steps were measured only with ffmpeg 4.4.2 on the work PC.
 - **For the work PC, from the home PC (2026-11-24).** After `git pull`, run `npm run setup` once: it installs `yt-dlp-ejs`, the solver YouTube's JavaScript puzzle needs, without which a signed-in lookup fails with "could not be looked up" (on the home PC the sign-in was off for a day because of that); if `nvidia-smi --query-gpu=name --format=csv` finds a card there, it also installs the card's libraries. With no NVIDIA card, transcripts (captions, whole videos, hooks) and the clip's picture are made on the processor, exactly as before. The Combine page's sync marks and each video's own player need nothing; the owner tried them on the home PC and they work. Combinations stay on the PC they were made on (they do not sync), so one made at home is not on the work PC. On the home PC captions now run on its card (see "Captions on the graphics card" in `docs/decisions.md`): a word can start up to about 0.3 s apart between a clip made there and one made here, so compare caption timing between the two PCs with that in mind. The card code in `scripts/transcribe.py` and `src/render.js` can only be tried on the home PC: keep its fallback to the processor when changing those files, and leave a note here if it needs trying there.
 - **Pull the new code on every PC before adding the first Twitch channel.** A PC with older code cannot read a channels list that has a Twitch address, so its sync would stop with a message until it is updated.
 - **TwitchDownloader**, if Twitch chat is wanted: a free program to save a past broadcast's chat as JSON. It is the owner's to install.
